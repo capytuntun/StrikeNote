@@ -39,7 +39,9 @@ die() { echo "[install] ✗ $1" >&2; exit 1; }
 log "更新套件列表、安裝 MariaDB / git / openssl…"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y curl ca-certificates gnupg git openssl mariadb-server
+# sudo：Raspberry Pi OS 本來就有，但純 Debian/Ubuntu 最小安裝可能沒裝，
+# 後面用 sudo -u 切到 $APP_USER 跑 npm ci 需要它。
+apt-get install -y curl ca-certificates gnupg git openssl sudo mariadb-server
 
 # ---------- 2. Node.js 22 ----------
 node_major() { command -v node >/dev/null 2>&1 && node -v | sed -E 's/^v([0-9]+).*/\1/' || echo 0; }
@@ -50,17 +52,16 @@ if [ "$(node_major)" -lt 22 ]; then
 fi
 log "Node $(node -v)、npm $(npm -v)"
 
-# ---------- 3. MariaDB ----------
+# ---------- 3. MariaDB 啟動 ----------
 log "啟動 MariaDB…"
 systemctl enable --now mariadb
-mkdir -p /etc/mysql/mariadb.conf.d
-if [ -f "$(dirname "$0")/mariadb/60-strikenote.cnf" ]; then
-  cp "$(dirname "$0")/mariadb/60-strikenote.cnf" /etc/mysql/mariadb.conf.d/60-strikenote.cnf
-  systemctl restart mariadb
-fi
 
 # ---------- 4. 系統使用者 + 程式碼 ----------
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin "$APP_USER"
+
+# step 8 把 $APP_DIR 的擁有者改成 $APP_USER，所以更新時這裡是以 root 身分對一個
+# 不屬於 root 的目錄跑 git —— 新版 git 預設會擋下這種「dubious ownership」，要先信任它。
+git config --global --add safe.directory "$APP_DIR"
 
 FRESH_INSTALL=1
 if [ -d "$APP_DIR/.git" ]; then
@@ -72,6 +73,19 @@ if [ -d "$APP_DIR/.git" ]; then
 else
   log "clone 程式碼到 $APP_DIR …"
   git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$APP_DIR"
+fi
+
+# ---------- 4b. MariaDB 調校設定 ----------
+# 要等程式碼真的在 $APP_DIR 上才有這個檔案可用 —— curl | sudo bash 執行時腳本是從
+# stdin 讀進來的，這一步之前 $0 沒有任何「旁邊的檔案」可言，放在 clone 之前找的話
+# 永遠找不到、會被 [ -f ... ] 悄悄跳過而不出錯，調校就完全沒生效過。
+CNF_SRC="$APP_DIR/deploy/mariadb/60-strikenote.cnf"
+CNF_DST="/etc/mysql/mariadb.conf.d/60-strikenote.cnf"
+mkdir -p /etc/mysql/mariadb.conf.d
+if [ -f "$CNF_SRC" ] && ! cmp -s "$CNF_SRC" "$CNF_DST" 2>/dev/null; then
+  log "套用 MariaDB 調校設定…"
+  cp "$CNF_SRC" "$CNF_DST"
+  systemctl restart mariadb
 fi
 
 # ---------- 5. 密碼：已有設定檔就沿用，沒有才產生新的 ----------
@@ -104,7 +118,11 @@ REQUIRE_HTTPS=1
 
 DB_HOST=127.0.0.1
 DB_PORT=3306
-DB_SOCKET=
+# unix socket，不是 TCP：跟 60-strikenote.cnf 的 skip-name-resolve=1 是必要搭配 ——
+# 一旦關掉主機名稱解析，MariaDB 對 TCP 127.0.0.1 連線只會拿字面 IP 去比對帳號的
+# host 欄位，'strikenote'@'localhost' 就不再匹配、直接被拒絕；改用 socket 連線一律
+# 比對成 localhost，兩者才吃得起來。設了 DB_SOCKET 這裡 DB_HOST/DB_PORT 就不會用到。
+DB_SOCKET=/run/mysqld/mysqld.sock
 DB_NAME=$DB_NAME
 DB_USER=$DB_USER
 DB_PASSWORD=$DB_PASSWORD
