@@ -93,7 +93,7 @@
     badge.appendChild(el('span', 'sec-card-badge-label', '文字描述框'));
     head.appendChild(badge);
     if (!ro) {
-      const del = el('button', 'sec-card-del', '✕');
+      const del = el('button', 'sec-card-del', global.Icons ? Icons.svg('x') : '✕');
       del.type = 'button';
       del.title = '刪除這個文字描述框';
       del.addEventListener('click', function () { card.remove(); renumber(); scheduleSave(); });
@@ -104,9 +104,10 @@
     const body = el('div', 'sec-card-body');
     card.dataset.tpl = step.tpl || '';
 
-    // 範本下拉（選擇會記住，重整後仍顯示；同時把樣板文字帶入描述框）
+    // 工具列：範本下拉＋帶入樣板（左）、插入程式碼區塊（右），合成一列——原本是
+    // 兩排各自的高度／間距／按鈕樣式對不齊，現在共用同一套 .btn-ghost 系統。
     const snippets = (global.SecReport && global.SecReport.snippets) || [{ id: '', label: '（不使用範本）', text: '' }];
-    const tplRow = el('div', 'sec-tpl-row');
+    const tplRow = el('div', 'sec-tools-row');
     tplRow.appendChild(el('span', 'sec-mini-label', '範本'));
     const tplSel = el('select', 'sec-tpl');
     snippets.forEach(function (s) {
@@ -117,21 +118,20 @@
     tplSel.value = step.tpl || '';
     tplSel.disabled = ro;
     tplRow.appendChild(tplSel);
-    // 「帶入樣板」按鈕：把目前所選範本的樣板文字插入描述框（可重複套用）
-    const applyBtn = el('button', 'sec-tpl-apply', '帶入樣板');
+    // 「帶入樣板」按鈕：把目前所選範本的樣板文字插入描述框（可重複套用；下拉選到
+    // 同一個範本不會觸發 change，這顆鈕是手動再套用一次的唯一辦法，不是重複功能）
+    const applyBtn = el('button', 'btn btn-ghost sec-tpl-apply', '帶入樣板');
     applyBtn.type = 'button';
     applyBtn.hidden = ro;
     tplRow.appendChild(applyBtn);
-    body.appendChild(tplRow);
-
-    // 每張卡片的小工具列（插入程式碼區塊）
-    const tools = el('div', 'sec-card-tools');
-    const codeBtn = el('button', 'sec-tool-btn', '&lt;/&gt; 程式碼區塊');
+    tplRow.appendChild(el('span', 'sec-tools-sp'));
+    const codeBtn = el('button', 'btn btn-ghost sec-tool-btn',
+      (global.Icons ? Icons.svg('square-code') : '') + '<span>程式碼區塊</span>');
     codeBtn.type = 'button';
     codeBtn.title = '插入程式碼區塊（可貼上自己的腳本）';
     codeBtn.hidden = ro;
-    tools.appendChild(codeBtn);
-    body.appendChild(tools);
+    tplRow.appendChild(codeBtn);
+    body.appendChild(tplRow);
 
     // 文字描述框
     const ta = el('textarea', 'sec-card-text');
@@ -178,7 +178,7 @@
     fi.type = 'file'; fi.accept = 'image/*'; fi.hidden = true;
     zone.appendChild(fi);
     const empty = el('div', 'sec-imgzone-empty',
-      '<span class="sec-imgzone-ic">🖼</span><span>點擊或拖曳圖片到此上傳</span>');
+      '<span class="sec-imgzone-ic">' + (global.Icons ? Icons.svg('image') : '') + '</span><span>點擊或拖曳圖片到此上傳</span>');
     const preview = el('div', 'sec-imgzone-preview');
     zone.appendChild(empty);
     zone.appendChild(preview);
@@ -291,7 +291,7 @@
     infoInputs = {};
     const ro = cur && cur.perm === 'read';
     const card = el('div', 'sec-info-card');
-    card.appendChild(el('div', 'sec-info-head', '🛡 報告資訊'));
+    card.appendChild(el('div', 'sec-info-head', (global.Icons ? Icons.svg('shield') : '') + ' 報告資訊'));
     const grid = el('div', 'sec-info-grid');
     INFO_FIELDS.forEach(function (f) {
       const cell = el('div', 'sec-info-cell');
@@ -430,7 +430,7 @@
   function showNewDialog(onConfirm) {
     const overlay = el('div', 'modal-overlay');
     const modal = el('div', 'modal sec-new-modal');
-    modal.appendChild(el('div', 'modal-title', '🛡 建立資安院報告'));
+    modal.appendChild(el('div', 'modal-title', (global.Icons ? Icons.svg('shield') : '') + ' 建立資安院報告'));
     modal.appendChild(el('div', 'sec-new-hint', '先填寫報告的基本資訊，之後仍可在編輯畫面修改。'));
 
     const inputs = {};

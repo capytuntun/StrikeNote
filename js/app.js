@@ -37,6 +37,7 @@
   const searchResultsEl = $('#search-results');
   const searchClearEl = $('#search-clear');
   const shareBtn = $('#share-btn');
+  const historyBtn = $('#history-btn');
   const presenceEl = $('#presence');
   const editorAreaEl = $('#editor-area');
   const notePathEl = $('#note-path');
@@ -50,6 +51,13 @@
   }
   // markdown.js resolves [[…]] through this; editor.js autocompletes through it.
   MD.setNoteLookup(findNoteByTitle);
+  // 樹狀清單／搜尋結果用的筆記圖示：分享來的看權限，自己的看筆記種類。
+  function noteIcon(note) {
+    if (note.perm && note.perm !== 'owner') return note.perm === 'edit' ? 'pen-line' : 'lock';
+    if (note.meta && note.meta.perfReport) return 'chart';
+    if (note.meta && note.meta.secReport) return 'shield';
+    return 'file-text';
+  }
   if (window.Editor) Editor.setNoteProvider(function (query) {
     const q = normTitle(query);
     return state.notes
@@ -67,7 +75,6 @@
     applyTheme(LS.get('theme', 'light'));
     setMode(state.mode);
     setTocCollapsed(LS.get('tocCollapsed', '0') === '1');
-    setSidebarCollapsed(LS.get('sidebarCollapsed', '0') === '1');
     bindEvents();
     // Nothing loads until the session is confirmed by the server.
     Auth.init(function (user) {
@@ -86,10 +93,16 @@
       state.folders = res[0];
       state.notes = res[1];
       renderTree();
-      const last = LS.get('lastNote', null);
-      if (last && state.notes.some(function (n) { return n.id === last; })) {
+      // 網址帶 #note/<id> 或 #book/<id>（複製連結）優先；否則回到上次開的筆記
+      const wantNote = noteIdFromHash();
+      const wantBook = bookIdFromHash();
+      const last = wantNote || LS.get('lastNote', null);
+      if (wantBook && state.folders.some(function (f) { return f.id === wantBook; })) {
+        openBook(wantBook);
+      } else if (last && state.notes.some(function (n) { return n.id === last; })) {
         openNote(last);
       } else {
+        if (wantNote || wantBook) toast('找不到這篇筆記，或你沒有存取權');
         showEmpty();
       }
     });
@@ -155,21 +168,25 @@
     row.dataset.type = 'folder';
     row.dataset.id = folder.id;
     row.innerHTML =
-      '<span class="twisty">' + (open ? '▾' : '▸') + '</span>' +
-      '<span class="ic">📁</span>' +
+      '<span class="twisty">' + Icons.svg(open ? 'chevron-down' : 'chevron-right') + '</span>' +
+      '<span class="ic ic-folder">' + Icons.svg('folder') + '</span>' +
       '<span class="label">' + MD.escapeHtml(folder.name) + '</span>';
 
     // hover actions: add subfolder / add note inside this folder
     const actions = document.createElement('span');
     actions.className = 'row-actions';
     const bFolder = document.createElement('button');
-    bFolder.className = 'row-act'; bFolder.title = '新增子資料夾'; bFolder.textContent = '📁＋';
+    bFolder.className = 'row-act'; bFolder.title = '新增子資料夾'; bFolder.innerHTML = Icons.svg('folder-plus');
     const bNote = document.createElement('button');
-    bNote.className = 'row-act'; bNote.title = '在此新增筆記'; bNote.textContent = '📄＋';
+    bNote.className = 'row-act'; bNote.title = '在此新增筆記'; bNote.innerHTML = Icons.svg('file-plus');
+    const bBook = document.createElement('button');
+    bBook.className = 'row-act'; bBook.title = '以電子書閱讀這個資料夾'; bBook.innerHTML = Icons.svg('book-open');
     bFolder.addEventListener('click', function (e) { e.stopPropagation(); newFolder(folder.id); });
     bNote.addEventListener('click', function (e) { e.stopPropagation(); newNote(folder.id); });
+    bBook.addEventListener('click', function (e) { e.stopPropagation(); openBook(folder.id); });
     actions.appendChild(bFolder);
     actions.appendChild(bNote);
+    actions.appendChild(bBook);
     row.appendChild(actions);
 
     row.addEventListener('click', function () { toggleFolder(folder.id); });
@@ -201,7 +218,7 @@
       ? '<input type="checkbox" class="note-check" title="選取"' + (selected.has(note.id) ? ' checked' : '') + '>'
       : '';
     row.innerHTML = checkHtml +
-      '<span class="ic">' + (mine ? '📄' : (note.perm === 'edit' ? '✍' : '🔒')) + '</span>' +
+      '<span class="ic">' + Icons.svg(noteIcon(note)) + '</span>' +
       '<span class="label">' + MD.escapeHtml(note.title || '未命名筆記') + '</span>' +
       (mine ? '' : '<span class="share-by">' + MD.escapeHtml(note.sharedBy || '') + '</span>');
     const cb = row.querySelector('.note-check');
@@ -273,14 +290,14 @@
       const n = state.notes.find(function (x) { return x.id === data.id; });
       if (n && (n.folderId || null) !== (targetFolderId || null)) {
         n.folderId = targetFolderId || null;
-        Store.updateNote(n).then(renderTree);
+        Store.updateNote(n).then(refreshViews);
       }
     } else if (data.type === 'folder') {
       if (data.id === targetFolderId || isDescendant(targetFolderId, data.id)) return; // no cycles
       const f = state.folders.find(function (x) { return x.id === data.id; });
       if (f && (f.parentId || null) !== (targetFolderId || null)) {
         f.parentId = targetFolderId || null;
-        Store.updateFolder(f).then(renderTree);
+        Store.updateFolder(f).then(refreshViews);
       }
     }
   }
@@ -290,6 +307,8 @@
     const bar = document.getElementById('batch-bar');
     if (!bar) return;
     bar.hidden = selected.size === 0;
+    // 批次列在抽屜裡：從首頁勾選筆記時抽屜多半是收起的，得拉出來才看得到移動／刪除鈕
+    if (selected.size > 0 && !isSidebarOpen()) setSidebarOpen(true);
     const c = bar.querySelector('.batch-count');
     if (c) c.textContent = '已選 ' + selected.size + ' 篇';
   }
@@ -325,6 +344,7 @@
   // 給儀表板用的選取 API（讓「所有筆記」也能勾選、共用同一份選取與批次列）
   const selectionApi = {
     has: function (id) { return selected.has(id); },
+    ids: function () { return Array.from(selected); },
     toggle: function (id, on) {
       if (on) selected.add(id); else selected.delete(id);
       syncTreeCheck(id, on);   // 反映到側邊欄
@@ -334,9 +354,43 @@
   // 批次動作後同時刷新側邊欄與（若正在顯示的）儀表板
   function refreshViews() {
     renderTree();
-    if (!emptyEl.hidden && window.Dashboard) {
-      Dashboard.render({ notes: state.notes, folders: state.folders, onOpen: openNote, selection: selectionApi });
-    }
+    if (!emptyEl.hidden && window.Dashboard) Dashboard.refresh(dashOpts());
+  }
+  // 儀表板需要的資料與回呼，集中一處，render / refresh 共用
+  function dashOpts() {
+    return {
+      notes: state.notes, folders: state.folders,
+      onOpen: openNote, onBook: openBook, onBookRemove: unmarkBook, onBookUpdate: updateBook,
+      onPin: pinNote, onRename: renameNoteTo, onMenu: showNoteMenu,
+      onFolderMenu: showFolderMenu, onFolderRename: renameFolderTo,
+      onMoveNotes: moveNotesToFolder,
+      selection: selectionApi
+    };
+  }
+
+  // Drag-and-drop filing from the dashboard. `folderId` may be null, meaning the
+  // top level. Notes already in the target are skipped so dropping a mixed
+  // selection does not generate pointless saves.
+  function moveNotesToFolder(ids, folderId) {
+    const target = folderId || null;
+    const moving = ids
+      .map(function (id) { return state.notes.find(function (n) { return n.id === id; }); })
+      .filter(function (n) { return n && isMine(n) && (n.folderId || null) !== target; });
+    if (!moving.length) return;
+    moving.forEach(function (n) { n.folderId = target; });
+    Promise.all(moving.map(function (n) {
+      return Store.updateNote(n).catch(function (e) {
+        toast('搬移「' + (n.title || '未命名筆記') + '」失敗：' + e.message);
+      });
+    })).then(function () {
+      selected.clear();
+      updateBatchBar();
+      refreshViews();
+      const where = target
+        ? '「' + ((state.folders.find(function (f) { return f.id === target; }) || {}).name || '資料夾') + '」'
+        : '最上層';
+      toast('已搬移 ' + moving.length + ' 篇筆記到' + where);
+    });
   }
 
   function batchDelete() {
@@ -393,13 +447,14 @@
     return parts.join(' / ');
   }
   // 選資料夾對話框：resolve({folderId}) 或 resolve(null)（取消）
-  function showFolderPicker(title) {
+  function showFolderPicker(title, o) {
+    o = o || {};
     return new Promise(function (resolve) {
       const overlay = document.createElement('div');
       overlay.className = 'modal-overlay';
       const modal = document.createElement('div');
       modal.className = 'modal';
-      const opts = ['<option value="">（最上層）</option>'];
+      const opts = o.noRoot ? [] : ['<option value="">（最上層）</option>'];
       state.folders.slice().sort(function (a, b) {
         return folderFullName(a.id).localeCompare(folderFullName(b.id), 'zh-Hant');
       }).forEach(function (f) {
@@ -410,7 +465,7 @@
         '<div class="modal-body"><select class="folder-picker">' + opts.join('') + '</select></div>' +
         '<div class="modal-actions">' +
         '<button class="btn modal-cancel" type="button">取消</button>' +
-        '<button class="btn btn-primary modal-ok" type="button">移動</button>' +
+        '<button class="btn btn-primary modal-ok" type="button">' + MD.escapeHtml(o.ok || '移動') + '</button>' +
         '</div>';
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
@@ -434,6 +489,7 @@
   // ---- Note open / editor ------------------------------------------------
   const secWrapEl = $('#sec-wrap');
   const perfWrapEl = $('#perf-wrap');
+  const bookWrapEl = $('#book-wrap');
   // 切換頂列的「筆記模式」：開一般筆記時顯示標題與編輯按鈕，回首頁時只留 logo + 帳號。
   function noteBar(on) {
     const app = document.getElementById('app');
@@ -453,21 +509,126 @@
     return parts.length ? parts.join('\\') + '\\' : '';
   }
   function updateNotePath(note) {
-    if (notePathEl) notePathEl.textContent = note ? folderPathPrefix(note.folderId) : '';
+    if (notePathEl) {
+      notePathEl.textContent = note ? folderPathPrefix(note.folderId) : '';
+      const f = note && note.folderId && state.folders.find(function (x) { return x.id === note.folderId; });
+      notePathEl.title = f ? '回到「' + (f.name || '未命名資料夾') + '」' : '';
+    }
+    fitNoteTitle();
   }
+  // 點標題前的「資料夾\」前綴：回到首頁並直接走進那個資料夾
+  function goToFolder(folderId) {
+    saveNow();
+    LS.set('lastNote', '');
+    showEmpty();            // render() 會回到最上層，再 navigate 進目標資料夾
+    renderTree();
+    if (window.Dashboard && Dashboard.openFolder) Dashboard.openFolder(folderId);
+  }
+  // 資料夾頁的「更新到電子書」：這本書現有的公開分享連結全部用最新內容重新打包
+  // （連結是快照，不會自己更新），然後打開閱讀器。閱讀器本身永遠是最新內容，
+  // 所以沒有連結時只是把書打開、告訴使用者沒什麼要更新。
+  function updateBook(folderId) {
+    openBook(folderId);
+    if (!window.Book || !Book.renderStandalone) return;
+    Store.getBookLinks(folderId).then(function (links) {
+      if (!links.length) { toast('這本電子書沒有公開分享連結；閱讀器顯示的就是最新內容'); return; }
+      const book = Book.current();
+      if (!book) return;
+      return Book.renderStandalone().then(function (html) {
+        return Promise.all(links.map(function (lk) {
+          return Store.updateBookLink(lk.token, {
+            title: book.title || '未命名電子書', html: html, chapters: book.chapters.length
+          });
+        }));
+      }).then(function () { toast('已用最新內容更新 ' + links.length + ' 個分享連結'); });
+    }).catch(function (e) { toast('更新電子書失敗：' + (e && e.message || e)); });
+  }
+  // 標題輸入框依內容伸縮：它跟資料夾路徑前綴排在同一個絕對置中的容器裡，寬度
+  // 貼著文字，「測試資料夾\測試筆記」才會看起來是一整串置中的字，而不是路徑在
+  // 左、標題在一個固定寬度的框裡各自為政。量測用同字型的隱形 span。
+  let titleMeasure = null;
+  function fitNoteTitle() {
+    if (!titleEl) return;
+    if (!titleMeasure) {
+      titleMeasure = document.createElement('span');
+      titleMeasure.className = 'note-title-measure';
+      titleMeasure.setAttribute('aria-hidden', 'true');
+      (titleEl.parentNode || document.body).appendChild(titleMeasure);
+    }
+    titleMeasure.textContent = titleEl.value || titleEl.placeholder || '';
+    titleEl.style.width = Math.ceil(titleMeasure.getBoundingClientRect().width + 8) + 'px';
+  }
+  // 內建字體載入後字寬會變，重量一次
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fitNoteTitle(); });
 
   function showEmpty() {
     closeStream();
     noteBar(false);
     if (notePathEl) notePathEl.textContent = '';
     state.currentId = null; state.current = null;
+    setHash('');
     emptyEl.hidden = false;
     wrapEl.hidden = true;
     if (secWrapEl) secWrapEl.hidden = true;
     if (perfWrapEl) perfWrapEl.hidden = true;
+    closeBookView();
     if (window.Dashboard) {
-      Dashboard.render({ notes: state.notes, folders: state.folders, onOpen: openNote, selection: selectionApi });
+      Dashboard.render(dashOpts());
     }
+    setSidebarOpen(true);    // 首頁預設打開抽屜；開啟筆記時才收回
+  }
+
+  // ---- 電子書模式 ---------------------------------------------------------
+  // 把一個資料夾當成一本書：裡面的筆記是章節、子資料夾是分部。閱讀介面與
+  // 「出版成單檔 HTML」都在 book.js；這裡只負責把其他檢視收起來、把書打開。
+  function closeBookView() {
+    if (!bookWrapEl) return;
+    if (!bookWrapEl.hidden && window.Book && Book.close) Book.close();
+    bookWrapEl.hidden = true;
+  }
+  function openBook(folderId) {
+    if (!window.Book || !bookWrapEl) return;
+    saveNow();
+    closeStream();
+    LS.set('lastNote', '');
+    noteBar(false);
+    if (notePathEl) notePathEl.textContent = '';
+    state.currentId = null; state.current = null;
+    emptyEl.hidden = true;
+    wrapEl.hidden = true;
+    if (secWrapEl) secWrapEl.hidden = true;
+    if (perfWrapEl) perfWrapEl.hidden = true;
+    bookWrapEl.hidden = false;
+    setSidebarOpen(false);
+    setHash('book/' + folderId);
+    Book.open({
+      container: bookWrapEl,
+      folderId: folderId,
+      notes: state.notes,
+      folders: state.folders,
+      onOpenNote: function (id) { openNote(id); },
+      onClose: function () { goHome(); },
+      // Restoring a book version rewrites several chapter notes on the server,
+      // so the in-memory copies are stale. loadData re-opens the book on its own
+      // because the URL hash is still #book/<id>.
+      onRestored: function () { loadData(); }
+    });
+    renderTree();
+    markBook(folderId);
+  }
+  // 用電子書模式開過的資料夾就留在書櫃（folders.is_book），之後從側邊欄的
+  // 「電子書」直接找得到，不用每次再從整個資料夾清單裡挑。
+  function markBook(folderId) {
+    const f = state.folders.find(function (x) { return x.id === folderId; });
+    if (!f || f.isBook) return;
+    f.isBook = true;
+    Store.updateFolder(f).then(function (saved) {
+      // 舊版伺服器（還沒重啟、沒有 folders.is_book）會回 200 但不帶 isBook：
+      // 標記只留在記憶體，重整就不見。與其默默吞掉，不如直接說要重啟。
+      if (saved && saved.isBook === undefined) {
+        toast('伺服器還在跑舊版程式，電子書標記存不進去——請重新啟動 node server/server.js');
+      }
+    }).catch(function () { f.isBook = false; });
   }
 
   // 回到首頁：先存好目前這篇，再顯示儀表板
@@ -503,7 +664,7 @@
         banner.className = 'ro-banner';
         wrapEl.insertBefore(banner, wrapEl.firstChild);
       }
-      banner.textContent = '🔒 唯讀 — 由 ' + (note.sharedBy || '其他使用者') + ' 分享給你';
+      banner.innerHTML = Icons.svg('lock') + ' 唯讀 — 由 ' + MD.escapeHtml(note.sharedBy || '其他使用者') + ' 分享給你';
       banner.hidden = false;
     } else if (banner) {
       banner.hidden = true;
@@ -520,7 +681,11 @@
       note._syncRev = note.rev || 0;
       note._syncContent = note.content || '';
       LS.set('lastNote', id);
+      setHash('note/' + id);
+      tocOpen.clear();         // 目錄的展開狀態是每篇筆記各自的
       emptyEl.hidden = true;
+      closeBookView();
+      setSidebarOpen(false);   // 從抽屜點開筆記後收回，把整個寬度留給筆記
 
       // 儲存後同步樹狀標題 / 記憶體中的筆記（給步驟式與表格式編輯器共用）。
       const onSaved = function (n) {
@@ -557,7 +722,14 @@
       if (perfWrapEl) perfWrapEl.hidden = true;
       wrapEl.hidden = false;
       titleEl.value = note.title || '';
+      fitNoteTitle();
       editorEl.value = note.content || '';
+      // Setting .value leaves the caret at the end, so the focus() below would
+      // scroll the editor to the bottom while the preview opens at the top.
+      // Start every note at the top on both sides instead.
+      try { editorEl.setSelectionRange(0, 0); } catch (e) {}
+      editorEl.scrollTop = 0;
+      if (previewScrollEl) previewScrollEl.scrollTop = 0;
       applyReadOnly(note);
       updateNotePath(note);   // 標題前綴顯示所在資料夾（如 pp\）
       // Only the owner may (re)share; recipients just see the collaborators.
@@ -580,8 +752,147 @@
     if (previewTimer) { clearTimeout(previewTimer); previewTimer = null; }
     previewEl.innerHTML = MD.render(editorEl.value);
     MD.resolveImages(previewEl);
+    restoreInlineTocState();
+    // Mind maps are edited in place in the preview, and the preview is rebuilt
+    // from scratch here, so the selection has to be re-applied every time.
+    if (window.MindMap && MindMap.restorePreview) MindMap.restorePreview();
     buildPreviewTOC();
     renderBacklinks();
+    scrollAnchorsDirty = true;
+  }
+
+  // ---- 左右捲動對齊 -----------------------------------------------------
+  // 純比例同步會讓「左邊已到第三章、右邊還在第二章」：圖片、表格、程式碼在
+  // 兩邊的高度差太多。改以標題為錨點：把編輯區每個 # 標題的像素位置對上預覽區
+  // 對應的 <h1>~<h6>，同一節裡的程式碼區塊、圖片、表格也一併配對，
+  // 錨點之間再按比例內插。什麼都對不上時等同純比例。
+  let scrollAnchorsDirty = true;
+  let scrollAnchors = null;   // [{ e: 編輯區 y, p: 預覽區 y }]，兩欄皆遞增
+
+  // 編輯區裡可以當錨點的區塊（依出現順序）：
+  //   h     ATX 標題（含層級）        pre   ``` / ~~~ 圍欄起點
+  //   img   以 ![ 開頭的圖片行        table 一段 | 表格的第一行
+  // 圍欄內的內容一律跳過。
+  function editorBlocks() {
+    const v = editorEl.value;
+    const out = [];
+    let pos = 0, fence = '', inTable = false;
+    v.split('\n').forEach(function (line) {
+      const f = line.match(/^\s*(`{3,}|~{3,})/);
+      if (f) {
+        if (!fence) { fence = f[1][0]; out.push({ type: 'pre', pos: pos }); }
+        else if (f[1][0] === fence) fence = '';
+        inTable = false;
+      } else if (!fence) {
+        const h = line.match(/^\s{0,3}(#{1,6})\s/);
+        const isTable = /^\s*\|/.test(line);
+        if (h) out.push({ type: 'h', pos: pos, level: h[1].length });
+        else if (/^\s*!\[/.test(line)) out.push({ type: 'img', pos: pos });
+        else if (isTable && !inTable) out.push({ type: 'table', pos: pos });
+        inTable = isTable;
+      }
+      pos += line.length + 1;
+    });
+    return out;
+  }
+
+  // 預覽區裡對應的元素（同樣依文件順序）
+  function previewBlocks() {
+    const out = [];
+    previewEl.querySelectorAll('h1,h2,h3,h4,h5,h6,.code-block,img,.pdf-embed,table').forEach(function (el) {
+      const tag = el.tagName;
+      if (/^H[1-6]$/.test(tag)) out.push({ type: 'h', el: el, level: parseInt(tag.charAt(1), 10) });
+      else if (tag === 'TABLE') out.push({ type: 'table', el: el });
+      else if (tag === 'IMG' || el.classList.contains('pdf-embed')) out.push({ type: 'img', el: el });
+      else out.push({ type: 'pre', el: el });
+    });
+    return out;
+  }
+
+  // 一次量出多個字元位置在 textarea 內容裡的像素高度（用共筆游標的量測鏡）
+  function measureEditorYs(positions) {
+    if (!ensureMirror()) return null;
+    syncMirrorStyle();
+    const v = editorEl.value;
+    const frag = document.createDocumentFragment();
+    const marks = [];
+    let last = 0;
+    positions.forEach(function (p) {
+      frag.appendChild(document.createTextNode(v.slice(last, p)));
+      const m = document.createElement('span');
+      m.textContent = '​';
+      marks.push(m);
+      frag.appendChild(m);
+      last = p;
+    });
+    frag.appendChild(document.createTextNode(v.slice(last)));
+    caretMirror.textContent = '';
+    caretMirror.appendChild(frag);
+    const ys = marks.map(function (m) { return m.offsetTop; });
+    caretMirror.textContent = '';
+    return ys;
+  }
+
+  // 兩邊的區塊清單以標題切成一段一段，同一段裡同類型的區塊數量相同才逐一配對；
+  // 數量不同（HTML 圖片、清單裡的程式碼…）就只放棄那一段的那一類，不影響其他段。
+  function pairBlocks(eb, pb) {
+    const pairs = [];
+    const eHeads = eb.map(function (b, i) { return b.type === 'h' ? i : -1; }).filter(function (i) { return i >= 0; });
+    const pHeads = pb.map(function (b, i) { return b.type === 'h' ? i : -1; }).filter(function (i) { return i >= 0; });
+    let n = Math.min(eHeads.length, pHeads.length);
+    for (let k = 0; k < n; k++) {
+      // 標題層級對不上（setext 標題、引用裡的標題…）就從這裡起只剩比例
+      if (eb[eHeads[k]].level !== pb[pHeads[k]].level) { n = k; break; }
+    }
+    // 段落邊界：[0, 第一個標題, …, 第 n 個標題, 結尾]
+    const eBounds = [0].concat(eHeads.slice(0, n), [eb.length]);
+    const pBounds = [0].concat(pHeads.slice(0, n), [pb.length]);
+    for (let seg = 0; seg + 1 < eBounds.length; seg++) {
+      const es = eb.slice(eBounds[seg], eBounds[seg + 1]);
+      const ps = pb.slice(pBounds[seg], pBounds[seg + 1]);
+      ['h', 'pre', 'img', 'table'].forEach(function (type) {
+        const a = es.filter(function (b) { return b.type === type; });
+        const b = ps.filter(function (b) { return b.type === type; });
+        if (!a.length || a.length !== b.length) return;
+        for (let i = 0; i < a.length; i++) pairs.push({ pos: a[i].pos, el: b[i].el });
+      });
+    }
+    pairs.sort(function (x, y) { return x.pos - y.pos; });
+    return pairs;
+  }
+
+  function buildScrollAnchors() {
+    scrollAnchorsDirty = false;
+    const eMax = editorEl.scrollHeight - editorEl.clientHeight;
+    const pMax = previewScrollEl.scrollHeight - previewScrollEl.clientHeight;
+    const list = [{ e: 0, p: 0 }];
+    const pairs = pairBlocks(editorBlocks(), previewBlocks());
+    const ys = pairs.length ? measureEditorYs(pairs.map(function (x) { return x.pos; })) : null;
+    if (ys) {
+      const base = previewScrollEl.getBoundingClientRect().top - previewScrollEl.scrollTop;
+      for (let i = 0; i < pairs.length; i++) {
+        const a = { e: ys[i], p: pairs[i].el.getBoundingClientRect().top - base };
+        const prev = list[list.length - 1];
+        // 最後一屏內的錨點不需要，且錨點在兩邊都必須嚴格遞增
+        if (a.e >= eMax || a.p >= pMax || a.e <= prev.e || a.p <= prev.p) continue;
+        list.push(a);
+      }
+    }
+    list.push({ e: eMax, p: pMax });
+    scrollAnchors = list;
+  }
+
+  // 把某一側的 scrollTop 換算成另一側應有的 scrollTop
+  function mapScrollTop(fromEditor, y) {
+    if (scrollAnchorsDirty || !scrollAnchors) buildScrollAnchors();
+    const k1 = fromEditor ? 'e' : 'p', k2 = fromEditor ? 'p' : 'e';
+    const A = scrollAnchors;
+    let i = 1;
+    while (i < A.length - 1 && A[i][k1] <= y) i++;
+    const a = A[i - 1], b = A[i];
+    const span = b[k1] - a[k1];
+    const t = span > 0 ? Math.max(0, Math.min(1, (y - a[k1]) / span)) : 0;
+    return a[k2] + t * (b[k2] - a[k2]);
   }
 
   // ---- Backlinks ---------------------------------------------------------
@@ -599,7 +910,7 @@
     backlinksEl.hidden = false;
     const head = document.createElement('div');
     head.className = 'backlinks-title';
-    head.textContent = '🔗 反向連結（' + refs.length + '）';
+    head.innerHTML = Icons.svg('link') + ' 反向連結（' + refs.length + '）';
     backlinksEl.appendChild(head);
     refs.forEach(function (n) {
       const a = document.createElement('button');
@@ -621,6 +932,101 @@
       state.notes.push(n);
       renderTree();
       openNote(n.id);
+    });
+  }
+
+  // ---- Version history ----------------------------------------------------
+  //
+  // The unsaved buffer is flushed first: opening history on a note whose last
+  // few keystrokes have not reached the server yet would show a "current
+  // version" that is not what is on screen.
+  function openHistory() {
+    if (!state.current || !window.Versions) return;
+    saveNow();
+    Versions.openNote(state.current, {
+      onRestored: function (fresh) {
+        const i = state.notes.findIndex(function (n) { return n.id === fresh.id; });
+        if (i >= 0) state.notes[i] = Object.assign(state.notes[i], fresh);
+        renderTree();
+        openNote(fresh.id);
+      }
+    });
+  }
+
+  // ---- To-do items and mind maps in the preview --------------------------
+  //
+  // Both write back into the textarea and then fire the same synthetic `input`
+  // event a keystroke would, so autosave, the highlight backdrop and the preview
+  // re-render all happen through the existing path rather than a second one.
+  function applyEditorText(text) {
+    const start = editorEl.selectionStart, end = editorEl.selectionEnd;
+    const top = editorEl.scrollTop;
+    editorEl.value = text;
+    editorEl.selectionStart = Math.min(start, text.length);
+    editorEl.selectionEnd = Math.min(end, text.length);
+    editorEl.scrollTop = top;
+    editorEl.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  // Walk the source counting task lines, skipping fenced code so a `- [ ]`
+  // inside a code sample is never mistaken for the checkbox that was clicked.
+  // markdown.js numbers the checkboxes in the same document order.
+  function eachTaskLine(text, fn) {
+    const lines = text.split('\n');
+    let inFence = false, seq = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (/^\s{0,3}(?:```|~~~)/.test(lines[i])) { inFence = !inFence; continue; }
+      if (inFence) continue;
+      const m = lines[i].match(/^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\][\s\S]*)$/);
+      if (!m) continue;
+      if (fn(seq++, i, m, lines) === false) break;
+    }
+    return lines;
+  }
+
+  function toggleTask(index, checked) {
+    let hit = false;
+    const lines = eachTaskLine(editorEl.value, function (seq, i, m, ls) {
+      if (seq !== index) return;
+      ls[i] = m[1] + (checked ? 'x' : ' ') + m[3];
+      hit = true;
+      return false;
+    });
+    // If the counts ever disagree the safest thing is to change nothing and let
+    // the next render put the checkbox back where the source says it is.
+    if (!hit) { renderPreviewNow(); return; }
+    applyEditorText(lines.join('\n'));
+  }
+
+  // Replace the body of the nth ```mindmap block in the source.
+  function replaceMindmapBlock(index, outline) {
+    const lines = editorEl.value.split('\n');
+    let seq = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const open = lines[i].match(/^(\s{0,3})(```+|~~~+)\s*mindmap\s*$/);
+      if (!open) continue;
+      let end = i + 1;
+      while (end < lines.length && !new RegExp('^\\s{0,3}' + open[2][0] + '{3,}\\s*$').test(lines[end])) end++;
+      if (++seq !== index) { i = end; continue; }
+      const body = outline.split('\n');
+      lines.splice(i + 1, end - i - 1, ...body);
+      applyEditorText(lines.join('\n'));
+      return true;
+    }
+    return false;
+  }
+
+  function openMindMapBlock(block) {
+    if (!block || !window.MindMap || !MindMap.open) return;
+    if (state.current && state.current.perm === 'read') {
+      toast('這篇筆記你只有唯讀權限');
+      return;
+    }
+    const all = previewEl.querySelectorAll('.mindmap-block');
+    const index = Array.prototype.indexOf.call(all, block);
+    if (index < 0) return;
+    MindMap.open(block.getAttribute('data-mindmap') || '', function (outline) {
+      if (!replaceMindmapBlock(index, outline)) toast('找不到對應的心智圖區塊，請重試');
     });
   }
 
@@ -649,7 +1055,10 @@
     title.appendChild(label);
     title.appendChild(collapse);
     tocEl.appendChild(title);
-    heads.forEach(function (h) {
+    // 預設只列到最上層（通常是 #）：底下的 ## / ### 收起來，點右邊的箭頭才展開。
+    // 展開狀態記在 tocOpen（以上層標題的 id 為鍵，與內文 [toc] 共用），
+    // 重新渲染時保留，換筆記時清空。
+    function makeLink(h) {
       const a = document.createElement('a');
       a.className = 'toc-' + h.tagName.toLowerCase();
       a.textContent = h.textContent;
@@ -659,20 +1068,81 @@
         e.preventDefault();
         h.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
-      tocEl.appendChild(a);
+      return a;
+    }
+    // 只有從 # 開始的筆記才會只剩 #；若整篇最淺的標題是 ##，就以 ## 為上層。
+    let top = 6;
+    heads.forEach(function (h) {
+      const lv = parseInt(h.tagName.charAt(1), 10);
+      if (lv < top) top = lv;
+    });
+    let group = null;   // 目前的上層群組：{ wrap, kids, twisty }
+    heads.forEach(function (h) {
+      const lv = parseInt(h.tagName.charAt(1), 10);
+      const a = makeLink(h);
+      if (lv > top) {
+        if (group) group.kids.appendChild(a);
+        else tocEl.appendChild(a);        // 前面沒有上層標題可掛，直接列出
+        return;
+      }
+      // 上層標題：一列 = 連結 + 展開箭頭；子項放在下面的 .toc-children
+      const key = h.id || h.textContent;   // 與內文 [toc] 用同一組鍵，兩邊同步展開
+      const wrap = document.createElement('div');
+      wrap.className = 'toc-group' + (tocOpen.has(key) ? ' open' : '');
+      const rowEl = document.createElement('div');
+      rowEl.className = 'toc-row';
+      const tw = document.createElement('button');
+      tw.type = 'button';
+      tw.className = 'toc-twisty';
+      tw.title = '展開／收合子標題';
+      tw.innerHTML = Icons.svg('chevron-right');
+      tw.addEventListener('click', function (e) {
+        e.preventDefault(); e.stopPropagation();
+        const open = wrap.classList.toggle('open');
+        if (open) tocOpen.add(key); else tocOpen.delete(key);
+        updateTocActive();
+      });
+      rowEl.appendChild(a);
+      rowEl.appendChild(tw);
+      const kids = document.createElement('div');
+      kids.className = 'toc-children';
+      wrap.appendChild(rowEl);
+      wrap.appendChild(kids);
+      tocEl.appendChild(wrap);
+      group = { wrap: wrap, kids: kids, twisty: tw };
+    });
+    // 底下沒有子標題的，不需要箭頭
+    tocEl.querySelectorAll('.toc-group').forEach(function (g) {
+      if (!g.querySelector('.toc-children a')) { g.classList.add('leaf'); const t = g.querySelector('.toc-twisty'); if (t) t.remove(); }
     });
     updateTocActive();
   }
+  // 哪些 ## 段落的子標題是展開的（側邊目錄與內文 [toc] 共用，以標題 id 為鍵）。
+  // 換筆記時清空——展開狀態屬於某一篇筆記，不該跟著跑到下一篇。
+  const tocOpen = new Set();
+  // 內文 [toc] 每次重新渲染都會重建，這裡把展開狀態貼回去
+  function restoreInlineTocState() {
+    previewEl.querySelectorAll('.md-toc .md-toc-toggle').forEach(function (b) {
+      if (tocOpen.has(b.getAttribute('data-toc'))) b.closest('li').classList.add('open');
+    });
+  }
   function updateTocActive() {
     if (!tocEl || !previewScrollEl) return;
-    const links = tocEl.querySelectorAll('a');
+    const links = Array.prototype.slice.call(tocEl.querySelectorAll('a'));
     if (!links.length) return;
     const containerTop = previewScrollEl.getBoundingClientRect().top;
     let active = links[0];
     links.forEach(function (a) {
       if (a._target && a._target.getBoundingClientRect().top - containerTop <= 40) active = a;
     });
-    links.forEach(function (a) { a.classList.toggle('active', a === active); });
+    // 目前段落是收合中的 ###：改反白它所屬的 ##
+    let shown = active;
+    if (active && active.offsetParent === null) {
+      const g = active.closest('.toc-group');
+      const parent = g && g.querySelector('.toc-row > a');
+      if (parent) shown = parent;
+    }
+    links.forEach(function (a) { a.classList.toggle('active', a === shown); });
   }
 
   // ---- Live collaboration (Server-Sent Events) --------------------------
@@ -748,6 +1218,7 @@
     // Adopt a remote title change unless the user is busy renaming.
     if (payload.title != null && document.activeElement !== titleEl && payload.title !== titleEl.value) {
       titleEl.value = payload.title;
+      fitNoteTitle();
       cur.title = payload.title;
       updateTitleInTree();
     }
@@ -1094,16 +1565,143 @@
       case 'ul': return setLinePrefix('- ');
       case 'task': return setLinePrefix('- [ ] ');
       case 'ol': return setLinePrefix(null, true);
-      case 'codeblock': return insertBlockAround('```\n', '\n```', '');
+      case 'codeblock': return insertBlockAround('```=\n', '\n```', '');   // = 預設顯示行號
       case 'callout': return insertBlockAround('> [!NOTE]\n> ', '', '內容');
       case 'table':
         if (window.TableTool) return TableTool.showInsertPicker(editorEl, $('#edit-toolbar button[data-fmt="table"]'));
         return insertBlockAround('| 欄位 A | 欄位 B |\n| --- | --- |\n| 內容 | 內容 |', '', '');
       case 'hr': return insertBlockAround('---', '', '');
-      case 'machine': return insertSnippet('machine');
-      case 'adset': return insertSnippet('adset');
+      case 'template': return showTemplatePicker($('#edit-toolbar button[data-fmt="template"]'));
       case 'pdf': return pickPdf();
     }
+  }
+
+  // ---- 插入範本 -----------------------------------------------------------
+  // 內建「機器」「AD Set」加上使用者自訂的範本（templates.js）。從工具列的
+  // 「範本」鈕選，或在編輯器裡輸入 /機器指令名稱。
+  function showTemplatePicker(anchor) {
+    if (!window.Templates || !anchor) return;
+    const r = anchor.getBoundingClientRect();
+    const list = Templates.all();
+    const pop = document.createElement('div');
+    pop.className = 'tpl-popup';
+    pop.innerHTML = '<div class="tpl-popup-head">範本</div>';
+    const body = document.createElement('div');
+    body.className = 'tpl-popup-list';
+    list.forEach(function (t) {
+      const row = document.createElement('div');
+      row.className = 'tpl-item';
+      const pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'tpl-pick';
+      pick.innerHTML = Icons.svg(t.icon || 'template') +
+        '<span class="tpl-name">' + MD.escapeHtml(t.name) + '</span>' +
+        (t.cmd ? '<span class="tpl-cmd">/' + MD.escapeHtml(t.cmd) + '</span>' : '');
+      pick.addEventListener('click', function () { close(); insertTemplateText(t.text); });
+      row.appendChild(pick);
+      if (!t.builtin) {
+        const ed = document.createElement('button');
+        ed.type = 'button'; ed.className = 'tpl-act'; ed.title = '編輯範本';
+        ed.innerHTML = Icons.svg('pencil');
+        ed.addEventListener('click', function (e) { e.stopPropagation(); close(); showTemplateEditor(t); });
+        const rm = document.createElement('button');
+        rm.type = 'button'; rm.className = 'tpl-act danger'; rm.title = '刪除範本';
+        rm.innerHTML = Icons.svg('trash');
+        rm.addEventListener('click', function (e) {
+          e.stopPropagation();
+          close();
+          showConfirm({ title: '刪除範本', message: '確定刪除範本「' + t.name + '」？', ok: '刪除', danger: true })
+            .then(function (ok) {
+              if (!ok) return;
+              Templates.remove(t.id); Templates.syncEditor(); toast('已刪除範本');
+            });
+        });
+        row.appendChild(ed);
+        row.appendChild(rm);
+      }
+      body.appendChild(row);
+    });
+    pop.appendChild(body);
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'tpl-add';
+    add.innerHTML = Icons.svg('plus') + '<span>新增範本…</span>';
+    add.addEventListener('click', function () { close(); showTemplateEditor(null); });
+    pop.appendChild(add);
+
+    document.body.appendChild(pop);
+    pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - pop.offsetWidth - 8)) + 'px';
+    pop.style.top = Math.min(r.bottom + 4, window.innerHeight - pop.offsetHeight - 8) + 'px';
+
+    function close() {
+      pop.remove();
+      document.removeEventListener('mousedown', onOutside, true);
+      document.removeEventListener('keydown', onKey, true);
+    }
+    function onOutside(e) { if (!pop.contains(e.target)) close(); }
+    function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+    setTimeout(function () {
+      document.addEventListener('mousedown', onOutside, true);
+      document.addEventListener('keydown', onKey, true);
+    }, 0);
+  }
+
+  // 新增／編輯自訂範本。tpl 為 null 表示新增；有選取內容時可一鍵帶入。
+  function showTemplateEditor(tpl) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'modal tpl-modal';
+    const sel = getSel();
+    const picked = sel.v.slice(sel.s, sel.e);
+    modal.innerHTML =
+      '<div class="modal-title">' + Icons.svg('template') + ' ' + (tpl ? '編輯範本' : '新增範本') + '</div>' +
+      '<div class="oscp-hint">範本會出現在工具列的「範本」選單；名稱含英數字時也會自動有一個 <code>/指令</code>。' +
+      '在內容裡寫 <code>$CURSOR</code> 可指定插入後游標停的位置。</div>' +
+      '<div class="oscp-field"><label>名稱</label><input class="tpl-name-input" type="text" placeholder="例如：Web 應用測試"></div>' +
+      '<div class="oscp-field"><label>內容（Markdown）</label>' +
+      '<textarea class="tpl-text-input" spellcheck="false" placeholder="## $CURSOR&#10;&#10;### 步驟&#10;"></textarea></div>' +
+      '<div class="modal-actions">' +
+      (picked ? '<button class="btn tpl-from-sel" type="button">帶入目前選取內容</button>' : '') +
+      '<button class="btn modal-cancel" type="button">取消</button>' +
+      '<button class="btn btn-primary tpl-save" type="button">儲存</button>' +
+      '</div>';
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    const nameEl = modal.querySelector('.tpl-name-input');
+    const textEl = modal.querySelector('.tpl-text-input');
+    if (tpl) { nameEl.value = tpl.name; textEl.value = tpl.text; }
+    const fromSel = modal.querySelector('.tpl-from-sel');
+    if (fromSel) fromSel.addEventListener('click', function () { textEl.value = picked; textEl.focus(); });
+
+    function close() { overlay.remove(); document.removeEventListener('keydown', onKey, true); }
+    function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+    document.addEventListener('keydown', onKey, true);
+    overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) close(); });
+    modal.querySelector('.modal-cancel').addEventListener('click', close);
+    modal.querySelector('.tpl-save').addEventListener('click', function () {
+      const name = nameEl.value.trim();
+      if (!name) { nameEl.focus(); return; }
+      Templates.save({ id: tpl ? tpl.id : '', name: name, text: textEl.value });
+      Templates.syncEditor();
+      close();
+      toast(tpl ? '已更新範本' : '已新增範本');
+    });
+    setTimeout(function () { nameEl.focus(); }, 30);
+  }
+
+  function insertTemplateText(tpl) {
+    if (!tpl) return;
+    editorEl.focus();
+    const g = getSel();
+    const idx = tpl.indexOf('$CURSOR');
+    const clean = tpl.replace('$CURSOR', '');
+    const pad0 = (g.s > 0 && g.v[g.s - 1] !== '\n') ? '\n' : '';
+    const pad1 = (g.e < g.v.length && g.v[g.e] !== '\n') ? '\n' : '';
+    const text = pad0 + clean + pad1;
+    const nv = g.v.slice(0, g.s) + text + g.v.slice(g.e);
+    const cur = g.s + pad0.length + (idx < 0 ? clean.length : idx);
+    setRange(nv, cur, cur);
   }
 
   // ---- Embed PDF ---------------------------------------------------------
@@ -1130,20 +1728,6 @@
     });
     inp.click();
   }
-  function insertSnippet(key) {
-    const tpl = (window.Editor && Editor.snippets && Editor.snippets[key]) || '';
-    if (!tpl) return;
-    const g = getSel();
-    const idx = tpl.indexOf('$CURSOR');
-    const clean = tpl.replace('$CURSOR', '');
-    const pad0 = (g.s > 0 && g.v[g.s - 1] !== '\n') ? '\n' : '';
-    const pad1 = (g.e < g.v.length && g.v[g.e] !== '\n') ? '\n' : '';
-    const text = pad0 + clean + pad1;
-    const nv = g.v.slice(0, g.s) + text + g.v.slice(g.e);
-    const cur = g.s + pad0.length + (idx < 0 ? clean.length : idx);
-    setRange(nv, cur, cur);
-  }
-
   // ---- Copy to clipboard (works on file://) ------------------------------
   function copyText(text, btn) {
     function done() {
@@ -1166,6 +1750,43 @@
   }
 
   // ---- Modal confirm dialog ----------------------------------------------
+  // Same shape as showConfirm but with a text field. Resolves to the string, or
+  // to null if the person cancelled — an empty string is a legitimate answer
+  // (it is how a version name gets cleared), so the two cannot be conflated.
+  function showPrompt(opts) {
+    return new Promise(function (resolve) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML =
+        '<div class="modal" role="dialog" aria-modal="true">' +
+        '<div class="modal-title">' + MD.escapeHtml(opts.title || '') + '</div>' +
+        (opts.message ? '<div class="modal-body">' + MD.escapeHtml(opts.message) + '</div>' : '') +
+        '<input class="modal-input" type="text">' +
+        '<div class="modal-actions">' +
+        '<button class="btn modal-cancel">' + MD.escapeHtml(opts.cancel || '取消') + '</button>' +
+        '<button class="btn btn-primary modal-ok">' + MD.escapeHtml(opts.ok || '確定') + '</button>' +
+        '</div></div>';
+      document.body.appendChild(overlay);
+      const field = overlay.querySelector('.modal-input');
+      field.value = opts.value || '';
+      if (opts.placeholder) field.placeholder = opts.placeholder;
+      function close(val) {
+        overlay.remove();
+        document.removeEventListener('keydown', onKey, true);
+        resolve(val);
+      }
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); close(null); }
+        else if (e.key === 'Enter') { e.preventDefault(); close(field.value); }
+      }
+      overlay.querySelector('.modal-cancel').addEventListener('click', function () { close(null); });
+      overlay.querySelector('.modal-ok').addEventListener('click', function () { close(field.value); });
+      overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) close(null); });
+      document.addEventListener('keydown', onKey, true);
+      setTimeout(function () { field.focus(); field.select(); }, 30);
+    });
+  }
+
   function showConfirm(opts) {
     return new Promise(function (resolve) {
       const overlay = document.createElement('div');
@@ -1240,116 +1861,300 @@
     }
   }
 
+  // ---- 筆記列動作（儀表板）／連結／提示 -----------------------------------
+  // 只改 meta（釘選等）：先抓最新版本再存，避免用記憶體裡較舊的內文蓋掉別人的編輯。
+  function patchNoteMeta(id, patch) {
+    return Store.getNote(id).then(function (fresh) {
+      if (!fresh) throw new Error('找不到筆記');
+      fresh.meta = Object.assign({}, fresh.meta || {}, patch);
+      fresh.baseRev = fresh.rev;
+      fresh.baseContent = fresh.content;
+      return Store.updateNote(fresh).then(function (saved) {
+        const n = state.notes.find(function (x) { return x.id === id; });
+        if (n) { n.meta = fresh.meta; n.rev = saved.rev; n.updatedAt = saved.updatedAt; }
+        if (state.current && state.current.id === id) state.current.meta = fresh.meta;
+        return saved;
+      });
+    });
+  }
+  function pinNote(note, on) {
+    patchNoteMeta(note.id, { pinned: !!on })
+      .then(function () { refreshViews(); toast(on ? '已釘選到最上面' : '已取消釘選'); })
+      .catch(function (e) { toast('儲存失敗：' + (e && e.message || e)); });
+  }
+  function noteLink(id) { return location.origin + location.pathname + '#note/' + encodeURIComponent(id); }
+  function copyNoteLink(note) {
+    const url = noteLink(note.id);
+    function done() { toast('已複製連結（需登入且有權限的人才能開啟）'); }
+    function fallback() {
+      const ta = document.createElement('textarea');
+      ta.value = url; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) { toast('無法自動複製，連結：' + url); }
+      ta.remove();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, fallback);
+    else fallback();
+  }
+  let toastTimer = null;
+  function toast(msg) {
+    let t = document.getElementById('toast');
+    if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
+    t.textContent = msg;
+    t.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2400);
+  }
+  // 儀表板筆記列的「⋯」：貼著按鈕右下角打開
+  function showNoteMenu(note, anchor) {
+    const r = anchor.getBoundingClientRect();
+    const actions = [
+      { icon: 'link', label: '複製連結', fn: function () { copyNoteLink(note); } },
+      { icon: 'users', label: '分享…', fn: function () { showShareDialog(note); } },
+      { icon: 'copy', label: '複製筆記', fn: function () { duplicateNote(note); } },
+      { icon: 'trash', label: '刪除這篇筆記', fn: function () { deleteNote(note); }, danger: true }
+    ];
+    openMenuAt(r.right, r.bottom + 4, actions, { alignRight: true });
+  }
+  // 資料夾方框右上的「⋮」
+  function showFolderMenu(folder, anchor) {
+    const r = anchor.getBoundingClientRect();
+    const actions = [
+      { icon: 'book-open', label: '以電子書閱讀', fn: function () { openBook(folder.id); } },
+      { icon: 'file-plus', label: '在此新增筆記', fn: function () { newNote(folder.id); } },
+      { icon: 'folder-plus', label: '在此新增子資料夾', fn: function () { newFolder(folder.id); } },
+      { icon: 'pencil', label: '重新命名', fn: function () { startFolderRename(folder); } },
+      { icon: 'trash', label: '刪除資料夾', fn: function () { deleteFolder(folder); }, danger: true }
+    ];
+    openMenuAt(r.right, r.bottom + 4, actions, { alignRight: true });
+  }
+  // 儀表板方框上就地改名（找不到方框就退回側邊欄的樹狀改名）
+  function startFolderRename(folder) {
+    const tile = document.querySelector('#dashboard .dash-folder-tile[data-id="' + folder.id + '"]');
+    if (tile && window.Dashboard && Dashboard.renameFolderTile) Dashboard.renameFolderTile(folder.id);
+    else { setSidebarOpen(true); startRename('folder', folder.id); }
+  }
+  function renameFolderTo(folder, val) {
+    const f = state.folders.find(function (x) { return x.id === folder.id; });
+    if (!f || !val || val === f.name) return;
+    f.name = val;
+    Store.updateFolder(f)
+      .then(function () { refreshViews(); })
+      .catch(function (e) { toast('改名失敗：' + (e && e.message || e)); refreshViews(); });
+  }
+  // 電子書：從「新增 → 電子書」挑一個資料夾做成電子書；開過一次它就會留在
+  // 首頁最上層的「電子書」區（folders.is_book），直到用方塊上的 ✕ 移出。
+  function pickBookFolder() {
+    if (!state.folders.length) { toast('先建立一個資料夾並放入筆記，再把它做成電子書'); return; }
+    showFolderPicker('選擇要做成電子書的資料夾', { ok: '開啟', noRoot: true }).then(function (res) {
+      if (res && res.folderId) openBook(res.folderId);
+    });
+  }
+  function unmarkBook(folderId) {
+    const f = state.folders.find(function (x) { return x.id === folderId; });
+    if (!f || !f.isBook) return;
+    f.isBook = false;
+    refreshViews();
+    Store.updateFolder(f).catch(function (e) {
+      f.isBook = true;
+      toast('移出電子書區失敗：' + (e && e.message || e));
+      refreshViews();
+    });
+  }
+  // 網址 hash：#note/<id>、#book/<folderId>——「複製連結」貼給別人就能直接開到那一篇
+  function noteIdFromHash() {
+    const m = location.hash.match(/^#note\/([^\/?#]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+  function bookIdFromHash() {
+    const m = location.hash.match(/^#book\/([^\/?#]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+  function setHash(h) {
+    const want = h ? '#' + h : '';
+    if (location.hash === want) return;
+    // pushState（不是 replaceState）：首頁／筆記／電子書要各自留一筆瀏覽紀錄，
+    // 這樣瀏覽器的「上一頁」才能一路退回首頁，而不是直接跳出整個 App。
+    try { history.pushState(null, '', location.pathname + location.search + want); } catch (e) { /* ignore */ }
+  }
+
   // ---- Context menu ------------------------------------------------------
   function showCtx(e, type, item) {
     e.preventDefault();
     e.stopPropagation();
     const actions = [];
     if (type === 'folder') {
-      actions.push({ label: '📄 在此新增筆記', fn: function () { newNote(item.id); } });
-      actions.push({ label: '📁 在此新增子資料夾', fn: function () { newFolder(item.id); } });
-      actions.push({ label: '✎ 重新命名', fn: function () { renameFolder(item); } });
-      actions.push({ label: '🗑 刪除資料夾', fn: function () { deleteFolder(item); }, danger: true });
+      actions.push({ icon: 'book-open', label: '以電子書閱讀', fn: function () { openBook(item.id); } });
+      actions.push({ icon: 'file-plus', label: '在此新增筆記', fn: function () { newNote(item.id); } });
+      actions.push({ icon: 'folder-plus', label: '在此新增子資料夾', fn: function () { newFolder(item.id); } });
+      actions.push({ icon: 'pencil', label: '重新命名', fn: function () { renameFolder(item); } });
+      actions.push({ icon: 'trash', label: '刪除資料夾', fn: function () { deleteFolder(item); }, danger: true });
     } else if (item.perm && item.perm !== 'owner') {
       // Shared with me: I can copy it into my own space, or drop it. Renaming or
       // deleting someone else's note is not mine to do.
-      actions.push({ label: '⧉ 複製到我的筆記', fn: function () { duplicateNote(item); } });
-      actions.push({ label: '✕ 移除這個分享', fn: function () { leaveShare(item); }, danger: true });
+      actions.push({ icon: 'link', label: '複製連結', fn: function () { copyNoteLink(item); } });
+      actions.push({ icon: 'copy', label: '複製到我的筆記', fn: function () { duplicateNote(item); } });
+      // 透過「此站台所有使用者」看到的筆記沒有分享列可移除
+      if (!item.viaSite) actions.push({ icon: 'x', label: '移除這個分享', fn: function () { leaveShare(item); }, danger: true });
     } else {
-      actions.push({ label: '👥 分享…', fn: function () { showShareDialog(item); } });
-      actions.push({ label: '✎ 重新命名', fn: function () { renameNote(item); } });
-      actions.push({ label: '⧉ 複製', fn: function () { duplicateNote(item); } });
-      actions.push({ label: '🗑 刪除筆記', fn: function () { deleteNote(item); }, danger: true });
+      actions.push({ icon: 'link', label: '複製連結', fn: function () { copyNoteLink(item); } });
+      actions.push({ icon: 'users', label: '分享…', fn: function () { showShareDialog(item); } });
+      actions.push({ icon: 'pencil', label: '重新命名', fn: function () { renameNote(item); } });
+      actions.push({ icon: 'copy', label: '複製', fn: function () { duplicateNote(item); } });
+      actions.push({ icon: 'trash', label: '刪除筆記', fn: function () { deleteNote(item); }, danger: true });
     }
+    openMenuAt(e.clientX, e.clientY, actions);
+  }
+  // 在指定座標打開一份動作選單（右鍵選單與儀表板筆記列的「⋯」共用）
+  function openMenuAt(x, y, actions, o) {
     ctxMenu.innerHTML = '';
     actions.forEach(function (a) {
       const b = document.createElement('button');
       b.className = 'ctx-item' + (a.danger ? ' danger' : '');
-      b.textContent = a.label;
+      b.innerHTML = (a.icon ? Icons.svg(a.icon) : '') + '<span>' + MD.escapeHtml(a.label) + '</span>';
       b.addEventListener('click', function () { hideCtx(); a.fn(); });
       ctxMenu.appendChild(b);
     });
     ctxMenu.hidden = false;
-    const x = Math.min(e.clientX, window.innerWidth - 200);
-    const y = Math.min(e.clientY, window.innerHeight - ctxMenu.offsetHeight - 10);
-    ctxMenu.style.left = x + 'px';
-    ctxMenu.style.top = y + 'px';
+    let left = (o && o.alignRight) ? x - ctxMenu.offsetWidth : x;
+    left = Math.max(8, Math.min(left, window.innerWidth - ctxMenu.offsetWidth - 8));
+    const top = Math.min(y, window.innerHeight - ctxMenu.offsetHeight - 10);
+    ctxMenu.style.left = left + 'px';
+    ctxMenu.style.top = top + 'px';
   }
   function hideCtx() { ctxMenu.hidden = true; }
   document.addEventListener('click', hideCtx);
   document.addEventListener('scroll', hideCtx, true);
 
   // ---- Sharing -----------------------------------------------------------
+  // 共用對話框（Google Drive 式）：
+  //   1. 新增使用者 + 角色（檢視者／編輯者）
+  //   2. 「具有存取權的使用者」：擁有者一列（固定），其他人可就地改角色或移除存取權
+  //   3. 「一般存取權」：限制（預設）或此站台的所有使用者（可再選檢視／編輯）
+  //   4. 複製連結（開啟仍需登入且有權限）
+  // 沒有「知道連結的任何人」——這台伺服器上放的是考試報告，不開匿名存取。
   function showShareDialog(note) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const modal = document.createElement('div');
     modal.className = 'modal share-modal';
+    const me = (Auth.user && Auth.user()) ? Auth.user().username : '';
     modal.innerHTML =
-      '<div class="modal-title">👥 分享「' + MD.escapeHtml(note.title || '未命名筆記') + '」</div>' +
-      '<div class="share-hint">輸入對方的帳號即可分享。對方會在自己的「分享給我的」看到這篇筆記。</div>' +
+      '<div class="modal-title">' + Icons.svg('users') + ' 共用「' + MD.escapeHtml(note.title || '未命名筆記') + '」</div>' +
       '<div class="share-add">' +
-      '<input class="share-user" type="text" placeholder="帳號" autocomplete="off" spellcheck="false">' +
-      '<select class="share-perm">' +
-      '<option value="read">唯讀</option><option value="edit">可編輯</option>' +
+      '<input class="share-user" type="text" placeholder="新增使用者（輸入帳號）" autocomplete="off" spellcheck="false">' +
+      '<select class="share-perm" title="角色">' +
+      '<option value="read">檢視者</option><option value="edit">編輯者</option>' +
       '</select>' +
-      '<button class="btn share-add-btn" type="button">分享</button>' +
+      '<button class="btn btn-primary share-add-btn" type="button">' + Icons.svg('user-plus') + '<span>新增</span></button>' +
       '</div>' +
       '<div class="share-error" hidden></div>' +
-      '<div class="share-list"></div>' +
-      '<div class="modal-actions"><button class="btn modal-cancel" type="button">關閉</button></div>';
+      '<div class="share-section-title">具有存取權的使用者</div>' +
+      '<div class="share-people"></div>' +
+      '<div class="share-section-title">一般存取權</div>' +
+      '<div class="share-general">' +
+        '<span class="share-general-ic"></span>' +
+        '<div class="share-general-body">' +
+          '<select class="share-access">' +
+            '<option value="restricted">限制</option>' +
+            '<option value="site">此站台的所有使用者</option>' +
+          '</select>' +
+          '<div class="share-general-desc"></div>' +
+        '</div>' +
+        '<select class="share-access-perm" title="站台使用者的角色" hidden>' +
+          '<option value="read">檢視者</option><option value="edit">編輯者</option>' +
+        '</select>' +
+      '</div>' +
+      '<div class="share-footer">' +
+        '<button class="btn share-link-btn" type="button">' + Icons.svg('link') + '<span>複製連結</span></button>' +
+        '<button class="btn btn-primary modal-cancel" type="button">完成</button>' +
+      '</div>';
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    const listEl = modal.querySelector('.share-list');
+    const peopleEl = modal.querySelector('.share-people');
     const errEl = modal.querySelector('.share-error');
     const userEl = modal.querySelector('.share-user');
     const permEl = modal.querySelector('.share-perm');
+    const accessEl = modal.querySelector('.share-access');
+    const accessPermEl = modal.querySelector('.share-access-perm');
+    const generalEl = modal.querySelector('.share-general');
+    const generalIc = modal.querySelector('.share-general-ic');
+    const generalDesc = modal.querySelector('.share-general-desc');
 
     function err(msg) { errEl.textContent = msg || ''; errEl.hidden = !msg; }
+    function avatar(name) {
+      const s = document.createElement('span');
+      s.className = 'share-avatar';
+      s.textContent = String(name || '?').charAt(0).toUpperCase();
+      let h = 0;
+      for (let i = 0; i < String(name).length; i++) h = (h * 31 + String(name).charCodeAt(i)) % 360;
+      s.style.background = 'hsl(' + h + ', 55%, 45%)';
+      return s;
+    }
+    function personRow(name, right, sub) {
+      const row = document.createElement('div');
+      row.className = 'share-person';
+      row.appendChild(avatar(name));
+      const label = document.createElement('span');
+      label.className = 'share-person-name';
+      label.textContent = name;
+      if (sub) { const sm = document.createElement('small'); sm.textContent = sub; label.appendChild(sm); }
+      row.appendChild(label);
+      row.appendChild(right);
+      return row;
+    }
+
+    function paintGeneral() {
+      const site = (note.access || 'restricted') === 'site';
+      accessEl.value = site ? 'site' : 'restricted';
+      accessPermEl.hidden = !site;
+      accessPermEl.value = note.accessPerm === 'edit' ? 'edit' : 'read';
+      generalEl.classList.toggle('site', site);
+      generalIc.innerHTML = Icons.svg(site ? 'globe' : 'lock');
+      generalDesc.textContent = site
+        ? '這個站台上任何登入的使用者都能' + (note.accessPerm === 'edit' ? '編輯' : '檢視') + '這篇筆記。'
+        : '只有上面列出的使用者可以開啟。';
+    }
+    function saveAccess() {
+      err('');
+      const mode = accessEl.value === 'site' ? 'site' : 'restricted';
+      const perm = accessPermEl.value === 'edit' ? 'edit' : 'read';
+      Store.setAccess(note.id, mode, perm).then(function (r) {
+        note.access = r.access; note.accessPerm = r.accessPerm;
+        const n = state.notes.find(function (x) { return x.id === note.id; });
+        if (n) { n.access = r.access; n.accessPerm = r.accessPerm; }
+        paintGeneral();
+      }).catch(function (e) { err(e.message); paintGeneral(); });
+    }
+    accessEl.addEventListener('change', saveAccess);
+    accessPermEl.addEventListener('change', saveAccess);
 
     function refresh() {
       Store.getShares(note.id).then(function (shares) {
-        listEl.innerHTML = '';
-        if (!shares.length) {
-          listEl.innerHTML = '<div class="share-empty">尚未分享給任何人</div>';
-          return;
-        }
+        peopleEl.innerHTML = '';
+        const ownerTag = document.createElement('span');
+        ownerTag.className = 'share-role';
+        ownerTag.textContent = '擁有者';
+        peopleEl.appendChild(personRow(me, ownerTag, '（你）'));
         shares.forEach(function (s) {
-          const row = document.createElement('div');
-          row.className = 'share-row';
-
-          const name = document.createElement('span');
-          name.className = 'share-name';
-          name.textContent = s.username;
-          row.appendChild(name);
-
-          // 權限下拉：直接在這裡改唯讀／可編輯，變更即時套用（後端會覆寫既有分享）。
+          // 角色下拉：檢視者／編輯者／移除存取權，變更即時套用
           const sel = document.createElement('select');
-          sel.className = 'share-perm-row';
-          sel.innerHTML = '<option value="read">唯讀</option><option value="edit">可編輯</option>';
+          sel.className = 'share-role-select';
+          sel.innerHTML = '<option value="read">檢視者</option><option value="edit">編輯者</option>' +
+            '<option disabled>──────</option><option value="remove">移除存取權</option>';
           sel.value = s.perm === 'edit' ? 'edit' : 'read';
           sel.addEventListener('change', function () {
             err('');
             sel.disabled = true;
-            Store.addShare(note.id, s.username, sel.value)
-              .then(refresh)
-              .catch(function (e) { err(e.message); refresh(); });
+            const p = sel.value === 'remove'
+              ? Store.removeShare(note.id, s.username)
+              : Store.addShare(note.id, s.username, sel.value);
+            p.then(refresh).catch(function (e) { err(e.message); refresh(); });
           });
-          row.appendChild(sel);
-
-          const rm = document.createElement('button');
-          rm.className = 'share-rm';
-          rm.type = 'button';
-          rm.textContent = '✕';
-          rm.title = '取消分享';
-          rm.addEventListener('click', function () {
-            Store.removeShare(note.id, s.username).then(refresh).catch(e => err(e.message));
-          });
-          row.appendChild(rm);
-          listEl.appendChild(row);
+          peopleEl.appendChild(personRow(s.username, sel));
         });
-      }).catch(e => err(e.message));
+      }).catch(function (e) { err(e.message); });
     }
 
     function add() {
@@ -1359,13 +2164,14 @@
       Store.addShare(note.id, u, permEl.value).then(function () {
         userEl.value = '';
         refresh();
-      }).catch(e => err(e.message));
+      }).catch(function (e) { err(e.message); });
     }
     modal.querySelector('.share-add-btn').addEventListener('click', add);
     userEl.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') { e.preventDefault(); add(); }
       e.stopPropagation();
     });
+    modal.querySelector('.share-link-btn').addEventListener('click', function () { copyNoteLink(note); });
 
     function close() { overlay.remove(); document.removeEventListener('keydown', onKey, true); }
     function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
@@ -1373,6 +2179,7 @@
     overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) close(); });
     modal.querySelector('.modal-cancel').addEventListener('click', close);
     setTimeout(function () { userEl.focus(); }, 30);
+    paintGeneral();
     refresh();
   }
 
@@ -1388,12 +2195,25 @@
       Store.removeShare(note.id, Auth.user().username).then(function () {
         state.notes = state.notes.filter(function (n) { return n.id !== note.id; });
         if (state.currentId === note.id) showEmpty();
-        renderTree();
+        refreshViews();
       }).catch(function (e) { alert('移除失敗：' + e.message); });
     });
   }
 
   // ---- CRUD actions ------------------------------------------------------
+  // 「目前打開的資料夾」：儀表板正瀏覽到的資料夾，或閱讀器裡那本書的資料夾。
+  // 新增 → 筆記／證照範本／資安院報告／成效報告 都預設放進這裡，而不是丟到最上層；
+  // 電子書不在此列（它本來就自己挑資料夾）。沒有打開資料夾時回 null = 最上層。
+  function currentFolderId() {
+    if (emptyEl && !emptyEl.hidden && window.Dashboard && Dashboard.currentFolder) {
+      return Dashboard.currentFolder() || null;
+    }
+    if (bookWrapEl && !bookWrapEl.hidden && window.Book && Book.current) {
+      const b = Book.current();
+      return (b && b.folder && b.folder.id) || null;
+    }
+    return null;
+  }
   function newNote(folderId) {
     Store.createNote('未命名筆記', folderId || null).then(function (n) {
       state.notes.push(n);
@@ -1411,7 +2231,7 @@
       blank.unit = info.unit; blank.domain = info.domain;
       blank.ip = info.ip; blank.vulnType = info.vulnType; blank.impact = info.impact;
       blank.title = SecEditor.titleFrom(info);
-      Store.createNote(blank.title, null).then(function (n) {
+      Store.createNote(blank.title, currentFolderId()).then(function (n) {
         n.meta = Object.assign({}, n.meta, { secReport: blank });
         n.content = (window.SecReport && SecReport.generate)
           ? SecReport.generate(blank, blank.steps).content : '';
@@ -1431,7 +2251,7 @@
       blank.unit = info.unit; blank.scope = info.scope;
       blank.periodStart = info.periodStart; blank.periodEnd = info.periodEnd;
       blank.title = PerfReport.titleFrom(info);
-      Store.createNote(blank.title, null).then(function (n) {
+      Store.createNote(blank.title, currentFolderId()).then(function (n) {
         n.meta = Object.assign({}, n.meta, { perfReport: blank });
         n.content = PerfReport.generate(blank).content;
         Store.updateNote(n).then(function () {
@@ -1448,7 +2268,7 @@
       state.folders.push(f);
       if (parentId) state.expanded[parentId] = true;
       state.expanded[f.id] = true;
-      renderTree();
+      refreshViews();   // 儀表板立刻長出新資料夾，不用重新整理
       startRename('folder', f.id);
     });
   }
@@ -1476,19 +2296,11 @@
       if (save && val) {
         if (type === 'folder') {
           const f = state.folders.find(function (x) { return x.id === id; });
-          if (f) { f.name = val; Store.updateFolder(f).then(renderTree); return; }
+          if (f) { f.name = val; Store.updateFolder(f).then(refreshViews); return; }
         } else {
           const n = state.notes.find(function (x) { return x.id === id; });
           if (n) {
-            const oldTitle = n.title;
-            n.title = val;
-            Store.updateNote(n).then(function () {
-              if (state.currentId === id) titleEl.value = val;
-              return retargetLinks(oldTitle, val);
-            }).then(function () {
-              renderTree();
-              renderPreview();
-            });
+            applyNoteTitle(id, val).then(function () { refreshViews(); renderPreview(); });
             return;
           }
         }
@@ -1502,6 +2314,23 @@
     });
     input.addEventListener('click', function (e) { e.stopPropagation(); });
     input.addEventListener('blur', function () { commit(true); });
+  }
+  // 改標題的共用路徑：樹狀清單的就地改名與儀表板的「修改標題」都走這裡。
+  function applyNoteTitle(id, val) {
+    const n = state.notes.find(function (x) { return x.id === id; });
+    if (!n || !val || val === n.title) return Promise.resolve();
+    const oldTitle = n.title;
+    n.title = val;
+    return Store.updateNote(n).then(function () {
+      if (state.currentId === id) { titleEl.value = val; fitNoteTitle(); }
+      if (state.current && state.current.id === id) state.current.title = val;
+      return retargetLinks(oldTitle, val);
+    });
+  }
+  function renameNoteTo(note, val) {
+    applyNoteTitle(note.id, val)
+      .then(function () { refreshViews(); renderPreview(); })
+      .catch(function (e) { toast('改名失敗：' + (e && e.message || e)); refreshViews(); });
   }
   // Renaming a note would orphan every [[old title]] pointing at it, so rewrite
   // those links across all notes to follow the new title.
@@ -1534,7 +2363,7 @@
         n.content = full.content;
         Store.updateNote(n).then(function () {
           state.notes.push(n);
-          renderTree();
+          refreshViews();
         });
       });
     });
@@ -1549,7 +2378,7 @@
       Store.deleteNote(note.id).then(function () {
         state.notes = state.notes.filter(function (n) { return n.id !== note.id; });
         if (state.currentId === note.id) showEmpty();
-        renderTree();
+        refreshViews();
       });
     });
   }
@@ -1571,7 +2400,7 @@
         state.notes = state.notes.filter(function (n) { return folderIds.indexOf(n.folderId) < 0; });
         state.folders = state.folders.filter(function (f) { return folderIds.indexOf(f.id) < 0; });
         if (state.current && folderIds.indexOf(state.current.folderId) >= 0) showEmpty();
-        renderTree();
+        refreshViews();
       });
     });
   }
@@ -1672,7 +2501,7 @@
       title.className = 'search-row-title';
       const ic = document.createElement('span');
       ic.className = 'ic';
-      ic.textContent = '📄';
+      ic.innerHTML = Icons.svg(noteIcon(r.note));
       title.appendChild(ic);
       const label = document.createElement('span');
       label.className = 'label';
@@ -1752,15 +2581,58 @@
     renderPreview();
   }
 
-  // ---- Sidebar collapse --------------------------------------------------
-  function setSidebarCollapsed(v) {
+  // ---- Sidebar drawer ------------------------------------------------------
+  // 側邊欄是浮動抽屜：預設收起，筆記區永遠吃滿整個寬度。
+  // hoverOpened 記錄「是滑到左緣把手拉出來的」— 這種情況滑鼠離開抽屜就自動收回；
+  // 用按鈕／快捷鍵打開、或在抽屜裡點過東西的，就釘住直到明確關閉。
+  let sidebarHoverOpened = false;
+  function isSidebarOpen() {
     const app = $('#app');
-    if (app) app.classList.toggle('sidebar-collapsed', !!v);
-    LS.set('sidebarCollapsed', v ? '1' : '0');
+    return !!(app && app.classList.contains('sidebar-open'));
   }
-  function toggleSidebar() {
+  function setSidebarOpen(v, byHover) {
     const app = $('#app');
-    setSidebarCollapsed(!(app && app.classList.contains('sidebar-collapsed')));
+    if (!app) return;
+    app.classList.toggle('sidebar-open', !!v);
+    sidebarHoverOpened = !!v && !!byHover;
+  }
+  function toggleSidebar() { setSidebarOpen(!isSidebarOpen()); }
+  function initSidebarDrawer() {
+    const sidebar = $('#sidebar');
+    const handle = $('#sidebar-reopen');
+    const toggleBtn = $('#sidebar-collapse');
+    if (!sidebar) return;
+    // 滑到左緣把手 → 拉出；滑鼠離開抽屜（且沒釘住）→ 收回
+    if (handle) {
+      handle.addEventListener('mouseenter', function () { if (!isSidebarOpen()) setSidebarOpen(true, true); });
+      handle.addEventListener('click', function () { setSidebarOpen(true); });
+    }
+    // 用 document 的 mousemove 而不是抽屜的 mouseleave：滑鼠從把手直接跳到主區時，
+    // 瀏覽器可能從沒把游標算進抽屜裡，mouseleave 根本不會發生。
+    document.addEventListener('mousemove', function (e) {
+      if (!sidebarHoverOpened) return;
+      if (e.buttons) return;                 // 拖曳筆記到資料夾途中滑出抽屜不算離開
+      // 用抽屜「滑出後」的位置判斷，而不是游標下的元素：滑入動畫還沒跑完時，
+      // 停在把手上的游標其實還在抽屜外面，若看元素會立刻誤判成離開。
+      const inside = e.clientX <= sidebar.offsetWidth + 4 && e.clientY >= sidebar.getBoundingClientRect().top;
+      if (inside) return;
+      setSidebarOpen(false);
+    });
+    sidebar.addEventListener('mousedown', function () { sidebarHoverOpened = false; });
+    sidebar.addEventListener('focusin', function () { sidebarHoverOpened = false; });
+    // 點到主區或頂列（抽屜鈕除外）→ 收回；右鍵選單、對話框等都在這兩區之外，不受影響
+    document.addEventListener('mousedown', function (e) {
+      if (!isSidebarOpen()) return;
+      if (toggleBtn && toggleBtn.contains(e.target)) return;
+      // 首頁預設開著抽屜：點儀表板不收回，只有 ☰、Esc 或開啟筆記才會收
+      if (!emptyEl.hidden) return;
+      const main = $('#main'), top = $('#topbar');
+      if ((main && main.contains(e.target)) || (top && top.contains(e.target))) setSidebarOpen(false);
+    });
+    // Esc：其他對話框／搜尋框已經吃掉的 Esc 不會走到這裡
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !e.defaultPrevented && isSidebarOpen()) setSidebarOpen(false);
+    });
   }
 
   // ---- Divider resize ----------------------------------------------------
@@ -1791,34 +2663,53 @@
       logo.title = '回到首頁';
       logo.addEventListener('click', goHome);
     }
-    // 收合側邊欄後，編輯畫面左上角也提供「📓 報告筆記」回首頁鈕
-    document.querySelectorAll('.home-btn').forEach(function (b) {
-      b.addEventListener('click', goHome);
-    });
 
-    $('#new-note').addEventListener('click', function () { newNote(null); });
+    $('#new-note').addEventListener('click', function () { newNote(currentFolderId()); });
     $('#new-folder').addEventListener('click', function () { newFolder(null); });
+    // 「新增」選單：筆記／證照範本／資安院報告／成效報告合併成一顆鈕，點開再選。
+    // 選項按鈕保留原本的 id，各自的 click 處理（下面）完全不用改；選項自己的
+    // handler 先跑（target 階段），事件冒泡到選單這層時再把它收起來。
+    const newBtn = $('#new-btn');
+    const newMenu = $('#new-dropdown');
+    function closeNewMenu() {
+      if (newMenu) newMenu.hidden = true;
+      if (newBtn) newBtn.setAttribute('aria-expanded', 'false');
+    }
+    if (newBtn && newMenu) {
+      newBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        const open = newMenu.hidden;
+        newMenu.hidden = !open;
+        newBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      newMenu.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (e.target.closest('button')) closeNewMenu();
+      });
+      document.addEventListener('click', closeNewMenu);
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeNewMenu(); });
+    }
     $('#export-pdf').addEventListener('click', exportPDF);
     $('#toggle-theme').addEventListener('click', toggleTheme);
     if (shareBtn) shareBtn.addEventListener('click', function () {
       if (state.current && isMine(state.current)) showShareDialog(state.current);
     });
+    if (historyBtn) historyBtn.addEventListener('click', openHistory);
 
     // 批次操作列
     const bMove = $('#batch-move'); if (bMove) bMove.addEventListener('click', batchMove);
     const bDel = $('#batch-delete'); if (bDel) bDel.addEventListener('click', batchDelete);
     const bClr = $('#batch-clear'); if (bClr) bClr.addEventListener('click', clearSelection);
 
-    // 收合鈕現在在全域頂列、永遠可見，因此改為切換（收合 ↔ 展開）
+    // 頂列的抽屜鈕：開 ↔ 關；左緣把手與自動收回的邏輯在 initSidebarDrawer
     const collapseBtn = $('#sidebar-collapse');
     if (collapseBtn) collapseBtn.addEventListener('click', toggleSidebar);
-    const reopenBtn = $('#sidebar-reopen');
-    if (reopenBtn) reopenBtn.addEventListener('click', function () { setSidebarCollapsed(false); });
+    initSidebarDrawer();
 
     const oscpBtn = $('#oscp-report');
     if (oscpBtn && window.OSCP) oscpBtn.addEventListener('click', function () {
       OSCP.showForm(function (title, md) {
-        Store.createNote(title, null).then(function (n) {
+        Store.createNote(title, currentFolderId()).then(function (n) {
           n.content = md;
           Store.updateNote(n).then(function () {
             state.notes.push(n);
@@ -1857,12 +2748,40 @@
     document.addEventListener('keydown', function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
+        setSidebarOpen(true);      // 搜尋框在抽屜裡，先拉出來
         searchInput.focus();
         searchInput.select();
       } else if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
         e.preventDefault();
         toggleSidebar();
       }
+    });
+
+    // 複製連結：#note/<id> 或 #book/<id> 變化時跟著切換（瀏覽器上一頁／下一頁也適用）
+    window.addEventListener('hashchange', function () {
+      const nid = noteIdFromHash();
+      if (nid) {
+        if (nid !== state.currentId && state.notes.some(function (n) { return n.id === nid; })) openNote(nid);
+        return;
+      }
+      const bid = bookIdFromHash();
+      if (bid) {
+        if (state.folders.some(function (f) { return f.id === bid; })) openBook(bid);
+        return;
+      }
+      // hash 變回空字串：通常是「上一頁」退回首頁那一層，把畫面切回儀表板
+      if (state.currentId || (bookWrapEl && !bookWrapEl.hidden)) goHome();
+    });
+    // 新增 → 電子書：挑一個資料夾做成電子書；開過就會出現在首頁的「電子書」區
+    const newBook = $('#new-book');
+    if (newBook) newBook.addEventListener('click', pickBookFolder);
+    const graphBtn = $('#graph-open-btn');
+    if (graphBtn) graphBtn.addEventListener('click', function () {
+      if (!window.Graph) return;
+      Graph.open(state.notes, {
+        onOpenNote: function (note) { openNote(note.id); },
+        onOpenTag: function (tag) { browseTag(tag); }
+      });
     });
 
     editorEl.addEventListener('input', function () {
@@ -1905,6 +2824,15 @@
     if (window.EditorHL) EditorHL.attach(editorEl, $('#editor-backdrop'));
     // Markdown editing helpers + autocomplete (auto-pairs, list continuation, suggestions)
     if (window.Editor) Editor.attach(editorEl);
+    // Mind maps are editable directly in the preview; every change writes the
+    // outline straight back into the fenced block, so the markdown in the editor
+    // updates as the map is edited.
+    if (window.MindMap && MindMap.bindPreview) {
+      MindMap.bindPreview(previewEl, {
+        onChange: function (blockIndex, outline) { replaceMindmapBlock(blockIndex, outline); },
+        isReadOnly: function () { return !!(state.current && state.current.perm === 'read'); }
+      });
+    }
     // Interactive table tooling (Notion-like controls + align/tidy)
     if (window.TableTool) TableTool.attach(editorEl, {
       isActive: function () { return state.mode !== 'preview' && !!state.current; }
@@ -1921,7 +2849,7 @@
         if (btn && btn.dataset.fmt) applyFormat(btn.dataset.fmt);
       });
     }
-    // sync scroll between editor & preview in split mode (bidirectional, proportional)
+    // sync scroll between editor & preview in split mode (bidirectional, heading-anchored)
     let scrollSyncing = false;
     function linkScroll(src, dst) {
       src.addEventListener('scroll', function () {
@@ -1931,7 +2859,7 @@
         const sMax = src.scrollHeight - src.clientHeight;
         const dMax = dst.scrollHeight - dst.clientHeight;
         if (sMax <= 0 || dMax <= 0) return;
-        const target = Math.round((src.scrollTop / sMax) * dMax);
+        const target = Math.round(Math.max(0, Math.min(dMax, mapScrollTop(src === editorEl, src.scrollTop))));
         if (Math.abs(dst.scrollTop - target) < 1) return;   // 已對齊就別再設，免得卡住旗標
         scrollSyncing = true;
         dst.scrollTop = target;
@@ -1940,6 +2868,16 @@
     if (previewScrollEl) {
       linkScroll(editorEl, previewScrollEl);   // 左捲動 → 右跟隨
       linkScroll(previewScrollEl, editorEl);   // 右捲動 → 左跟隨
+      // 兩邊任何一側高度變了（打字、圖片載入、拖分隔線、改視窗大小）錨點就重算
+      const dirty = function () { scrollAnchorsDirty = true; };
+      editorEl.addEventListener('input', dirty);
+      window.addEventListener('resize', dirty);
+      if (window.ResizeObserver) {
+        const ro = new ResizeObserver(dirty);
+        ro.observe(previewEl);
+        ro.observe(previewScrollEl);
+        ro.observe(editorEl);
+      }
     }
     // scroll-spy: highlight the current heading in the TOC
     if (previewScrollEl) previewScrollEl.addEventListener('scroll', updateTocActive);
@@ -1949,20 +2887,58 @@
     // Copy button on code blocks
     previewEl.addEventListener('click', function (e) {
       if (!e.target.closest) return;
+      // 待辦清單：預覽裡的勾選框直接改寫原始 markdown（Notion 式）
+      const task = e.target.closest('.task-check');
+      if (task) {
+        if (state.current && state.current.perm === 'read') { e.preventDefault(); return; }
+        toggleTask(Number(task.getAttribute('data-task')), task.checked);
+        return;
+      }
+      const mmBtn = e.target.closest('.mm-edit-btn');
+      if (mmBtn) { e.preventDefault(); openMindMapBlock(mmBtn.closest('.mindmap-block')); return; }
       const link = e.target.closest('.note-link');
       if (link) { e.preventDefault(); handleNoteLink(link); return; }
       const tag = e.target.closest('.hashtag');
       if (tag) { e.preventDefault(); browseTag(tag.getAttribute('data-tag')); return; }
       const anno = e.target.closest('.img-annotate');
       if (anno) { e.preventDefault(); openAnnotator(anno.getAttribute('data-annotate')); return; }
+      // 內文 [toc] 的展開鈕：預設只列到 ##，點了才顯示底下的 ###
+      const tocToggle = e.target.closest('.md-toc-toggle');
+      if (tocToggle) {
+        e.preventDefault();
+        const key = tocToggle.getAttribute('data-toc');
+        const li = tocToggle.closest('li');
+        const open = li.classList.toggle('open');
+        if (open) tocOpen.add(key); else tocOpen.delete(key);
+        return;
+      }
+      // Inline [toc] entries: scroll the preview pane instead of changing the URL hash.
+      const tocLink = e.target.closest('.md-toc a[href^="#"]');
+      if (tocLink) {
+        e.preventDefault();
+        const id = decodeURIComponent(tocLink.getAttribute('href').slice(1));
+        const target = id && previewEl.querySelector('[id="' + id.replace(/"/g, '\\"') + '"]');
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
       const btn = e.target.closest('.code-copy');
       if (!btn) return;
       const block = btn.closest('.code-block');
-      const codeEl = block && block.querySelector('pre code');
-      if (codeEl) copyText(codeEl.textContent, btn);
+      if (!block) return;
+      // Numbered blocks hold one <code> per <li> (see markdown.js) instead of
+      // a single blob, so their lines have to be rejoined for copying.
+      const lines = block.querySelectorAll('.code-lines > li');
+      const text = lines.length
+        ? Array.prototype.map.call(lines, function (li) { return li.textContent; }).join('\n')
+        : (block.querySelector('pre code') || {}).textContent;
+      if (text != null) copyText(text, btn);
     });
 
     titleEl.addEventListener('input', scheduleSave);
+    titleEl.addEventListener('input', fitNoteTitle);
+    if (notePathEl) notePathEl.addEventListener('click', function () {
+      if (state.current && state.current.folderId) goToFolder(state.current.folderId);
+    });
 
     // import
     $('#import-btn').addEventListener('click', function () { $('#import-input').click(); });
@@ -1988,7 +2964,7 @@
   }
 
   // Shared with other modules (admin.js reuses the confirm dialog).
-  window.App = { confirm: showConfirm, reload: loadData };
+  window.App = { confirm: showConfirm, prompt: showPrompt, toast: toast, reload: loadData };
 
   // Go
   init();

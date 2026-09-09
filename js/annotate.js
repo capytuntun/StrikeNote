@@ -15,11 +15,11 @@
   const MIN_DRAG = 4;          // ignore sub-pixel jitter as a drag
 
   const TOOLS = [
-    { id: 'arrow',    label: '箭頭',   icon: '↗' },
-    { id: 'rect',     label: '方框',   icon: '▭' },
+    { id: 'arrow',    label: '箭頭',   icon: 'arrow-up-right' },
+    { id: 'rect',     label: '方框',   icon: 'square' },
     { id: 'text',     label: '文字',   icon: 'T' },
-    { id: 'mosaic',   label: '馬賽克', icon: '▩' },
-    { id: 'blackout', label: '塗黑',   icon: '■' }
+    { id: 'mosaic',   label: '馬賽克', icon: 'grid' },
+    { id: 'blackout', label: '塗黑',   icon: 'square-fill' }
   ];
 
   function el(tag, cls, text) {
@@ -187,7 +187,9 @@
 
     // ---- header ----
     const head = el('div', 'anno-head');
-    head.appendChild(el('div', 'modal-title', '✎ 圖片標註'));
+    const ttl = el('div', 'modal-title');
+    ttl.innerHTML = (global.Icons ? Icons.svg('pencil') : '') + ' 圖片標註';
+    head.appendChild(ttl);
     const dims = el('div', 'anno-dims', W + ' × ' + H);
     head.appendChild(dims);
     modal.appendChild(head);
@@ -197,7 +199,8 @@
     const toolWrap = el('div', 'anno-group');
     const toolBtns = {};
     TOOLS.forEach(function (t) {
-      const b = el('button', 'anno-tool', t.icon + ' ' + t.label);
+      const b = el('button', 'anno-tool');
+      b.innerHTML = (global.Icons ? Icons.svg(t.icon) : '') + '<span>' + t.label + '</span>';
       b.type = 'button';
       b.title = t.label;
       b.addEventListener('click', function () { setTool(t.id); });
@@ -242,9 +245,12 @@
     bar.appendChild(widthWrap);
 
     const histWrap = el('div', 'anno-group');
-    const undoBtn = el('button', 'anno-tool', '↶ 復原');
-    const redoBtn = el('button', 'anno-tool', '↷ 重做');
-    const clearBtn = el('button', 'anno-tool', '✕ 全部清除');
+    const undoBtn = el('button', 'anno-tool');
+    const redoBtn = el('button', 'anno-tool');
+    const clearBtn = el('button', 'anno-tool');
+    undoBtn.innerHTML = (global.Icons ? Icons.svg('undo') : '') + '<span>復原</span>';
+    redoBtn.innerHTML = (global.Icons ? Icons.svg('redo') : '') + '<span>重做</span>';
+    clearBtn.innerHTML = (global.Icons ? Icons.svg('x') : '') + '<span>全部清除</span>';
     [undoBtn, redoBtn, clearBtn].forEach(function (b) { b.type = 'button'; histWrap.appendChild(b); });
     bar.appendChild(histWrap);
     modal.appendChild(bar);

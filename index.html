@@ -6,53 +6,74 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>報告筆記系統</title>
-  <link rel="icon" href="favicon.ico">
+  <title>StrikeNote</title>
+  <link rel="icon" href="logo.png" type="image/png">
+  <!-- 內建字體（Inter + Noto Sans TC，皆為可變字體，依 unicode-range 分檔載入）。
+       獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=64">
+  <link rel="stylesheet" href="app.css?v=92">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
   <div id="auth-screen" class="auth-screen" hidden>
-    <form id="auth-form" class="auth-box" autocomplete="on">
-      <div class="auth-logo">報告筆記系統</div>
-      <div id="auth-title" class="auth-title">登入</div>
-      <label class="auth-field">
-        <span>帳號</span>
-        <input id="auth-username" type="text" autocomplete="username" autocapitalize="off" spellcheck="false">
-      </label>
-      <label class="auth-field">
-        <span>密碼</span>
-        <input id="auth-password" type="password" autocomplete="current-password">
-      </label>
-      <label class="auth-field" id="auth-invite-row" hidden>
-        <span>邀請碼</span>
-        <input id="auth-invite" type="text" autocomplete="off" spellcheck="false">
-      </label>
-      <div id="auth-hint" class="auth-hint" hidden>密碼至少 12 個字元。</div>
-      <div id="auth-error" class="auth-error" hidden></div>
-      <button id="auth-submit" type="submit" class="btn btn-primary auth-submit">登入</button>
-      <button id="auth-toggle" type="button" class="link-btn auth-toggle">還沒有帳號？建立一個</button>
-    </form>
+    <div class="auth-box">
+      <!-- 品牌區：跟頂列 logo 同一份 mask 技巧，只是放大、加一塊雙色調底——
+           這是使用者第一眼看到的畫面，值得有它自己的存在感，而不是跟表單同一塊白。 -->
+      <div class="auth-brand">
+        <span class="auth-brand-mark" aria-hidden="true"></span>
+        <div class="auth-brand-name">StrikeNote</div>
+        <div class="auth-brand-tag">滲透測試 · 檢定考試報告系統</div>
+      </div>
+      <form id="auth-form" class="auth-form" autocomplete="on">
+        <div id="auth-title" class="auth-title">登入</div>
+        <label class="auth-field">
+          <span>帳號</span>
+          <!-- 圖示排在 input 後面，讓 CSS 的 input:focus + .auth-field-ic 這種
+               緊鄰選擇器抓得到（它只認「後面那個手足」，順序不能反過來） -->
+          <input id="auth-username" type="text" autocomplete="username" autocapitalize="off" spellcheck="false">
+          <span class="auth-field-ic" data-icon="user" aria-hidden="true"></span>
+        </label>
+        <label class="auth-field">
+          <span>密碼</span>
+          <input id="auth-password" type="password" autocomplete="current-password">
+          <span class="auth-field-ic" data-icon="lock" aria-hidden="true"></span>
+        </label>
+        <label class="auth-field" id="auth-invite-row" hidden>
+          <span>邀請碼</span>
+          <input id="auth-invite" type="text" autocomplete="off" spellcheck="false">
+          <span class="auth-field-ic" data-icon="key" aria-hidden="true"></span>
+        </label>
+        <div id="auth-hint" class="auth-hint" hidden>密碼至少 12 個字元。</div>
+        <div id="auth-error" class="auth-error" hidden></div>
+        <button id="auth-submit" type="submit" class="btn btn-primary auth-submit">登入</button>
+        <button id="auth-toggle" type="button" class="link-btn auth-toggle">還沒有帳號？建立一個</button>
+      </form>
+    </div>
   </div>
 
   <div id="app" hidden>
-    <!-- 收合後浮現在左緣的展開把手 -->
-    <button id="sidebar-reopen" class="sidebar-reopen" title="展開側邊欄 (Ctrl+\)" aria-label="展開側邊欄">»</button>
+    <!-- 左緣把手：滑過去或點一下拉出筆記抽屜 -->
+    <button id="sidebar-reopen" class="sidebar-reopen" title="筆記清單 (Ctrl+\)" aria-label="開啟筆記清單" data-icon="chevron-right"></button>
 
     <!-- 全域頂列：跟筆記工具列同高的 bar，帳號選單在最右邊 -->
     <header id="topbar" class="topbar">
-      <!-- 左側群組寬度＝側邊欄寬度，讓後面的筆記標題正好對齊 md 編輯器 -->
+      <!-- 側邊欄是浮動抽屜（不佔寬度），用這顆鈕或 Ctrl+\ 拉出 -->
       <div class="topbar-left">
-        <button id="sidebar-collapse" class="icon-btn" title="收合/展開側邊欄 (Ctrl+\)">«</button>
-        <span class="logo" title="回到首頁">📓 報告筆記</span>
+        <button id="sidebar-collapse" class="icon-btn" title="筆記清單 (Ctrl+\)" aria-label="開啟筆記清單" data-icon="panel-left"></button>
+        <span class="logo" title="回到首頁"><span class="logo-mark" aria-hidden="true"></span>StrikeNote</span>
       </div>
 
       <!-- 開啟筆記時，標題與編輯按鈕直接顯示在這條 bar 上（display:contents 併入 topbar）-->
       <div id="topbar-note" class="topbar-note">
-        <!-- 若筆記在資料夾裡，標題前顯示資料夾路徑（如 pp\），非可編輯 -->
-        <span id="note-path" class="note-path" title="所在資料夾"></span>
-        <input id="note-title" class="note-title" placeholder="未命名筆記" />
+        <!-- 標題連同資料夾路徑前綴（如 測試資料夾\測試筆記）包成一組，整組絕對定位
+             置中在頂列正中線；輸入框寬度由 app.js 依文字量測，兩者才接得起來 -->
+        <div class="note-title-wrap">
+          <span id="note-path" class="note-path" title="所在資料夾"></span>
+          <input id="note-title" class="note-title" placeholder="未命名筆記" />
+        </div>
+        <!-- 保留標題原本吃掉的彈性空間，讓水豚／檢視模式／版本／分享／PDF 這些按鈕的位置不受影響 -->
+        <div class="note-title-spacer" aria-hidden="true"></div>
         <!-- 彩蛋：打字時會出現一隻正面跳舞的小水豚 -->
         <span id="capybara" class="capybara" aria-hidden="true" title="卡皮巴拉正在為你加油 🎵">
           <svg viewBox="0 0 48 48" width="30" height="30">
@@ -74,55 +95,69 @@
         </span>
         <div id="presence" class="presence" aria-label="在線協作者"></div>
         <div class="mode-switch" role="group" aria-label="檢視模式">
-          <button data-mode="split" class="mode-btn active" title="分割檢視">◫ 分割</button>
-          <button data-mode="edit" class="mode-btn" title="純編輯">✎ 編輯</button>
-          <button data-mode="preview" class="mode-btn" title="純預覽">👁 預覽</button>
+          <button data-mode="split" class="mode-btn active" title="分割檢視" data-icon="columns">分割</button>
+          <button data-mode="edit" class="mode-btn" title="純編輯" data-icon="pen-line">編輯</button>
+          <button data-mode="preview" class="mode-btn" title="純預覽" data-icon="eye">預覽</button>
         </div>
+        <button id="history-btn" class="btn" title="版本紀錄" data-icon="history">版本</button>
         <button id="share-btn" class="btn" title="分享這篇筆記">分享</button>
-        <button id="export-pdf" class="btn btn-primary" title="輸出 PDF">⭳ PDF</button>
+        <button id="export-pdf" class="btn btn-primary" title="輸出 PDF" data-icon="download">PDF</button>
       </div>
 
       <div class="topbar-right">
-        <button id="toggle-theme" class="icon-btn" title="切換深色/淺色">🌓</button>
+        <button id="toggle-theme" class="icon-btn" title="切換深色/淺色"><span class="theme-ic theme-ic-light" data-icon="moon"></span><span class="theme-ic theme-ic-dark" data-icon="sun"></span></button>
         <div class="user-menu">
           <button id="user-btn" class="user-btn" title="帳號選單" aria-haspopup="true" aria-expanded="false">
             <span id="current-user"></span>
-            <span class="user-caret" aria-hidden="true">▾</span>
+            <span class="user-caret" aria-hidden="true" data-icon="chevron-down"></span>
           </button>
           <div id="user-dropdown" class="user-dropdown" role="menu" hidden>
-            <button id="passwd-btn" class="user-menu-item" role="menuitem">🔑 更改密碼</button>
-            <button id="admin-btn" class="user-menu-item" role="menuitem" hidden>👥 帳號管理</button>
+            <button id="passwd-btn" class="user-menu-item" role="menuitem" data-icon="key">更改密碼</button>
+            <button id="admin-btn" class="user-menu-item" role="menuitem" hidden data-icon="users">帳號管理</button>
+            <button id="storage-btn" class="user-menu-item" role="menuitem" hidden data-icon="hard-drive">儲存空間</button>
             <div class="user-menu-sep" role="separator"></div>
-            <button id="logout-btn" class="user-menu-item danger" role="menuitem">⏻ 登出</button>
+            <button id="logout-btn" class="user-menu-item danger" role="menuitem" data-icon="log-out">登出</button>
           </div>
         </div>
       </div>
     </header>
 
     <div id="app-body">
-    <!-- Sidebar -->
+    <!-- Sidebar：浮動抽屜，覆蓋在主區上方而不擠壓它 -->
     <aside id="sidebar">
+      <!-- 「新增」一顆鈕：點開選要新增筆記還是哪一種報告。選項保留原本的 id，
+           app.js 裡各自的 click 處理不用改。 -->
       <div class="sidebar-actions">
-        <button id="new-note" class="btn">＋ 筆記</button>
-        <button id="new-folder" class="btn">＋ 資料夾</button>
+        <div class="new-menu">
+          <button id="new-btn" class="btn btn-primary new-btn" type="button" aria-haspopup="true" aria-expanded="false" data-icon="plus">新增<span class="new-caret" aria-hidden="true" data-icon="chevron-down"></span></button>
+          <div id="new-dropdown" class="new-dropdown" role="menu" hidden>
+            <button id="new-note" class="user-menu-item" role="menuitem" type="button" data-icon="file-plus">筆記</button>
+            <div class="user-menu-sep" role="separator"></div>
+            <button id="oscp-report" class="user-menu-item" role="menuitem" type="button" title="證照考試範本模式" data-icon="award">證照範本</button>
+            <button id="sec-report" class="user-menu-item" role="menuitem" type="button" title="資安院報告模式" data-icon="shield">資安院報告</button>
+            <button id="perf-report" class="user-menu-item" role="menuitem" type="button" title="成效報告模式" data-icon="chart">成效報告</button>
+            <div class="user-menu-sep" role="separator"></div>
+            <button id="new-book" class="user-menu-item" role="menuitem" type="button" title="挑一個資料夾做成電子書；做過的電子書會列在首頁的「電子書」區" data-icon="book-open">電子書</button>
+          </div>
+        </div>
+        <button id="new-folder" class="btn" data-icon="folder-plus">資料夾</button>
       </div>
-      <div class="sidebar-actions sidebar-modes">
-        <button id="oscp-report" class="btn btn-oscp" title="證照考試範本模式">證照範本</button>
-        <button id="sec-report" class="btn btn-oscp" title="資安院報告模式">資安院報告</button>
-        <button id="perf-report" class="btn btn-oscp" title="成效報告模式">成效報告</button>
+      <!-- 工具列：關聯圖（反向連結＋標籤的力導向圖） -->
+      <div class="sidebar-actions sidebar-tools">
+        <button id="graph-open-btn" class="btn" title="用力導向圖看所有筆記的反向連結跟標籤關聯" data-icon="graph">關聯圖</button>
       </div>
       <div class="search-box">
         <input id="search-input" type="text" placeholder="搜尋筆記…（Ctrl+K）"
                autocomplete="off" spellcheck="false" aria-label="搜尋筆記">
-        <button id="search-clear" class="search-clear" title="清除搜尋" hidden>✕</button>
+        <button id="search-clear" class="search-clear" title="清除搜尋" hidden data-icon="x"></button>
       </div>
       <!-- 批次操作列：勾選筆記後出現，可整批移動到資料夾或刪除 -->
       <div id="batch-bar" class="batch-bar" hidden>
         <span class="batch-count"></span>
         <div class="batch-actions">
-          <button id="batch-move" class="batch-btn" type="button" title="移動所選筆記到資料夾">📁 移動</button>
-          <button id="batch-delete" class="batch-btn danger" type="button" title="刪除所選筆記">🗑 刪除</button>
-          <button id="batch-clear" class="batch-btn ghost" type="button" title="取消選取">✕</button>
+          <button id="batch-move" class="batch-btn" type="button" title="移動所選筆記到資料夾" data-icon="folder">移動</button>
+          <button id="batch-delete" class="batch-btn danger" type="button" title="刪除所選筆記" data-icon="trash">刪除</button>
+          <button id="batch-clear" class="batch-btn ghost" type="button" title="取消選取" data-icon="x"></button>
         </div>
       </div>
       <div id="tree" class="tree" data-root="true"></div>
@@ -143,32 +178,31 @@
         <div class="panes" id="panes">
           <section class="pane pane-edit">
             <div class="edit-toolbar" id="edit-toolbar">
-              <button data-fmt="h1" title="標題 1">H1</button>
-              <button data-fmt="h2" title="標題 2">H2</button>
-              <button data-fmt="h3" title="標題 3">H3</button>
+              <button data-fmt="h1" title="標題 1" data-icon="heading-1"></button>
+              <button data-fmt="h2" title="標題 2" data-icon="heading-2"></button>
+              <button data-fmt="h3" title="標題 3" data-icon="heading-3"></button>
               <span class="tb-sep"></span>
-              <button data-fmt="bold" title="粗體"><b>B</b></button>
-              <button data-fmt="italic" title="斜體"><i>I</i></button>
-              <button data-fmt="strike" title="刪除線"><s>S</s></button>
+              <button data-fmt="bold" title="粗體" data-icon="bold"></button>
+              <button data-fmt="italic" title="斜體" data-icon="italic"></button>
+              <button data-fmt="strike" title="刪除線" data-icon="strikethrough"></button>
               <span class="tb-sep"></span>
-              <button data-fmt="code" title="行內程式碼">&lt;/&gt;</button>
-              <button data-fmt="codeblock" title="程式碼區塊">▤ Code</button>
-              <button data-fmt="callout" title="Callout 提示框">💬</button>
-              <button data-fmt="quote" title="引言">❝</button>
+              <button data-fmt="codeblock" title="程式碼區塊" data-icon="square-code">Code</button>
+              <button data-fmt="code" title="行內程式碼" data-icon="code"></button>
+              <button data-fmt="callout" title="Callout 提示框" data-icon="message-square"></button>
+              <button data-fmt="quote" title="引言" data-icon="quote"></button>
               <span class="tb-sep"></span>
-              <button data-fmt="ul" title="項目清單">•</button>
-              <button data-fmt="ol" title="編號清單">1.</button>
-              <button data-fmt="task" title="待辦清單">☑</button>
+              <button data-fmt="ul" title="項目清單" data-icon="list"></button>
+              <button data-fmt="ol" title="編號清單" data-icon="list-ordered"></button>
+              <button data-fmt="task" title="待辦清單" data-icon="list-checks"></button>
               <span class="tb-sep"></span>
-              <button data-fmt="link" title="連結">🔗</button>
-              <button data-fmt="notelink" title="連結到其他筆記（也可輸入 [[ ）">⧉ 筆記</button>
-              <button data-fmt="image" title="圖片">🖼</button>
-              <button data-fmt="pdf" title="嵌入 PDF">🗎 PDF</button>
-              <button data-fmt="table" title="表格">▦</button>
-              <button data-fmt="hr" title="分隔線">―</button>
+              <button data-fmt="link" title="連結" data-icon="link"></button>
+              <button data-fmt="notelink" title="連結到其他筆記（也可輸入 [[ ）" data-icon="files">筆記</button>
+              <button data-fmt="image" title="圖片" data-icon="image"></button>
+              <button data-fmt="pdf" title="嵌入 PDF" data-icon="file-text">PDF</button>
+              <button data-fmt="table" title="表格" data-icon="table"></button>
+              <button data-fmt="hr" title="分隔線" data-icon="minus"></button>
               <span class="tb-sep"></span>
-              <button data-fmt="machine" title="新增機器區塊（也可輸入 /machine）">🖥 機器</button>
-              <button data-fmt="adset" title="新增 AD Set 區塊（也可輸入 /adset）">🗂 AD</button>
+              <button data-fmt="template" title="插入範本（機器、AD Set，或你自己新增的）" data-icon="template">範本</button>
             </div>
             <div class="editor-area" id="editor-area">
             <div class="editor-backdrop" id="editor-backdrop" aria-hidden="true"></div>
@@ -184,7 +218,7 @@
           </section>
           <div class="divider" id="divider"></div>
           <section class="pane pane-preview">
-            <button id="toc-show" class="toc-show" title="顯示目錄">☰ 目錄</button>
+            <button id="toc-show" class="toc-show" title="顯示目錄" data-icon="list">目錄</button>
             <nav id="preview-toc" class="preview-toc" aria-label="目錄"></nav>
             <div class="preview-scroll" id="preview-scroll">
               <article id="preview" class="markdown-body"></article>
@@ -202,20 +236,19 @@
       <!-- 資安院報告模式：整個右側是步驟式編輯器，取代 md 編輯器 -->
       <div id="sec-wrap" class="sec-wrap" hidden>
         <div class="toolbar">
-          <button class="home-btn" type="button" title="回到首頁">📓 報告筆記</button>
           <input id="sec-title" class="note-title" placeholder="資安院報告標題" />
           <div class="toolbar-right">
-            <span class="sec-badge">🛡 資安院報告模式</span>
+            <span class="sec-badge" data-icon="shield">資安院報告模式</span>
             <label class="sec-date-label">日期
               <input id="sec-date" type="date" class="sec-date">
             </label>
-            <button id="sec-export-pdf" class="btn btn-primary" title="輸出 PDF">⭳ PDF</button>
+            <button id="sec-export-pdf" class="btn btn-primary" title="輸出 PDF" data-icon="download">PDF</button>
           </div>
         </div>
         <div class="sec-editor-scroll" id="sec-editor-scroll">
           <div id="sec-info" class="sec-info"></div>
           <div id="sec-steps" class="sec-steps-live"></div>
-          <button id="sec-add-step" class="sec-add-live" type="button">＋ 新增文字描述框</button>
+          <button id="sec-add-step" class="sec-add-live" type="button" data-icon="plus">新增文字描述框</button>
         </div>
         <div class="statusbar">
           <span id="sec-status-info"></span>
@@ -226,21 +259,20 @@
       <!-- 成效報告模式：表格式，會即時統計風險分布與修復率 -->
       <div id="perf-wrap" class="sec-wrap perf-wrap" hidden>
         <div class="toolbar">
-          <button class="home-btn" type="button" title="回到首頁">📓 報告筆記</button>
           <input id="perf-title" class="note-title" placeholder="成效報告標題" />
           <div class="toolbar-right">
-            <span class="sec-badge perf-badge">📈 成效報告模式</span>
+            <span class="sec-badge perf-badge" data-icon="chart">成效報告模式</span>
             <label class="sec-date-label">日期
               <input id="perf-date" type="date" class="sec-date">
             </label>
-            <button id="perf-export-pdf" class="btn btn-primary" title="輸出 PDF">⭳ PDF</button>
+            <button id="perf-export-pdf" class="btn btn-primary" title="輸出 PDF" data-icon="download">PDF</button>
           </div>
         </div>
         <div class="sec-editor-scroll" id="perf-editor-scroll">
           <div id="perf-info" class="sec-info"></div>
           <div id="perf-stats" class="perf-stats"></div>
           <div id="perf-table-wrap" class="perf-table-wrap"></div>
-          <button id="perf-add-row" class="sec-add-live" type="button">＋ 新增弱點</button>
+          <button id="perf-add-row" class="sec-add-live" type="button" data-icon="plus">新增弱點</button>
           <div id="perf-summary-wrap" class="perf-summary-wrap"></div>
         </div>
         <div class="statusbar">
@@ -248,6 +280,8 @@
           <span id="perf-status-save"></span>
         </div>
       </div>
+      <!-- 電子書模式：把一個資料夾當成一本書來閱讀（GitBook 式三欄），可出版成單檔 HTML -->
+      <div id="book-wrap" class="book-wrap" hidden></div>
     </main>
     </div><!-- /#app-body -->
   </div>
@@ -264,23 +298,29 @@
   <script src="vendor/hljs-dos.min.js"></script>
 
   <!-- App -->
-  <script src="js/merge.js?v=1"></script>
-  <script src="js/store.js?v=43"></script>
-  <script src="js/auth.js?v=42"></script>
+  <script src="js/icons.js?v=5"></script>
+  <script src="js/merge.js?v=2"></script>
+  <script src="js/mindmap.js?v=3"></script>
+  <script src="js/graph.js?v=3"></script>
+  <script src="js/store.js?v=47"></script>
+  <script src="js/auth.js?v=46"></script>
   <script src="js/migrate.js?v=41"></script>
-  <script src="js/admin.js?v=41"></script>
+  <script src="js/admin.js?v=48"></script>
   <script src="js/search.js?v=41"></script>
-  <script src="js/markdown.js?v=43"></script>
-  <script src="js/editor.js?v=41"></script>
-  <script src="js/edithl.js?v=42"></script>
-  <script src="js/table.js?v=41"></script>
-  <script src="js/oscp.js?v=41"></script>
+  <script src="js/markdown.js?v=51"></script>
+  <script src="js/editor.js?v=47"></script>
+  <script src="js/templates.js?v=1"></script>
+  <script src="js/edithl.js?v=44"></script>
+  <script src="js/table.js?v=42"></script>
+  <script src="js/oscp.js?v=42"></script>
   <script src="js/secreport.js?v=41"></script>
-  <script src="js/seceditor.js?v=41"></script>
-  <script src="js/perfreport.js?v=41"></script>
-  <script src="js/dashboard.js?v=48"></script>
-  <script src="js/annotate.js?v=41"></script>
-  <script src="js/pdf.js?v=41"></script>
-  <script src="js/app.js?v=53"></script>
+  <script src="js/seceditor.js?v=43"></script>
+  <script src="js/perfreport.js?v=43"></script>
+  <script src="js/dashboard.js?v=59"></script>
+  <script src="js/annotate.js?v=42"></script>
+  <script src="js/pdf.js?v=48"></script>
+  <script src="js/book.js?v=4"></script>
+  <script src="js/versions.js?v=2"></script>
+  <script src="js/app.js?v=71"></script>
 </body>
 </html>

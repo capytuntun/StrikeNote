@@ -8,6 +8,8 @@
 
   const CALLOUTS = ['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION',
     'RISK:CRITICAL', 'RISK:HIGH', 'RISK:MEDIUM', 'RISK:LOW', 'RISK:INFO'];
+  // CodiMD/HackMD `:::` container names (offered after typing ':::').
+  const CONTAINERS = ['info', 'success', 'warning', 'danger', 'note', 'tip', 'important', 'caution'];
   const LANGS = ['javascript', 'js', 'typescript', 'ts', 'jsx', 'tsx', 'python', 'java', 'c',
     'cpp', 'csharp', 'go', 'rust', 'ruby', 'php', 'kotlin', 'swift', 'dart', 'scala', 'r',
     'html', 'xml', 'css', 'scss', 'less', 'json', 'yaml', 'toml', 'ini', 'markdown', 'sql',
@@ -77,9 +79,16 @@
   let noteProvider = null;
   function setNoteProvider(fn) { noteProvider = fn; }
 
+  // The user's own templates (templates.js) join the built-in /commands, so a
+  // template called "Web App" is also reachable as /webapp.
+  let extraSnippets = [];
+  function setExtraSnippets(list) { extraSnippets = Array.isArray(list) ? list : []; }
+  function allSnippets() { return SNIPPETS.concat(extraSnippets); }
+
   const SNIPPETS = [
     { cmd: 'machine', hint: '新增機器區塊', text: MACHINE_SNIPPET },
     { cmd: 'wiki', hint: '連結到其他筆記', text: '[[$CURSOR]]' },
+    { cmd: 'toc', hint: '目錄（依 # 標題自動產生）', text: '[toc]\n\n$CURSOR' },
     { cmd: 'adset', hint: '新增 AD Set 區塊', text: ADSET_SNIPPET },
     { cmd: 'risk', hint: '弱點（會列入總覽表）', text: '> [!RISK:HIGH] $CURSOR\n> ' },
     { cmd: 'note', hint: 'Note callout', text: '> [!NOTE]\n> $CURSOR' },
@@ -87,10 +96,18 @@
     { cmd: 'important', hint: 'Important callout', text: '> [!IMPORTANT]\n> $CURSOR' },
     { cmd: 'warning', hint: 'Warning callout', text: '> [!WARNING]\n> $CURSOR' },
     { cmd: 'caution', hint: 'Caution callout', text: '> [!CAUTION]\n> $CURSOR' },
-    { cmd: 'code', hint: '程式碼區塊', text: '```$CURSOR\n\n```' },
-    { cmd: 'codeln', hint: '程式碼（含行號）', text: '```$CURSOR=\n\n```' },
+    { cmd: 'info', hint: ':::info 容器（＝ [!NOTE]）', text: ':::info\n$CURSOR\n:::' },
+    { cmd: 'success', hint: ':::success 容器（＝ [!TIP]）', text: ':::success\n$CURSOR\n:::' },
+    { cmd: 'danger', hint: ':::danger 容器（＝ [!CAUTION]）', text: ':::danger\n$CURSOR\n:::' },
+    { cmd: 'code', hint: '程式碼區塊（= 顯示行號，游標處填語言）', text: '```$CURSOR=\n\n```' },
     { cmd: 'table', hint: '表格', text: '| 欄位 A | 欄位 B |\n| --- | --- |\n| $CURSOR |  |' },
-    { cmd: 'todo', hint: '待辦清單', text: '- [ ] $CURSOR' },
+    { cmd: 'todo', hint: '待辦清單（預覽可直接勾選）', text: '- [ ] $CURSOR' },
+    // A wiki link alone on its own line renders as a sub-page card, so /page is
+    // just that with the title pre-selected — type over it and click the card to
+    // create the page. `pick` selects the placeholder instead of leaving a caret.
+    { cmd: 'page', hint: '子頁面（自成一行的筆記連結）', text: '\n[[子頁面標題]]\n', pick: '子頁面標題' },
+    { cmd: 'mindmap', hint: '心智圖（縮排大綱）',
+      text: '```mindmap\n中央主題\n  分支一\n  分支二\n```\n', pick: '中央主題' },
     { cmd: 'quote', hint: '引用', text: '> $CURSOR' },
     { cmd: 'hr', hint: '分隔線', text: '\n---\n\n$CURSOR' },
     { cmd: 'h1', hint: '標題 1', text: '# $CURSOR' },
@@ -136,11 +153,9 @@
         if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); return; }
         if (e.key === 'Escape') { e.preventDefault(); closePopup(); return; }
         if (e.key === 'Tab') { e.preventDefault(); accept(items[index]); return; }
-        if (e.key === 'Enter') {
-          // For the bare-'>' popup, Enter continues the quote normally (pick with Tab/click).
-          if (ctx && ctx.mode === 'quote') { closePopup(); }
-          else { e.preventDefault(); accept(items[index]); return; }
-        }
+        // Enter selects the highlighted item in every popup, including the
+        // bare-'>' callout menu and the ':::' container menu.
+        if (e.key === 'Enter') { e.preventDefault(); accept(items[index]); return; }
       }
 
       const s = ta.selectionStart, en = ta.selectionEnd, v = ta.value;
@@ -281,6 +296,10 @@
       if ((m = line.match(/\[!([a-zA-Z:]*)$/))) {
         return { type: 'callout', mode: 'bracket', query: m[1].toUpperCase(), from: caret - m[1].length, to: caret };
       }
+      // ':::' container fence — a bare ':::' already opens the menu (empty query)
+      if ((m = line.match(/^:::[ \t]*([a-zA-Z]*)$/))) {
+        return { type: 'container', query: m[1].toLowerCase(), from: lineStart, to: caret };
+      }
       if ((m = line.match(/(?:^|\s)\/([a-zA-Z0-9]*)$/))) {
         return { type: 'slash', query: m[1].toLowerCase(), from: caret - m[1].length - 1, to: caret };
       }
@@ -296,8 +315,12 @@
         return CALLOUTS.filter(function (l) { return l.indexOf(c.query) === 0; })
           .map(function (l) { return { label: l, hint: 'callout', kind: 'callout' }; });
       }
+      if (c.type === 'container') {
+        return CONTAINERS.filter(function (l) { return l.indexOf(c.query) === 0; })
+          .map(function (l) { return { label: l, hint: '容器 :::', kind: 'container' }; });
+      }
       if (c.type === 'slash') {
-        return SNIPPETS.filter(function (sn) { return sn.cmd.indexOf(c.query) === 0; })
+        return allSnippets().filter(function (sn) { return sn.cmd.indexOf(c.query) === 0; })
           .slice(0, 8).map(function (sn) { return { label: '/' + sn.cmd, hint: sn.hint, kind: 'slash', snip: sn }; });
       }
       if (c.type === 'note') {
@@ -312,9 +335,11 @@
     function accept(item) {
       if (!item || !ctx) { closePopup(); return; }
       if (item.kind === 'lang') {
+        // ```bash= — the '=' turns on line numbers, which every new block gets by default.
         const from = ctx.from, to = ctx.to;
-        const text = item.label + '\n\n```';
-        replaceRange(from, to, text, from + item.label.length + 1, from + item.label.length + 1);
+        const text = item.label + '=\n\n```';
+        const caret = from + item.label.length + 2;
+        replaceRange(from, to, text, caret, caret);
       } else if (item.kind === 'callout') {
         if (ctx.mode === 'quote') {
           // Replace the whole '> ' line with a complete callout header + body line.
@@ -334,10 +359,26 @@
         if (ta.value.slice(to, to + 2) === ']]') to += 2;
         else if (ta.value[to] === ']') to += 1;
         replaceRange(ctx.from, to, item.label + ']]');
+      } else if (item.kind === 'container') {
+        // ':::info' + blank body line + closing ':::', caret on the blank line.
+        const text = ':::' + item.label + '\n\n:::';
+        const caret = ctx.from + 3 + item.label.length + 1;
+        replaceRange(ctx.from, ctx.to, text, caret, caret);
       } else if (item.kind === 'slash') {
         const t = item.snip.text;
         const idx = t.indexOf('$CURSOR');
         const clean = t.replace('$CURSOR', '');
+        // `pick` selects a placeholder word instead of leaving a bare caret, so
+        // the next thing typed replaces it. $CURSOR still wins if both are set.
+        const pick = item.snip.pick;
+        if (idx < 0 && pick) {
+          const at = clean.indexOf(pick);
+          if (at >= 0) {
+            replaceRange(ctx.from, ctx.to, clean, ctx.from + at, ctx.from + at + pick.length);
+            closePopup();
+            return;
+          }
+        }
         const cur = ctx.from + (idx < 0 ? clean.length : idx);
         replaceRange(ctx.from, ctx.to, clean, cur, cur);
       }
@@ -365,7 +406,15 @@
       items.forEach(function (it, i) {
         const el = document.createElement('div');
         el.className = 'ac-item' + (i === index ? ' active' : '');
-        el.innerHTML = '<span>' + it.label + '</span><span class="hint">' + it.hint + '</span>';
+        // Built with textContent, not innerHTML: a label here can be a note
+        // title or a user template name, so it is untrusted text, not markup.
+        const name = document.createElement('span');
+        name.textContent = it.label;
+        const hint = document.createElement('span');
+        hint.className = 'hint';
+        hint.textContent = it.hint || '';
+        el.appendChild(name);
+        el.appendChild(hint);
         el.addEventListener('mousedown', function (e) { e.preventDefault(); accept(it); });
         el.addEventListener('mousemove', function () { index = i; highlight(); });
         popup.appendChild(el);
@@ -434,6 +483,7 @@
   global.Editor = {
     attach: attach,
     setNoteProvider: setNoteProvider,
+    setExtraSnippets: setExtraSnippets,
     snippets: { machine: MACHINE_SNIPPET, adset: ADSET_SNIPPET }
   };
 })(window);

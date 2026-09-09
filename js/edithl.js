@@ -31,6 +31,8 @@
       if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; return '<span class="e-code">' + escapeHtml(line) + '</span>'; }
       if (inFence) return '<span class="e-code">' + escapeHtml(line) + '</span>';
       if (/^\s{0,3}#{1,6}\s/.test(line)) return '<span class="e-head">' + escapeHtml(line) + '</span>';
+      if (/^\s{0,3}\[toc\]\s*$/i.test(line)) return '<span class="e-toc">' + escapeHtml(line) + '</span>';
+      if (/^\s{0,3}:::/.test(line)) return '<span class="e-container">' + escapeHtml(line) + '</span>';
       if (/^\s{0,3}>/.test(line)) return '<span class="e-quote">' + escapeHtml(line) + '</span>';
       if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) return '<span class="e-hr">' + escapeHtml(line) + '</span>';
       return inlineHl(line);

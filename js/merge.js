@@ -3,6 +3,11 @@
  * Mirrors server/merge.js exactly so the client resolves a conflict the same way
  * the server does and the two always converge. See that file for the rationale.
  *   window.Merge.merge3(base, mine, theirs) -> merged string ("mine" wins ties).
+ *
+ * merge3 and its LCS helpers must stay identical to server/merge.js. diffLines
+ * and diffStat at the bottom are browser-only additions for the version-history
+ * viewer — they read the same LCS but have no server counterpart, so leave them
+ * out when comparing the two files.
  */
 (function (global) {
   'use strict';
@@ -79,5 +84,41 @@
     return out.join('\n');
   }
 
-  global.Merge = { merge3: merge3 };
+  // Line diff for the version-history viewer. Built on the same LCS the merge
+  // uses, so "what changed" on screen is decided exactly the way a conflict is —
+  // there is no second, subtly different notion of a changed line in this app.
+  //
+  // Returns rows of { type: 'ctx' | 'del' | 'add', text, a, b } where `a`/`b` are
+  // 1-based line numbers in the old/new text (null on the side that lacks the
+  // line). Deletions are emitted before the additions that replace them.
+  function diffLines(oldText, newText) {
+    const a = String(oldText == null ? '' : oldText).split('\n');
+    const b = String(newText == null ? '' : newText).split('\n');
+    const pairs = lcsPairs(a, b);
+    pairs.push([a.length, b.length]);
+    const rows = [];
+    let ai = 0, bi = 0;
+    for (let k = 0; k < pairs.length; k++) {
+      const pa = pairs[k][0], pb = pairs[k][1];
+      while (ai < pa) { rows.push({ type: 'del', text: a[ai], a: ai + 1, b: null }); ai++; }
+      while (bi < pb) { rows.push({ type: 'add', text: b[bi], a: null, b: bi + 1 }); bi++; }
+      if (pa < a.length && pb < b.length) {
+        rows.push({ type: 'ctx', text: a[pa], a: pa + 1, b: pb + 1 });
+        ai = pa + 1; bi = pb + 1;
+      }
+    }
+    return rows;
+  }
+
+  // Counts for a one-line "+12 −3" summary without rendering the whole diff.
+  function diffStat(oldText, newText) {
+    let added = 0, removed = 0;
+    diffLines(oldText, newText).forEach(function (r) {
+      if (r.type === 'add') added++;
+      else if (r.type === 'del') removed++;
+    });
+    return { added: added, removed: removed };
+  }
+
+  global.Merge = { merge3: merge3, diffLines: diffLines, diffStat: diffStat };
 })(window);

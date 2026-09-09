@@ -218,27 +218,29 @@
     function buildBar() {
       bar = document.createElement('div');
       bar.className = 'table-tb';
+      // [op, icon, label, tooltip] — label may be '' for icon-only buttons
       const defs = [
-        ['rowAbove', '⤒列', '上方插入列'],
-        ['rowBelow', '⤓列', '下方插入列'],
-        ['rowDel', '✕列', '刪除此列'],
+        ['rowAbove', 'arrow-up-to-line', '列', '上方插入列'],
+        ['rowBelow', 'arrow-down-to-line', '列', '下方插入列'],
+        ['rowDel', 'x', '列', '刪除此列'],
         ['sep'],
-        ['colLeft', '⇤欄', '左方插入欄'],
-        ['colRight', '欄⇥', '右方插入欄'],
-        ['colDel', '✕欄', '刪除此欄'],
+        ['colLeft', 'arrow-left-to-line', '欄', '左方插入欄'],
+        ['colRight', 'arrow-right-to-line', '欄', '右方插入欄'],
+        ['colDel', 'x', '欄', '刪除此欄'],
         ['sep'],
-        ['alignLeft', '⯇', '此欄靠左'],
-        ['alignCenter', '≡', '此欄置中'],
-        ['alignRight', '⯈', '此欄靠右'],
+        ['alignLeft', 'align-left', '', '此欄靠左'],
+        ['alignCenter', 'align-center', '', '此欄置中'],
+        ['alignRight', 'align-right', '', '此欄靠右'],
         ['sep'],
-        ['tidy', '✨ 整理對齊', '整理欄寬與對齊'],
-        ['del', '🗑', '刪除整個表格']
+        ['tidy', 'wand', '整理對齊', '整理欄寬與對齊'],
+        ['del', 'trash', '', '刪除整個表格']
       ];
+      const ic = function (name) { return (global.Icons && Icons.svg) ? Icons.svg(name) : ''; };
       defs.forEach(function (d) {
         if (d[0] === 'sep') { const s = document.createElement('span'); s.className = 'tb-sep'; bar.appendChild(s); return; }
         const btn = document.createElement('button');
-        btn.textContent = d[1];
-        btn.title = d[2];
+        btn.innerHTML = ic(d[1]) + (d[2] ? '<span>' + d[2] + '</span>' : '');
+        btn.title = d[3];
         btn.dataset.op = d[0];
         bar.appendChild(btn);
       });

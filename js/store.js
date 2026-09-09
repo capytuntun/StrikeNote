@@ -97,8 +97,9 @@
         .then(r => r.folder);
     },
     updateFolder: function (folder) {
-      return req('PUT', '/api/folders/' + folder.id, { name: folder.name, parentId: folder.parentId || null })
-        .then(r => r.folder);
+      const body = { name: folder.name, parentId: folder.parentId || null };
+      if (folder.isBook !== undefined) body.isBook = !!folder.isBook;
+      return req('PUT', '/api/folders/' + folder.id, body).then(r => r.folder);
     },
     deleteFolder: function (id) { return req('DELETE', '/api/folders/' + id); },
 
@@ -123,6 +124,62 @@
     },
     deleteNote: function (id) { return req('DELETE', '/api/notes/' + id); },
 
+    // Version history. The list never carries note bodies — only sizes — so
+    // opening the panel on a long note stays cheap.
+    getVersions: function (noteId) { return req('GET', '/api/notes/' + noteId + '/versions'); },
+    getVersion: function (noteId, versionId) {
+      return req('GET', '/api/notes/' + noteId + '/versions/' + versionId);
+    },
+    createVersion: function (noteId, label) {
+      return req('POST', '/api/notes/' + noteId + '/versions', { label: label || '' }).then(r => r.version);
+    },
+    renameVersion: function (noteId, versionId, label) {
+      return req('PUT', '/api/notes/' + noteId + '/versions/' + versionId, { label: label || '' });
+    },
+    deleteVersion: function (noteId, versionId) {
+      return req('DELETE', '/api/notes/' + noteId + '/versions/' + versionId);
+    },
+    restoreVersion: function (noteId, versionId) {
+      return req('POST', '/api/notes/' + noteId + '/versions/' + versionId + '/restore', {})
+        .then(r => r.note);
+    },
+
+    // E-book versions. `chapters` is the ordered list of note ids as js/book.js
+    // computed it — the server pins each one but does not re-derive the order.
+    getBookVersions: function (folderId) {
+      return req('GET', '/api/books/' + folderId + '/versions').then(r => r.versions);
+    },
+    createBookVersion: function (folderId, title, label, chapterIds) {
+      return req('POST', '/api/books/' + folderId + '/versions',
+        { title: title, label: label || '', chapters: chapterIds }).then(r => r.version);
+    },
+    getBookVersion: function (versionId) {
+      return req('GET', '/api/book-versions/' + versionId).then(r => r.version);
+    },
+    getBookVersionChapter: function (versionId, noteId) {
+      return req('GET', '/api/book-versions/' + versionId + '/chapters/' + noteId).then(r => r.chapter);
+    },
+    restoreBookVersion: function (versionId) {
+      return req('POST', '/api/book-versions/' + versionId + '/restore', {});
+    },
+    deleteBookVersion: function (versionId) {
+      return req('DELETE', '/api/book-versions/' + versionId);
+    },
+
+    // Public e-book links. `html` is the packed, self-contained book; the server
+    // stores it verbatim and serves that exact file at /s/<token>, so a link
+    // never exposes an API or anything outside the book it was made from.
+    getBookLinks: function (folderId) {
+      return req('GET', '/api/books/' + folderId + '/links').then(r => r.links);
+    },
+    createBookLink: function (folderId, payload) {
+      return req('POST', '/api/books/' + folderId + '/links', payload).then(r => r.link);
+    },
+    updateBookLink: function (token, payload) {
+      return req('PUT', '/api/book-links/' + token, payload).then(r => r.link);
+    },
+    deleteBookLink: function (token) { return req('DELETE', '/api/book-links/' + token); },
+
     // Sharing
     getShares: function (noteId) { return req('GET', '/api/notes/' + noteId + '/shares').then(r => r.shares); },
     addShare: function (noteId, username, perm) {
@@ -130,6 +187,10 @@
     },
     removeShare: function (noteId, username) {
       return req('DELETE', '/api/notes/' + noteId + '/shares/' + encodeURIComponent(username));
+    },
+    // General access (owner only): 'restricted' | 'site', with 'read' | 'edit' for site
+    setAccess: function (noteId, mode, perm) {
+      return req('PUT', '/api/notes/' + noteId + '/access', { mode: mode, perm: perm });
     },
 
     // Live collaboration: subscribe to a note's Server-Sent-Events stream.
@@ -202,6 +263,7 @@
       return req('POST', '/api/admin/users/' + id + '/role', { role: role });
     },
     adminDeleteUser: function (id) { return req('DELETE', '/api/admin/users/' + id); },
+    adminStorage: function () { return req('GET', '/api/admin/storage'); },
     register: function (username, password, invite) {
       return req('POST', '/api/register', { username: username, password: password, invite: invite });
     },

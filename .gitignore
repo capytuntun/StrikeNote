@@ -12,6 +12,9 @@ server/data/
 # 資料庫備份（server/backup.js 產生）
 backup-*.db
 
+# 還原用的資料庫快照（意外覆蓋後留存，內含真實報告內容，切勿入庫）
+server/data-recovery*/
+
 # 單一實例鎖檔
 server.lock
 **/server.lock

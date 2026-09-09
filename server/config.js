@@ -21,19 +21,31 @@ const ROOT = path.resolve(__dirname, '..');
 
 const config = {
   port: int(process.env.PORT, 8080),
+  // 0.0.0.0 is the developer default. Behind cloudflared / a reverse proxy the
+  // app should only be reachable from that proxy: set HOST=127.0.0.1.
   host: process.env.HOST || '0.0.0.0',
 
   // Static assets = the existing front-end, served from the repo root.
   staticDir: ROOT,
-  dataDir: process.env.DATA_DIR || path.join(ROOT, 'server', 'data'),
+
+  // MariaDB. Either a TCP host/port or a unix socket path (DB_SOCKET wins).
+  db: {
+    host: process.env.DB_HOST || '127.0.0.1',
+    port: int(process.env.DB_PORT, 3306),
+    socket: process.env.DB_SOCKET || '',
+    name: process.env.DB_NAME || 'strikenote',
+    user: process.env.DB_USER || 'strikenote',
+    password: process.env.DB_PASSWORD || ''
+  },
 
   // 'open' | 'invite' | 'closed'. Invite-only by default — an open registration
   // endpoint on a public host means anyone can help themselves to an account.
   registerMode: process.env.REGISTER_MODE || 'invite',
   inviteCode: process.env.INVITE_CODE || '',
 
-  // Set TRUST_PROXY=1 when running behind nginx/Caddy so X-Forwarded-Proto is
-  // honoured for the Secure cookie flag and for redirecting to HTTPS.
+  // Set TRUST_PROXY=1 when running behind cloudflared/nginx/Caddy so the
+  // forwarded-protocol and client-IP headers are honoured (Secure cookie flag,
+  // HTTPS redirect, login throttling).
   trustProxy: bool(process.env.TRUST_PROXY, false),
   // Only turn this off for localhost testing. Over the public internet, a
   // session cookie without Secure is a session cookie you have given away.
@@ -51,11 +63,15 @@ const config = {
   maxLoginAttempts: int(process.env.MAX_LOGIN_ATTEMPTS, 5),
   loginLockoutMs: int(process.env.LOGIN_LOCKOUT_MINUTES, 15) * 60 * 1000,
 
-  maxBodyBytes: int(process.env.MAX_BODY_BYTES, 25 * 1024 * 1024), // images are posted whole
+  // Images/PDFs are posted whole, and a packed share-book arrives as one JSON
+  // body, so this is the real ceiling on both. Keep it under MariaDB's
+  // max_allowed_packet (64M in deploy/mariadb/60-strikenote.cnf).
+  maxBodyBytes: int(process.env.MAX_BODY_BYTES, 25 * 1024 * 1024),
 
-  // How long SQLite waits for a lock before giving up. 0 (the SQLite default)
-  // means "fail instantly", which turns any brief contention into a failed save.
-  busyTimeoutMs: int(process.env.BUSY_TIMEOUT_MS, 5000),
+  // Low-disk warning for admins (storage panel + startup/hourly log line):
+  // trip when free space on the MariaDB data directory drops below either.
+  storageWarnMb: int(process.env.STORAGE_WARN_MB, 1024),
+  storageWarnPct: int(process.env.STORAGE_WARN_PCT, 10)
 };
 
 // An invite code that only exists in memory would change on every restart, so
@@ -63,6 +79,14 @@ const config = {
 if (config.registerMode === 'invite' && !config.inviteCode) {
   config.inviteCode = crypto.randomBytes(9).toString('base64url');
   config.inviteCodeGenerated = true;
+}
+
+// Refuse to start against a password-less TCP account: that is never what a
+// deployment wants, and the failure would otherwise surface as a confusing
+// ER_ACCESS_DENIED at the first query.
+if (!config.db.password && !config.db.socket) {
+  console.error('DB_PASSWORD 未設定（或改用 DB_SOCKET 走 unix socket）。請見 deploy/env.example。');
+  process.exit(1);
 }
 
 module.exports = config;

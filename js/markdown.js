@@ -10,6 +10,24 @@
     caution:   { title: 'Caution' }
   };
 
+  // CodiMD/HackMD `:::` container names mapped onto the callout types above, so
+  // `:::info` renders identically to `> [!NOTE]`. The GitHub names also pass
+  // straight through, so `:::tip` etc. work too.
+  const CONTAINER_ALIAS = {
+    info: 'note', success: 'tip', warning: 'warning', danger: 'caution',
+    note: 'note', tip: 'tip', important: 'important', caution: 'caution'
+  };
+
+  // The one place callout HTML is built, shared by both the `> [!NOTE]` block
+  // and the `:::info` container so the two syntaxes are pixel-identical.
+  function calloutHTML(calloutType, title, innerHTML) {
+    const meta = CALLOUTS[calloutType] || CALLOUTS.note;
+    const label = title ? title : meta.title;
+    return '<div class="callout callout-' + calloutType + '">' +
+      '<div class="callout-title">' + escapeHtml(label) + '</div>' +
+      '<div class="callout-content">' + innerHTML + '</div></div>\n';
+  }
+
   // Findings written as `> [!RISK:HIGH] Title`. rank drives the summary sort.
   const RISK_LEVELS = {
     critical: { label: 'Critical', rank: 0 },
@@ -70,12 +88,57 @@
       return token;
     },
     renderer: function (token) {
-      const meta = CALLOUTS[token.calloutType] || CALLOUTS.note;
-      const title = token.title ? token.title : meta.title;
-      const inner = this.parser.parse(token.tokens);
-      return '<div class="callout callout-' + token.calloutType + '">' +
-        '<div class="callout-title">' + escapeHtml(title) + '</div>' +
-        '<div class="callout-content">' + inner + '</div></div>\n';
+      return calloutHTML(token.calloutType, token.title, this.parser.parse(token.tokens));
+    }
+  };
+
+  // ---- Container block: :::info … ::: (CodiMD/HackMD) ---------------------
+  // Same output as the callout above. Supports an optional title on the marker
+  // line (`:::info 標題`), nested containers, and an unclosed block runs to EOF.
+  const containerExtension = {
+    name: 'container',
+    level: 'block',
+    start: function (src) {
+      const m = src.match(/^ {0,3}:::/m);
+      return m ? m.index : undefined;
+    },
+    tokenizer: function (src) {
+      const nl0 = src.indexOf('\n');
+      const first = nl0 < 0 ? src : src.slice(0, nl0);
+      const open = /^ {0,3}:::[ \t]*([A-Za-z][\w-]*)[ \t]*(.*)$/.exec(first);
+      if (!open) return;
+      const mapped = CONTAINER_ALIAS[open[1].toLowerCase()];
+      if (!mapped) return;                     // unknown container: leave it alone
+      const title = (open[2] || '').trim();
+
+      // Walk the following lines to the matching bare `:::`, tracking nesting.
+      const bodyStart = nl0 < 0 ? src.length : nl0 + 1;
+      let idx = bodyStart, depth = 1, bodyEnd = -1, rawEnd = src.length;
+      while (idx < src.length) {
+        const nl = src.indexOf('\n', idx);
+        const lineEnd = nl < 0 ? src.length : nl;
+        const next = nl < 0 ? src.length : nl + 1;
+        const line = src.slice(idx, lineEnd);
+        if (/^ {0,3}:::[ \t]*$/.test(line)) {                 // bare ::: → close
+          if (--depth === 0) { bodyEnd = idx; rawEnd = next; break; }
+        } else if (/^ {0,3}:::[ \t]*[A-Za-z]/.test(line)) {   // nested open
+          depth++;
+        }
+        idx = next;
+      }
+      if (bodyEnd < 0) { bodyEnd = src.length; rawEnd = src.length; }   // unclosed → EOF
+      const token = {
+        type: 'container',
+        raw: src.slice(0, rawEnd),
+        calloutType: mapped,
+        title: title,
+        tokens: []
+      };
+      this.lexer.blockTokens(src.slice(bodyStart, bodyEnd), token.tokens);
+      return token;
+    },
+    renderer: function (token) {
+      return calloutHTML(token.calloutType, token.title, this.parser.parse(token.tokens));
     }
   };
 
@@ -83,6 +146,9 @@
   // Each finding gets a stable id so the PDF summary table can point at it and
   // resolve its page number with target-counter().
   let findingSeq = 0;   // reset per render, like usedSlugs below
+  // Position of each to-do checkbox in document order. app.js uses it to find
+  // the matching `- [ ]` line in the source when someone ticks one off.
+  let taskSeq = 0;      // reset per render
 
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
 
@@ -237,6 +303,111 @@
     return out;
   }
 
+  // Split hljs-highlighted HTML into one fragment per source line, re-closing
+  // and re-opening any <span> that straddles a line break so each fragment is
+  // valid on its own. hljs's HTML renderer only ever emits <span class="...">,
+  // so a small tag-aware scan is enough here — no general HTML parser needed.
+  function splitHighlightedLines(html) {
+    const openTags = [];
+    const lines = [];
+    let cur = '';
+    const re = /<span([^>]*)>|<\/span>|([^<]+)/g;
+    let m;
+    while ((m = re.exec(html))) {
+      if (m[2] !== undefined) {
+        const parts = m[2].split('\n');
+        parts.forEach(function (part, i) {
+          cur += part;
+          if (i < parts.length - 1) {
+            for (let j = openTags.length - 1; j >= 0; j--) cur += '</span>';
+            lines.push(cur);
+            cur = '';
+            for (let j = 0; j < openTags.length; j++) cur += '<span' + openTags[j] + '>';
+          }
+        });
+      } else if (m[0] === '</span>') {
+        cur += m[0];
+        openTags.pop();
+      } else {
+        cur += m[0];
+        openTags.push(m[1]);
+      }
+    }
+    lines.push(cur);
+    return lines;
+  }
+
+  // ---- [toc] extension: inline table of contents --------------------------
+  // A line holding just `[toc]` (CodiMD / HackMD style) turns into a nested list
+  // of every h1–h3 in the note — the same levels the sidebar and the PDF use.
+  // The headings after the marker are not known yet when it is rendered, so the
+  // renderer leaves a placeholder and render() swaps the real list in once the
+  // whole document has been parsed.
+  const TOC_PLACEHOLDER = '<!--md-toc-placeholder-->';
+  const TOC_MAX_LEVEL = 3;
+  let headingList = [];   // [{ level, text, id }] in document order, reset per render
+
+  const tocExtension = {
+    name: 'toc',
+    level: 'block',
+    start: function (src) {
+      const m = src.match(/^ {0,3}\[toc\][ \t]*$/im);
+      return m ? m.index : undefined;
+    },
+    tokenizer: function (src) {
+      const match = /^ {0,3}\[toc\][ \t]*(?:\n+|$)/i.exec(src);
+      if (match) return { type: 'toc', raw: match[0] };
+    },
+    renderer: function () { return TOC_PLACEHOLDER + '\n'; }
+  };
+
+  // Inline [toc]: only the note's top heading level is listed (normally `#`).
+  // Everything deeper is tucked into a collapsed sub-list under its parent and
+  // appears only when the reader opens it. The toggle is a plain <button> —
+  // app.js delegates the click, keys the open state by the *parent's* id (so the
+  // side panel and this list stay in step) and restores it after each re-render.
+  function buildInlineTOC() {
+    const items = headingList.filter(function (h) { return h.level <= TOC_MAX_LEVEL; });
+    if (!items.length) {
+      return '<nav class="md-toc md-toc-empty">這份筆記還沒有標題，加上 # 標題後會自動列在這裡</nav>';
+    }
+    // A note that starts at ## (no h1 at all) should still show something, so
+    // the always-visible level is whatever the shallowest heading happens to be.
+    let top = 6;
+    items.forEach(function (h) { if (h.level < top) top = h.level; });
+
+    // Build a proper tree first: rendering straight from the flat list makes the
+    // "1.1.1" numbering lie as soon as a level is skipped.
+    const roots = [];
+    const stack = [];
+    items.forEach(function (h) {
+      const node = { h: h, kids: [] };
+      while (stack.length && stack[stack.length - 1].h.level >= h.level) stack.pop();
+      if (stack.length) stack[stack.length - 1].kids.push(node);
+      else roots.push(node);
+      stack.push(node);
+    });
+
+    function renderList(nodes, cls) {
+      let s = '<ul' + (cls ? ' class="' + cls + '"' : '') + '>';
+      nodes.forEach(function (n) {
+        s += '<li class="toc-l' + n.h.level + '"><a href="#' + n.h.id + '">' + n.h.text + '</a>';
+        if (n.kids.length) {
+          // Only the top level is shown; its whole subtree hides behind a toggle.
+          if (n.h.level === top) {
+            s += '<button type="button" class="md-toc-toggle" data-toc="' + n.h.id + '" ' +
+              'aria-label="展開子標題"></button>' + renderList(n.kids, 'md-toc-kids');
+          } else {
+            s += renderList(n.kids, '');
+          }
+        }
+        s += '</li>';
+      });
+      return s + '</ul>';
+    }
+    return '<nav class="md-toc">' + renderList(roots, 'md-toc-top') + '</nav>';
+  }
+
   // ---- Custom renderer overrides -----------------------------------------
   const usedSlugs = {};
   const renderer = {
@@ -245,11 +416,56 @@
       let slug = base, i = 1;
       while (usedSlugs[slug]) { slug = base + '-' + (i++); }
       usedSlugs[slug] = true;
+      // Plain-text copy (already HTML-escaped by marked) for the inline [toc]
+      headingList.push({ level: level, text: text.replace(/<[^>]*>/g, ''), id: slug });
       return '<h' + level + ' id="' + slug + '">' + text + '</h' + level + '>\n';
     },
+    // Notion-style to-do items. marked's default emits a disabled checkbox with
+    // no hook back to the source; ours carries the index of the task in document
+    // order, which is all app.js needs to find and flip the matching `- [ ]` in
+    // the textarea. The counter is reset per render, in render() below.
+    checkbox: function (checked) {
+      return '<input class="task-check" type="checkbox" data-task="' + (taskSeq++) + '"' +
+        (checked ? ' checked' : '') + '>';
+    },
+    listitem: function (text, task, checked) {
+      if (!task) return '<li>' + text + '</li>\n';
+      return '<li class="task-item' + (checked ? ' task-done' : '') + '">' + text + '</li>\n';
+    },
+
+    // A wiki link alone on its own line is a sub-page, the way Notion separates
+    // an inline page mention from a sub-page block. Inline `[[x]]` inside a
+    // sentence is untouched, and the markup stays a plain `[[標題]]` in the
+    // source, so nothing new has to be understood to read the raw note.
+    paragraph: function (text) {
+      const m = String(text).trim().match(
+        /^<a class="note-link( missing)?" href="#" (data-note-id|data-note-title)="([^"]*)"[^>]*>([\s\S]*)<\/a>$/);
+      if (!m) return '<p>' + text + '</p>\n';
+      const missing = !!m[1];
+      return '<a class="page-card note-link' + (missing ? ' missing' : '') + '" href="#" ' +
+        m[2] + '="' + m[3] + '">' +
+        '<span class="page-card-ic">' + (global.Icons ? Icons.svg(missing ? 'file-plus' : 'file-page') : '') + '</span>' +
+        '<span class="page-card-t">' + m[4] + '</span>' +
+        '<span class="page-card-hint">' + (missing ? '點擊建立' : '子頁面') + '</span></a>\n';
+    },
+
     code: function (code, infostring) {
       // CodiMD-style options in the info string: ```js=  or  ```js=10  (line numbers, optional start)
       const info = (infostring || '').trim();
+      // ```mindmap holds an indented outline, rendered as a diagram. The outline
+      // stays the source of truth — searchable, mergeable, and readable as text
+      // if anything ever fails to draw.
+      if (info === 'mindmap' && global.MindMap) {
+        let svg = '';
+        try { svg = MindMap.renderSVG(code); } catch (e) { svg = ''; }
+        if (svg) {
+          return '<div class="mindmap-block" data-mindmap="' + escapeHtml(code) + '">' +
+            '<button class="mm-edit-btn" type="button" title="在全螢幕編輯器裡打開">' +
+            (global.Icons ? Icons.svg('mind-map') : '') + ' 全螢幕</button>' + svg +
+            '<div class="mm-hint">點節點選取，再按 Tab 加子項目、Enter 加同層、F2 改字，' +
+            '直接拖曳可換上層</div></div>';
+        }
+      }
       let requested = info, lineNumbers = false, startLine = 1;
       const opt = info.match(/^([^\s=]*)=(\d*)$/);
       if (opt) {
@@ -257,20 +473,17 @@
         lineNumbers = true;
         if (opt[2]) startLine = parseInt(opt[2], 10);
       }
-      // ```linux（含 linux=）當成 shell 高亮，避免 highlightAuto 誤判成 graphql，
-      // 並標記 code-linux 讓 CSS 套用 Kali 終端配色。
+      // ```linux（含 linux=）當成 shell 高亮，並標記 code-linux 讓 CSS 套用 Kali 終端配色。
       const ALIAS = { linux: 'bash', kali: 'bash' };
       const isKali = requested === 'linux' || requested === 'kali';
       const hlLang = ALIAS[requested] || requested;
-      let out, lang = requested;
+      // 只依使用者標明的語言上色；沒標語言（或 hljs 不認得）就是純文字，不自動猜——
+      // 猜錯會把終端輸出塗成別種語言的顏色，右上角的標籤也跟著錯。
+      const lang = requested;   // 標籤永遠顯示使用者寫的字（例如 linux）
+      let out;
       try {
         if (hlLang && global.hljs && global.hljs.getLanguage(hlLang)) {
           out = global.hljs.highlight(code, { language: hlLang }).value;
-          lang = requested;               // 顯示使用者寫的標籤（linux）
-        } else if (global.hljs) {
-          const r = global.hljs.highlightAuto(code);
-          out = r.value;
-          lang = r.language || '';
         } else {
           out = escapeHtml(code);
         }
@@ -282,16 +495,24 @@
         '<button class="code-copy" type="button" title="複製程式碼">複製</button>' + langSpan + '</div>';
       const kaliCls = isKali ? ' code-linux' : '';
       if (lineNumbers) {
+        // Each source line becomes its own <li data-ln="N">, gutter number and
+        // code sharing one CSS grid row — so a long line can wrap (needed in
+        // print, which has no horizontal scroll) without pulling the numbers
+        // out of sync with the lines after it, the way a single shared gutter
+        // column would.
         const count = code.replace(/\n$/, '').split('\n').length;
-        const nums = [];
-        for (let i = 0; i < count; i++) nums.push(startLine + i);
-        const gutter = '<span class="ln-gutter" aria-hidden="true">' + nums.join('\n') + '</span>';
+        let htmlLines = splitHighlightedLines(out);
+        if (htmlLines.length > count) htmlLines = htmlLines.slice(0, count);
+        while (htmlLines.length < count) htmlLines.push('');
+        const items = htmlLines.map(function (lineHtml, i) {
+          return '<li data-ln="' + (startLine + i) + '"><code class="hljs language-' +
+            escapeHtml(lang || 'plaintext') + '">' + lineHtml + '</code></li>';
+        }).join('');
         return '<div class="code-block code-ln' + kaliCls + '">' + tools +
-          '<pre class="code-pre">' + gutter +
-          '<code class="hljs language-' + escapeHtml(lang) + '">' + out + '</code></pre></div>\n';
+          '<pre class="code-pre"><ol class="code-lines">' + items + '</ol></pre></div>\n';
       }
       return '<div class="code-block' + kaliCls + '">' + tools +
-        '<pre><code class="hljs language-' + escapeHtml(lang) + '">' + out + '</code></pre></div>\n';
+        '<pre><code class="hljs language-' + escapeHtml(lang || 'plaintext') + '">' + out + '</code></pre></div>\n';
     },
     image: function (href, title, text) {
       // Embedded PDF attachment: ![檔名](pdf:<id>) → same-origin <iframe> viewer.
@@ -301,7 +522,7 @@
         return '<span class="pdf-embed">' +
           '<span class="pdf-embed-bar">' +
           '<span class="pdf-embed-name">📎 ' + name + '</span>' +
-          '<a class="pdf-embed-open" data-pdf-id="' + escapeHtml(id) + '" href="#" target="_blank" rel="noopener">在新分頁開啟 ↗</a>' +
+          '<a class="pdf-embed-open" data-pdf-id="' + escapeHtml(id) + '" href="#" target="_blank" rel="noopener">Open in new tab ↗</a>' +
           '</span>' +
           '<iframe class="pdf-embed-frame" data-pdf-id="' + escapeHtml(id) + '" title="' + name + '" loading="lazy"></iframe>' +
           '</span>';
@@ -326,18 +547,44 @@
 
   marked.use({
     gfm: true, breaks: false,
-    extensions: [riskExtension, calloutExtension, wikiLinkExtension, hashtagExtension],
+    extensions: [tocExtension, riskExtension, calloutExtension, containerExtension, wikiLinkExtension, hashtagExtension],
     renderer: renderer
   });
+
+  // <iframe> is only in the sanitizer's tag allow-list (below) for the PDF-embed
+  // feature, and that markup never carries its own `src` — js/pdf.js's viewer sets
+  // `.src` from a validated `data-pdf-id` *after* sanitizing. If a note author instead
+  // types a literal `<iframe src="...">` in raw markdown, DOMPurify's URL check blocks
+  // javascript:/data: but happily keeps a plain same-origin src — and CSP's
+  // `frame-src 'self'` explicitly allows framing this app's own pages, so `src="/"`
+  // would nest the whole authenticated app inside another user's note (clickjacking:
+  // the note owner/editor could overlay it to trick a viewer into clicking real
+  // buttons in their own session). Strip src/srcdoc from every <iframe> unconditionally
+  // so a typed-in one is always inert, regardless of what the raw markdown asked for.
+  if (global.DOMPurify) {
+    DOMPurify.addHook('uponSanitizeElement', function (node, data) {
+      if (data.tagName === 'iframe' && node.removeAttribute) {
+        node.removeAttribute('src');
+        node.removeAttribute('srcdoc');
+      }
+    });
+  }
 
   // ---- Public render -----------------------------------------------------
   function render(md) {
     for (const k in usedSlugs) delete usedSlugs[k]; // reset per render
     findingSeq = 0;
-    const raw = marked.parse(md || '');
+    taskSeq = 0;
+    headingList = [];
+    let raw = marked.parse(md || '');
+    // Every [toc] gets the same full list, built now that all headings are known.
+    if (raw.indexOf(TOC_PLACEHOLDER) >= 0) raw = raw.split(TOC_PLACEHOLDER).join(buildInlineTOC());
     return DOMPurify.sanitize(raw, {
       ADD_ATTR: ['id', 'data-img-id', 'data-note-id', 'data-note-title', 'data-annotate',
-        'data-risk', 'data-finding', 'type', 'target', 'data-pdf-id', 'loading', 'data-tag'],
+        'data-risk', 'data-finding', 'type', 'target', 'data-pdf-id', 'loading', 'data-tag',
+        'data-toc',    // [toc] 的展開鈕
+        'data-task',   // 待辦清單：勾選框在文件中的序號，用來回寫原始 markdown
+        'data-mindmap', 'data-i'],   // 心智圖：原始大綱文字，以及節點索引
       ADD_TAGS: ['input', 'button', 'iframe'] // checkboxes, annotate button, PDF embed
     });
   }
@@ -366,7 +613,7 @@
           urlCache[id] = url;
           img.src = url;
         } else {
-          img.alt = '[遺失的圖片]';
+          img.alt = '[Missing image]';
         }
       });
     });

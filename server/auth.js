@@ -26,6 +26,8 @@ function validUsername(u) {
   return typeof u === 'string' && /^[a-zA-Z0-9_.-]{3,32}$/.test(u);
 }
 
+function isDup(e) { return !!e && (e.code === 'ER_DUP_ENTRY' || e.errno === 1062); }
+
 async function hashPassword(password) {
   const salt = crypto.randomBytes(16);
   const hash = await scrypt(password, salt);
@@ -37,7 +39,7 @@ async function setPassword(userId, password) {
     return { error: '密碼至少需 ' + config.minPasswordLength + ' 個字元' };
   }
   const { salt, hash } = await hashPassword(password);
-  q.setPassword.run(hash, salt, userId);
+  await q.setPassword.run(hash, salt, userId);
   return { ok: true };
 }
 
@@ -48,19 +50,24 @@ async function setPassword(userId, password) {
 // one, print it once, and force it to be changed at first login.
 async function ensureAdmin() {
   const name = config.adminUsername;
-  const existing = q.userByName.get(name);
+  const existing = await q.userByName.get(name);
   if (existing) {
-    if (existing.role !== 'admin') q.setRole.run('admin', existing.id);
+    if (existing.role !== 'admin') await q.setRole.run('admin', existing.id);
     return null;
   }
   const chosen = config.adminPassword;
   const password = chosen || crypto.randomBytes(12).toString('base64url');
   const { salt, hash } = await hashPassword(password);
-  q.insertUser.run(name, hash, salt, Date.now(), 'admin');
-  const user = q.userByName.get(name);
+  let r;
+  try { r = await q.insertUser.run(name, hash, salt, Date.now(), 'admin'); }
+  catch (e) {
+    // Two instances booting at once: the other one won, and that is fine.
+    if (isDup(e)) return null;
+    throw e;
+  }
   // A password the operator picked is their own decision; a generated one must
   // be replaced, because it has been printed to a log.
-  q.setMustChange.run(chosen ? 0 : 1, user.id);
+  await q.setMustChange.run(chosen ? 0 : 1, r.insertId);
   return { username: name, password: password, generated: !chosen };
 }
 
@@ -73,7 +80,7 @@ async function createUser(username, password, inviteCode) {
   }
   // The very first account is always allowed — otherwise a fresh invite-only
   // deployment could never be bootstrapped.
-  const isFirst = q.countUsers.get().n === 0;
+  const isFirst = (await q.countUsers.get()).n === 0;
   if (!isFirst) {
     if (config.registerMode === 'closed') return { error: '此站台已關閉註冊' };
     if (config.registerMode === 'invite') {
@@ -84,20 +91,27 @@ async function createUser(username, password, inviteCode) {
       if (!ok) return { error: '邀請碼不正確' };
     }
   }
-  if (q.userByName.get(username)) return { error: '此帳號已被使用' };
+  if (await q.userByName.get(username)) return { error: '此帳號已被使用' };
 
   const { salt, hash } = await hashPassword(password);
   const now = Date.now();
-  q.insertUser.run(username, hash, salt, now, 'user');
-  const user = q.userByName.get(username);
+  let r;
+  // The name check above is only a fast path: two registrations for the same
+  // name can interleave now that the DB is async, and the UNIQUE key is what
+  // actually decides.
+  try { r = await q.insertUser.run(username, hash, salt, now, 'user'); }
+  catch (e) {
+    if (isDup(e)) return { error: '此帳號已被使用' };
+    throw e;
+  }
   // Registering signs you straight in, so it counts as a login — otherwise the
   // admin panel shows "never logged in" for someone who is using the app.
-  q.touchLogin.run(now, user.id);
-  return { user: { id: user.id, username: user.username, role: user.role } };
+  await q.touchLogin.run(now, r.insertId);
+  return { user: { id: r.insertId, username: username, role: 'user' } };
 }
 
 async function verifyPassword(username, password) {
-  const row = q.userByName.get(username);
+  const row = await q.userByName.get(username);
   if (!row) {
     // Hash anyway so a missing account is not detectably faster than a wrong password.
     await scrypt(String(password || ''), crypto.randomBytes(16));
@@ -109,42 +123,43 @@ async function verifyPassword(username, password) {
   // Check disabled only after the password is verified, so the response cannot be
   // used to enumerate which accounts exist.
   if (row.disabled) return { disabled: true };
-  q.touchLogin.run(Date.now(), row.id);
+  await q.touchLogin.run(Date.now(), row.id);
   return { id: row.id, username: row.username, role: row.role, mustChangePassword: !!row.must_change_pw };
 }
 
-function createSession(userId) {
+async function createSession(userId) {
   const token = crypto.randomBytes(32).toString('base64url');
   const now = Date.now();
-  q.insertSession.run(sha256(token), userId, now, now + config.sessionTtlDays * 86400000);
+  await q.insertSession.run(sha256(token), userId, now, now + config.sessionTtlDays * 86400000);
   return token;
 }
 
-function userFromToken(token) {
+async function userFromToken(token) {
   if (!token) return null;
-  const row = q.sessionByHash.get(sha256(token));
+  const row = await q.sessionByHash.get(sha256(token));
   if (!row) return null;
   if (row.expires_at < Date.now()) {
-    q.deleteSession.run(row.token_hash);
+    await q.deleteSession.run(row.token_hash);
     return null;
   }
-  const user = q.userById.get(row.user_id);
+  const user = await q.userById.get(row.user_id);
   if (!user) return null;
   // Disabling must bite straight away, not at the next login — an attacker with a
   // live session would otherwise keep it for the full two weeks.
   if (user.disabled) {
-    q.deleteSessionsOf.run(user.id);
+    await q.deleteSessionsOf.run(user.id);
     return null;
   }
   return user;
 }
 
-function destroySession(token) {
-  if (token) q.deleteSession.run(sha256(token));
+async function destroySession(token) {
+  if (token) await q.deleteSession.run(sha256(token));
 }
 
 // ---------------- login throttling ----------------
 // Keyed by username+IP so one attacker cannot lock out a real user globally.
+// In-memory and per process: fine for the single instance this app runs as.
 const attempts = new Map();
 function throttleKey(username, ip) { return String(username).toLowerCase() + '|' + ip; }
 
@@ -173,7 +188,8 @@ function parseCookies(header) {
   String(header || '').split(';').forEach(function (part) {
     const i = part.indexOf('=');
     if (i < 0) return;
-    out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    try { out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); }
+    catch (e) { /* malformed percent-escape: ignore that cookie */ }
   });
   return out;
 }
@@ -195,13 +211,16 @@ function clearCookie(secure) {
   return bits.join('; ');
 }
 
-// Housekeeping: drop expired rows hourly.
-setInterval(function () {
-  try { q.deleteExpiredSessions.run(Date.now()); } catch (e) {}
-}, 3600000).unref();
+// Housekeeping: drop expired rows hourly. Started by server.js once the pool is
+// up (a timer at module load would fire before db.init()).
+function startHousekeeping() {
+  setInterval(function () {
+    q.deleteExpiredSessions.run(Date.now()).catch(function () { /* next hour */ });
+  }, 3600000).unref();
+}
 
 module.exports = {
   COOKIE, createUser, verifyPassword, createSession, userFromToken, destroySession,
   isLockedOut, noteFailure, noteSuccess, parseCookies, sessionCookie, clearCookie, validUsername,
-  ensureAdmin, setPassword, hashPassword
+  ensureAdmin, setPassword, hashPassword, startHousekeeping
 };

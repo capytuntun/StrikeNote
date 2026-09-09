@@ -52,6 +52,10 @@
     // hiding the button is only tidiness, not the boundary.
     const adminBtn = $('#admin-btn');
     if (adminBtn) adminBtn.hidden = user.role !== 'admin';
+    const storageBtn = $('#storage-btn');
+    if (storageBtn) storageBtn.hidden = user.role !== 'admin';
+    // 管理員一登入就主動檢查磁碟空間，太低會在頂端跳出警告（之後每半小時再看一次）
+    if (user.role === 'admin' && global.Admin && Admin.checkStorage) Admin.checkStorage();
 
     // A generated password has been printed to a terminal log; make it be replaced
     // before the app is usable.
@@ -108,34 +112,46 @@
   }
 
   // Replaces the login form when the page is not being served by our backend.
-  // Guessing wrong here is expensive, so say exactly what was observed and give
-  // the two commands that fix it.
+  //
+  // On a developer machine (localhost) the likely cause is a static file server
+  // or a backend that was never started, so say so and show the command. On any
+  // other host the page came through a real deployment (proxy, tunnel) and a
+  // failed /api/me is almost always the backend restarting or an upstream error
+  // page — the only sane offer is "check again". Never navigate anywhere: an
+  // earlier version bounced to http://<host>:8080/, which behind HTTPS is a
+  // protocol downgrade to a port that is not even open.
   function showBackendProblem(e) {
     const box = document.querySelector('.auth-box');
     const here = location.origin + '/';
     const wrong = !!e.wrongServer;
+    const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+    let msg, fix = '';
+    if (local && wrong) {
+      msg = '你正連到 <code>' + esc(here) + '</code>，它送得出網頁，但 ' +
+        '<code>/api/me</code> 回應 <b>' + esc(e.status) + '</b>。<br><br>' +
+        '這通常表示它是一個<b>只會發送檔案的靜態伺服器</b>' +
+        '（例如 <code>python -m http.server</code>、IDE 的預覽功能），' +
+        '不是本系統的後端——所以登入、筆記全都不會動。';
+      fix = '<div class="backend-fix"><div class="backend-step"><b>啟動後端，改用它印出的網址</b>' +
+        '<pre>cd report_system\nnode server/server.js</pre></div></div>';
+    } else if (local) {
+      msg = '<code>' + esc(here) + '</code> 沒有回應。後端可能沒有啟動。';
+      fix = '<div class="backend-fix"><div class="backend-step"><b>啟動後端</b>' +
+        '<pre>cd report_system\nnode server/server.js</pre></div></div>';
+    } else {
+      msg = '無法連線到伺服器' + (wrong ? '（<code>/api/me</code> 回應 <b>' + esc(e.status) + '</b>）' : '') +
+        '。伺服器可能正在重新啟動或維護中，請稍後按「重新檢查」。';
+    }
     box.innerHTML =
-      '<div class="auth-logo">報告筆記系統</div>' +
-      '<div class="auth-title">' + (wrong ? '這不是本系統的伺服器' : '伺服器沒有回應') + '</div>' +
-      '<div class="backend-msg">' +
-      (wrong
-        ? '你正連到 <code>' + esc(here) + '</code>，它送得出網頁，但 ' +
-          '<code>/api/me</code> 回應 <b>' + e.status + '</b>。<br><br>' +
-          '這通常表示它是一個<b>只會發送檔案的靜態伺服器</b>' +
-          '（例如 <code>python -m http.server</code>、IDE 的預覽功能），' +
-          '不是本系統的後端——所以登入、筆記全都不會動。'
-        : '<code>' + esc(here) + '</code> 沒有回應。後端可能沒有啟動。') +
+      '<div class="auth-brand">' +
+        '<span class="auth-brand-mark" aria-hidden="true"></span>' +
+        '<div class="auth-brand-name">StrikeNote</div>' +
       '</div>' +
-      '<div class="backend-fix">' +
-      '<div class="backend-step"><b>1. 啟動後端</b><pre>cd ' +
-      'report_system\nnode server/server.js</pre></div>' +
-      '<div class="backend-step"><b>2. 改用它提供的網址</b><pre>http://localhost:8080</pre></div>' +
-      '</div>' +
-      '<button type="button" class="btn btn-primary auth-submit backend-go">前往 localhost:8080</button>' +
-      '<button type="button" class="link-btn auth-toggle backend-retry">重新檢查</button>';
-    box.querySelector('.backend-go').addEventListener('click', function () {
-      location.href = 'http://' + location.hostname + ':8080/';
-    });
+      '<div class="auth-form">' +
+        '<div class="auth-title">' + (wrong ? '後端沒有正確回應' : '伺服器沒有回應') + '</div>' +
+        '<div class="backend-msg">' + msg + '</div>' + fix +
+        '<button type="button" class="btn btn-primary auth-submit backend-retry">重新檢查</button>' +
+      '</div>';
     box.querySelector('.backend-retry').addEventListener('click', function () { location.reload(); });
     show(document.querySelector('#auth-screen'), true);
     show(document.querySelector('#app'), false);
@@ -169,6 +185,8 @@
     if (adminBtn) adminBtn.addEventListener('click', function () { closeMenu(); Admin.showPanel(); });
     const pwBtn = $('#passwd-btn');
     if (pwBtn) pwBtn.addEventListener('click', function () { closeMenu(); Admin.showChangePassword({}); });
+    const storageBtn = $('#storage-btn');
+    if (storageBtn) storageBtn.addEventListener('click', function () { closeMenu(); Admin.showStorage(); });
 
     Store.ready().then(function (r) {
       registerMode = r.registerMode || 'invite';

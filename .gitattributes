@@ -1,0 +1,9 @@
+# Files that end up on a Linux host must stay LF even when checked out on
+# Windows (core.autocrlf=true would otherwise CRLF them and break bash/systemd).
+deploy/** text eol=lf
+*.sh text eol=lf
+*.service text eol=lf
+*.timer text eol=lf
+*.cnf text eol=lf
+*.sql text eol=lf
+*.yml text eol=lf

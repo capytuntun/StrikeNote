@@ -1,0 +1,28 @@
+# StrikeNote 的 MariaDB 設定。放到 /etc/mysql/mariadb.conf.d/60-strikenote.cnf 後
+# systemctl restart mariadb。數字是 4 GB Raspberry Pi 的；8 GB 可把 buffer pool 調到 1G。
+[mysqld]
+# app 跟資料庫在同一台機器，不需要對外聽。
+bind-address = 127.0.0.1
+
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+
+# 單一列的上限：一本打包好的電子書（40 MB）、一份 25 MB 的 PDF、標註時圖片的
+# 兩顆 blob 都要塞得進一個封包。要大於 app 的 MAX_BODY_BYTES。
+max_allowed_packet = 64M
+
+innodb_buffer_pool_size = 256M
+innodb_log_file_size = 128M
+# 每次 commit 都 fsync：資料是考試報告，寧可慢一點也不要掉最後一筆。
+innodb_flush_log_at_trx_commit = 1
+# 兩個人同時存同一篇筆記時，後到的最多等這麼久就回 503 讓客戶端自己重試。
+innodb_lock_wait_timeout = 10
+
+max_connections = 50
+tmp_table_size = 32M
+max_heap_table_size = 32M
+performance_schema = OFF
+skip-name-resolve = 1
+
+[client]
+default-character-set = utf8mb4

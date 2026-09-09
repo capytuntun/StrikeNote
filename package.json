@@ -1,0 +1,17 @@
+{
+  "name": "strikenote",
+  "version": "1.0.0",
+  "private": true,
+  "description": "StrikeNote — self-hosted Markdown note app for pentest / exam reporting (Node 22 + MariaDB)",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server/server.js",
+    "migrate": "node server/tools/migrate-sqlite-to-mariadb.js",
+    "smoke": "node server/tools/smoke.js"
+  },
+  "dependencies": {
+    "mysql2": "3.24.4"
+  }
+}

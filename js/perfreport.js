@@ -16,6 +16,8 @@
   const STATUS = ['已修復', '處理中', '未修復', '風險接受'];
   // 風險等級對應的樣式 class（顏色）
   const SEV_CLASS = { '嚴重': 'crit', '高': 'high', '中': 'med', '低': 'low', '資訊': 'info' };
+  // 修復狀態對應的樣式 class（顏色）—— 獨立於風險等級，不能共用同一組 class
+  const STATUS_CLASS = { '已修復': 'fixed', '處理中': 'progress', '未修復': 'open', '風險接受': 'accepted' };
 
   // 模組狀態
   let cur = null, onSavedCb = null, saveTimer = null, inited = false;
@@ -108,7 +110,9 @@
     findings.forEach(function (f) {
       if (!(f.name && f.name.trim()) && !f.severity && !f.status) return;
       n += 1;
-      L.push('| ' + n + ' | ' + (f.name || '') + ' | ' + (f.severity || '') + ' | ' + (f.status || '') + ' |');
+      // 風險等級／修復狀態在編輯畫面靠顏色分辨；純文字的匯出（PDF／電子書）沒有顏色，
+      // 用粗體至少保留視覺上的重量差異，而不是讓它們跟弱點名稱一樣輕
+      L.push('| ' + n + ' | ' + (f.name || '') + ' | **' + (f.severity || '') + '** | **' + (f.status || '') + '** |');
     });
     if (n === 0) L.push('| — | *(尚未新增弱點)* |  |  |');
     L.push('');
@@ -130,7 +134,7 @@
     infoInputs = {};
     const ro = cur && cur.perm === 'read';
     const card = el('div', 'sec-info-card');
-    card.appendChild(el('div', 'sec-info-head', '📈 報告資訊'));
+    card.appendChild(el('div', 'sec-info-head', (global.Icons ? Icons.svg('chart') : '') + ' 報告資訊'));
     const grid = el('div', 'sec-info-grid');
 
     const fields = [
@@ -165,7 +169,7 @@
   function renderStats() {
     const st = computeStats(collectFindings());
     statsEl.innerHTML = '';
-    const head = el('div', 'perf-stats-head', '📊 即時成效統計');
+    const head = el('div', 'perf-stats-head', (global.Icons ? Icons.svg('trending-up') : '') + ' 即時成效統計');
     statsEl.appendChild(head);
 
     const chips = el('div', 'perf-chips');
@@ -194,8 +198,8 @@
   }
 
   // ---------------- 弱點列表（表格）----------------
-  function buildSelect(value, options, placeholder, ro) {
-    const sel = el('select', 'perf-cell-select');
+  function buildSelect(value, options, placeholder, ro, extraCls) {
+    const sel = el('select', extraCls ? 'perf-cell-select ' + extraCls : 'perf-cell-select');
     const ph = document.createElement('option');
     ph.value = ''; ph.textContent = placeholder;
     sel.appendChild(ph);
@@ -235,7 +239,7 @@
     tr.appendChild(tdName);
 
     const tdSev = document.createElement('td');
-    const sev = buildSelect(f.severity || '', SEVERITY, '風險等級', ro);
+    const sev = buildSelect(f.severity || '', SEVERITY, '風險等級', ro, 'perf-sev-select');
     sev.addEventListener('change', function () {
       tr.dataset.sev = SEV_CLASS[sev.value] || '';
       renderStats(); scheduleSave();
@@ -245,14 +249,18 @@
     tr.appendChild(tdSev);
 
     const tdStatus = document.createElement('td');
-    const status = buildSelect(f.status || '', STATUS, '修復狀態', ro);
-    status.addEventListener('change', function () { renderStats(); scheduleSave(); });
+    const status = buildSelect(f.status || '', STATUS, '修復狀態', ro, 'perf-status-select');
+    status.addEventListener('change', function () {
+      tr.dataset.status = STATUS_CLASS[status.value] || '';
+      renderStats(); scheduleSave();
+    });
+    tr.dataset.status = STATUS_CLASS[f.status || ''] || '';
     tdStatus.appendChild(status);
     tr.appendChild(tdStatus);
 
     const tdDel = document.createElement('td');
     if (!ro) {
-      const del = el('button', 'sec-card-del', '✕');
+      const del = el('button', 'sec-card-del', global.Icons ? Icons.svg('x') : '✕');
       del.type = 'button'; del.title = '刪除這列';
       del.addEventListener('click', function () { tr.remove(); renumberRows(); renderStats(); scheduleSave(); });
       tdDel.appendChild(del);
@@ -394,7 +402,7 @@
   function showNewDialog(onConfirm) {
     const overlay = el('div', 'modal-overlay');
     const modal = el('div', 'modal sec-new-modal');
-    modal.appendChild(el('div', 'modal-title', '📈 建立成效報告'));
+    modal.appendChild(el('div', 'modal-title', (global.Icons ? Icons.svg('chart') : '') + ' 建立成效報告'));
     modal.appendChild(el('div', 'sec-new-hint', '先填基本資訊，弱點清單與統計在編輯畫面逐列輸入。'));
 
     const spec = [

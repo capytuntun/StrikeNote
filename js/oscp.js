@@ -41,7 +41,7 @@
     if (kind === 'machines') return ['targets'];
     if (kind === 'osep') return ['external', 'adset'];
     if (kind === 'cpent') return ['adset', 'binaries', 'iot', 'webapps', 'ctf'];
-    if (kind === 'vhl') return ['vhlhosts', 'adset'];
+    if (kind === 'vhl') return ['vhlnets', 'vhlhosts'];
     if (kind === 'web') return ['webapps'];
     if (kind === 'exploit') return ['binaries'];
     if (kind === 'wifi') return ['wifi'];
@@ -173,6 +173,26 @@
       '```',
       ''
     ];
+  }
+
+  // VHL：把機器歸到它填的 Network 底下（不分大小寫）。表單裡定義過的 Network 依
+  // 定義順序排前面；機器上寫了但沒定義的 Network 接在後面；沒填的歸「未分類」。
+  function groupVhl(nets, hosts) {
+    const groups = [], byKey = {};
+    function get(name, range) {
+      const key = String(name || '').trim().toLowerCase() || '__none__';
+      if (!byKey[key]) {
+        byKey[key] = { name: String(name || '').trim() || '未分類', range: range || '', hosts: [] };
+        groups.push(byKey[key]);
+      }
+      return byKey[key];
+    }
+    nets.forEach(function (n) { get(n.name, n.range); });
+    hosts.forEach(function (h) { get(h.net).hosts.push(h); });
+    // 沒填 Network 的機器放最後
+    const none = byKey.__none__;
+    if (none) { groups.splice(groups.indexOf(none), 1); groups.push(none); }
+    return groups;
   }
 
   function webSection(app, i) {
@@ -407,6 +427,7 @@
     const wifi = (data.wifi || []).filter(function (x) { return x && x.trim(); });
     const items = (data.items || []).filter(function (x) { return x && x.trim(); });
     const vhlhosts = (data.vhlhosts || []).filter(function (h) { return (h.ip && h.ip.trim()) || (h.name && h.name.trim()); });
+    const vhlnets = (data.vhlnets || []).filter(function (n) { return n.name && n.name.trim(); });
     const external = (data.external || []).filter(function (x) { return x && x.trim(); });
     const adHostsAll = (data.ad && data.ad.hosts || []).filter(function (h) { return (h.ip && h.ip.trim()) || (h.name && h.name.trim()); });
     const iot = (data.iot || []).filter(function (d) { return (d.name && d.name.trim()) || (d.ip && d.ip.trim()); });
@@ -440,10 +461,14 @@
     }
     else if (kind === 'vhl') {
       L.push('');
-      L.push('| IP | Hostname | local.txt | proof.txt |');
-      L.push('| --- | --- | --- | --- |');
-      if (vhlhosts.length) vhlhosts.forEach(function (h) { L.push('| `' + (h.ip || '') + '` | ' + (h.name || '') + ' | ☐ | ☐ |'); });
-      else L.push('| *(尚未提供)* |  |  |  |');
+      L.push('**Networks:**');
+      if (vhlnets.length) vhlnets.forEach(function (n) { L.push('- **' + n.name + '**' + (n.range ? ' — `' + n.range + '`' : '')); });
+      else L.push('- *(尚未提供)*');
+      L.push('');
+      L.push('| Network | IP | Hostname | local.txt | proof.txt |');
+      L.push('| --- | --- | --- | --- | --- |');
+      if (vhlhosts.length) vhlhosts.forEach(function (h) { L.push('| ' + (h.net || '—') + ' | `' + (h.ip || '') + '` | ' + (h.name || '') + ' | ☐ | ☐ |'); });
+      else L.push('| *(尚未提供)* |  |  |  |  |');
     }
     else if (kind === 'web') { if (webapps.length) webapps.forEach(function (a) { L.push('- **' + (a.name || 'App') + '**' + (a.url ? ' — `' + a.url + '`' : '')); }); else L.push('- *(尚未提供)*'); }
     else if (kind === 'exploit') { if (binaries.length) binaries.forEach(function (a) { L.push('- **' + a.name + '**' + (a.ver ? ' (' + a.ver + ')' : '')); }); else L.push('- *(尚未提供)*'); }
@@ -529,11 +554,15 @@
       L.push('');
       L = L.concat(adSet(data, '## Active Directory Set'));
     } else if (kind === 'vhl') {
-      L.push('# Target Machines');
-      L.push('');
-      if (!vhlhosts.length) { L.push('*(尚未提供機器)*'); L.push(''); }
-      vhlhosts.forEach(function (h, i) { L = L.concat(vhlSection(h, i)); });
-      if (adHostsAll.length) L = L.concat(adSet(data));
+      // 機器依 Network 分組：先照表單裡 Network 的順序，沒填 Network 的放最後
+      const groups = groupVhl(vhlnets, vhlhosts);
+      if (!groups.length) { L.push('# Target Machines'); L.push(''); L.push('*(尚未提供機器)*'); L.push(''); }
+      groups.forEach(function (g) {
+        L.push('# Network — ' + g.name + (g.range ? ' (`' + g.range + '`)' : ''));
+        L.push('');
+        if (!g.hosts.length) { L.push('*(此 Network 尚未提供機器)*'); L.push(''); }
+        g.hosts.forEach(function (h, i) { L = L.concat(vhlSection(h, i)); });
+      });
     } else {
       L.push('# ' + (kind === 'machines-ad' ? 'Independent Challenges' : 'Target Machines'));
       L.push('');
@@ -559,6 +588,13 @@
     if (ph2 != null) { const b = el('input'); b.type = 'text'; b.placeholder = ph2; b.dataset.role = role2; row.appendChild(b); }
     const rm = el('button', 'oscp-x', '✕'); rm.type = 'button'; rm.addEventListener('click', function () { row.remove(); });
     row.appendChild(rm);
+    return row;
+  }
+  // 三欄的版本（VHL 機器：主機名 / IP / 所屬 Network）
+  function textRow3(ph1, ph2, ph3, role1, role2, role3) {
+    const row = textRow(ph1, ph2, role1, role2);
+    const c = el('input'); c.type = 'text'; c.placeholder = ph3; c.dataset.role = role3;
+    row.insertBefore(c, row.lastChild);
     return row;
   }
 
@@ -625,14 +661,21 @@
           add.addEventListener('click', function () { list.appendChild(textRow('192.168.x.x', null, 'ext-ip')); });
           const wrap = el('div'); wrap.appendChild(list); wrap.appendChild(add);
           dyn.appendChild(field('External Network — 對外主機 IP', wrap));
+        } else if (f === 'vhlnets') {
+          const list = el('div'); list.dataset.list = 'vhlnets';
+          list.appendChild(textRow('Network 名稱（如 Lab Network 1）', '網段 / 說明（如 10.14.1.0/24）', 'net-name', 'net-range'));
+          const add = el('button', 'oscp-add', '＋ 新增 Network'); add.type = 'button';
+          add.addEventListener('click', function () { list.appendChild(textRow('Network 名稱', '網段 / 說明', 'net-name', 'net-range')); });
+          const wrap = el('div'); wrap.appendChild(list); wrap.appendChild(add);
+          dyn.appendChild(field('Network（可新增多個；報告會依 Network 分章）', wrap));
         } else if (f === 'vhlhosts') {
           const list = el('div'); list.dataset.list = 'vhlhosts';
-          list.appendChild(textRow('主機名', 'IP', 'vhl-name', 'vhl-ip'));
-          list.appendChild(textRow('主機名', 'IP', 'vhl-name', 'vhl-ip'));
+          list.appendChild(textRow3('主機名', 'IP', 'Network 名稱', 'vhl-name', 'vhl-ip', 'vhl-net'));
+          list.appendChild(textRow3('主機名', 'IP', 'Network 名稱', 'vhl-name', 'vhl-ip', 'vhl-net'));
           const add = el('button', 'oscp-add', '＋ 新增機器'); add.type = 'button';
-          add.addEventListener('click', function () { list.appendChild(textRow('主機名', 'IP', 'vhl-name', 'vhl-ip')); });
+          add.addEventListener('click', function () { list.appendChild(textRow3('主機名', 'IP', 'Network 名稱', 'vhl-name', 'vhl-ip', 'vhl-net')); });
           const wrap = el('div'); wrap.appendChild(list); wrap.appendChild(add);
-          dyn.appendChild(field('實驗室機器（主機名 + IP，可逐步新增）', wrap));
+          dyn.appendChild(field('實驗室機器（主機名 + IP + 所屬 Network，可逐步新增）', wrap));
         } else if (f === 'webapps') {
           const list = el('div'); list.dataset.list = 'webapps';
           list.appendChild(textRow('應用名稱', 'URL', 'app-name', 'app-url'));
@@ -715,7 +758,14 @@
           return { name: r.querySelector('[data-role="bin-name"]').value.trim(), ver: r.querySelector('[data-role="bin-ver"]').value.trim() };
         }),
         vhlhosts: Array.prototype.map.call(dyn.querySelectorAll('[data-list="vhlhosts"] .oscp-row'), function (r) {
-          return { name: r.querySelector('[data-role="vhl-name"]').value.trim(), ip: r.querySelector('[data-role="vhl-ip"]').value.trim() };
+          return {
+            name: r.querySelector('[data-role="vhl-name"]').value.trim(),
+            ip: r.querySelector('[data-role="vhl-ip"]').value.trim(),
+            net: (r.querySelector('[data-role="vhl-net"]') || { value: '' }).value.trim()
+          };
+        }),
+        vhlnets: Array.prototype.map.call(dyn.querySelectorAll('[data-list="vhlnets"] .oscp-row'), function (r) {
+          return { name: r.querySelector('[data-role="net-name"]').value.trim(), range: r.querySelector('[data-role="net-range"]').value.trim() };
         }),
         iot: Array.prototype.map.call(dyn.querySelectorAll('[data-list="iot"] .oscp-row'), function (r) {
           return { name: r.querySelector('[data-role="iot-name"]').value.trim(), ip: r.querySelector('[data-role="iot-ip"]').value.trim() };
