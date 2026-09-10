@@ -1356,7 +1356,7 @@ mark.search-hit {
   background: var(--bg-2); padding: 14px 16px;
   margin: 0 0 14px; font-size: var(--fs-md); line-height: 1.55; border: 1px solid var(--border);
   white-space: pre-wrap; overflow-wrap: anywhere;
-  width: fit-content; max-width: 100%; box-sizing: border-box;
+  width: 100%; box-sizing: border-box;
 }
 .markdown-body pre code { background: none; padding: 0; font-size: inherit; white-space: inherit; }
 .markdown-body code {
@@ -1369,6 +1369,11 @@ mark.search-hit {
 .markdown-body table {
   border-collapse: collapse; margin: 0 0 16px; display: block; overflow: auto;
   border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+  /* `display:block` on <table> splits it into an outer wrapper box and an
+     anonymous inner table box; without this the wrapper's auto width fills
+     the whole pane while the inner table (real columns) stays shrink-to-fit,
+     leaving a blank strip inside the border to the right of a narrow table. */
+  width: fit-content; max-width: 100%;
 }
 .markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
 .markdown-body th {
@@ -1524,11 +1529,10 @@ mark.search-hit {
 :root[data-theme="dark"] .risk-badge { color: #0f1218; }
 
 /* ---------- Code block with language label ---------- */
-/* 跟著 pre 一起縮到內容寬度（不是整欄都撐滿），這樣短的程式碼不會拉出一大片
-   空白；語言標籤／複製鈕維持絕對定位貼右上角，min-width 留住它們的容身空間。 */
+/* 一律撐滿欄寬，不管指令長短——語言標籤／複製鈕維持絕對定位貼右上角。 */
 .code-block {
   position: relative; margin: 0 0 14px;
-  width: fit-content; max-width: 100%; min-width: 200px; box-sizing: border-box;
+  width: 100%; box-sizing: border-box;
 }
 .code-block pre { margin: 0; width: 100%; }
 .code-block .code-tools {
@@ -1554,7 +1558,10 @@ mark.search-hit {
    this is what lets a long line wrap (same as print — see pdf.js) without
    the numbers drifting out of sync with the lines below it, instead of
    forcing a horizontal scrollbar for just that one line. */
-.code-lines { list-style: none; margin: 0; padding: 0; }
+/* Specificity has to beat `.markdown-body ul, .markdown-body ol` (line ~1344)
+   or its list padding-left/margin-bottom leak into the gutter: a fat empty
+   strip before the line number and a stray 14px gap under the last line. */
+.markdown-body .code-lines { list-style: none; margin: 0; padding: 0; }
 .code-lines > li {
   display: grid; grid-template-columns: auto 1fr; column-gap: 12px;
   white-space: pre-wrap; overflow-wrap: anywhere; margin: 0;

@@ -175,8 +175,8 @@
     ];
   }
 
-  // VHL：把機器歸到它填的 Network 底下（不分大小寫）。表單裡定義過的 Network 依
-  // 定義順序排前面；機器上寫了但沒定義的 Network 接在後面；沒填的歸「未分類」。
+  // VHL：把機器歸到它填的 Level 底下（不分大小寫）。表單裡定義過的 Level 依
+  // 定義順序排前面；機器上寫了但沒定義的 Level 接在後面；沒填的歸「未分類」。
   function groupVhl(nets, hosts) {
     const groups = [], byKey = {};
     function get(name, range) {
@@ -189,7 +189,7 @@
     }
     nets.forEach(function (n) { get(n.name, n.range); });
     hosts.forEach(function (h) { get(h.net).hosts.push(h); });
-    // 沒填 Network 的機器放最後
+    // 沒填 Level 的機器放最後
     const none = byKey.__none__;
     if (none) { groups.splice(groups.indexOf(none), 1); groups.push(none); }
     return groups;
@@ -461,11 +461,11 @@
     }
     else if (kind === 'vhl') {
       L.push('');
-      L.push('**Networks:**');
+      L.push('**Levels:**');
       if (vhlnets.length) vhlnets.forEach(function (n) { L.push('- **' + n.name + '**' + (n.range ? ' — `' + n.range + '`' : '')); });
       else L.push('- *(尚未提供)*');
       L.push('');
-      L.push('| Network | IP | Hostname | local.txt | proof.txt |');
+      L.push('| Level | IP | Hostname | local.txt | proof.txt |');
       L.push('| --- | --- | --- | --- | --- |');
       if (vhlhosts.length) vhlhosts.forEach(function (h) { L.push('| ' + (h.net || '—') + ' | `' + (h.ip || '') + '` | ' + (h.name || '') + ' | ☐ | ☐ |'); });
       else L.push('| *(尚未提供)* |  |  |  |  |');
@@ -558,9 +558,9 @@
       const groups = groupVhl(vhlnets, vhlhosts);
       if (!groups.length) { L.push('# Target Machines'); L.push(''); L.push('*(尚未提供機器)*'); L.push(''); }
       groups.forEach(function (g) {
-        L.push('# Network — ' + g.name + (g.range ? ' (`' + g.range + '`)' : ''));
+        L.push('# Level — ' + g.name + (g.range ? ' (`' + g.range + '`)' : ''));
         L.push('');
-        if (!g.hosts.length) { L.push('*(此 Network 尚未提供機器)*'); L.push(''); }
+        if (!g.hosts.length) { L.push('*(此 Level 尚未提供機器)*'); L.push(''); }
         g.hosts.forEach(function (h, i) { L = L.concat(vhlSection(h, i)); });
       });
     } else {
@@ -663,19 +663,19 @@
           dyn.appendChild(field('External Network — 對外主機 IP', wrap));
         } else if (f === 'vhlnets') {
           const list = el('div'); list.dataset.list = 'vhlnets';
-          list.appendChild(textRow('Network 名稱（如 Lab Network 1）', '網段 / 說明（如 10.14.1.0/24）', 'net-name', 'net-range'));
-          const add = el('button', 'oscp-add', '＋ 新增 Network'); add.type = 'button';
-          add.addEventListener('click', function () { list.appendChild(textRow('Network 名稱', '網段 / 說明', 'net-name', 'net-range')); });
+          list.appendChild(textRow('Level 名稱（如 Level 1）', '說明（選填）', 'net-name', 'net-range'));
+          const add = el('button', 'oscp-add', '＋ 新增 Level'); add.type = 'button';
+          add.addEventListener('click', function () { list.appendChild(textRow('Level 名稱', '說明（選填）', 'net-name', 'net-range')); });
           const wrap = el('div'); wrap.appendChild(list); wrap.appendChild(add);
-          dyn.appendChild(field('Network（可新增多個；報告會依 Network 分章）', wrap));
+          dyn.appendChild(field('Level（可新增多個；報告會依 Level 分章）', wrap));
         } else if (f === 'vhlhosts') {
           const list = el('div'); list.dataset.list = 'vhlhosts';
-          list.appendChild(textRow3('主機名', 'IP', 'Network 名稱', 'vhl-name', 'vhl-ip', 'vhl-net'));
-          list.appendChild(textRow3('主機名', 'IP', 'Network 名稱', 'vhl-name', 'vhl-ip', 'vhl-net'));
+          list.appendChild(textRow3('主機名', 'IP', 'Level 名稱', 'vhl-name', 'vhl-ip', 'vhl-net'));
+          list.appendChild(textRow3('主機名', 'IP', 'Level 名稱', 'vhl-name', 'vhl-ip', 'vhl-net'));
           const add = el('button', 'oscp-add', '＋ 新增機器'); add.type = 'button';
-          add.addEventListener('click', function () { list.appendChild(textRow3('主機名', 'IP', 'Network 名稱', 'vhl-name', 'vhl-ip', 'vhl-net')); });
+          add.addEventListener('click', function () { list.appendChild(textRow3('主機名', 'IP', 'Level 名稱', 'vhl-name', 'vhl-ip', 'vhl-net')); });
           const wrap = el('div'); wrap.appendChild(list); wrap.appendChild(add);
-          dyn.appendChild(field('實驗室機器（主機名 + IP + 所屬 Network，可逐步新增）', wrap));
+          dyn.appendChild(field('實驗室機器（主機名 + IP + 所屬 Level，可逐步新增）', wrap));
         } else if (f === 'webapps') {
           const list = el('div'); list.dataset.list = 'webapps';
           list.appendChild(textRow('應用名稱', 'URL', 'app-name', 'app-url'));
