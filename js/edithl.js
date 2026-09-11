@@ -28,6 +28,14 @@
     const lines = value.split('\n');
     let inFence = false;
     return lines.map(function (line) {
+      // A blank line inside a fence used to come out as <span class="e-code"></span>:
+      // no text, so no line box, so the row collapsed to the gutter's height (28px)
+      // instead of the 31.5px the textarea gives that same line — 3.5px of drift for
+      // every blank line in every code block, accumulating down the note until the
+      // caret and the highlighted row visibly disagree. The zero-width space keeps a
+      // line box without painting anything. (build()'s `|| '​'` only covered
+      // lines whose whole HTML was empty, not an empty span.)
+      if (!line.trim()) return escapeHtml(line) + '​';
       if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; return '<span class="e-code">' + escapeHtml(line) + '</span>'; }
       if (inFence) return '<span class="e-code">' + escapeHtml(line) + '</span>';
       if (/^\s{0,3}#{1,6}\s/.test(line)) return '<span class="e-head">' + escapeHtml(line) + '</span>';
