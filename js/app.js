@@ -2608,19 +2608,17 @@
   }
 
   // ---- Sidebar drawer ------------------------------------------------------
-  // 側邊欄是浮動抽屜：預設收起，筆記區永遠吃滿整個寬度。
-  // hoverOpened 記錄「是滑到左緣把手拉出來的」— 這種情況滑鼠離開抽屜就自動收回；
-  // 用按鈕／快捷鍵打開、或在抽屜裡點過東西的，就釘住直到明確關閉。
-  let sidebarHoverOpened = false;
+  // 側邊欄是浮動抽屜：預設收起，筆記區永遠吃滿整個寬度。打開只認明確動作——
+  // 點左緣把手、頂列的 ☰、或 Ctrl+\——不再用滑過左緣自動彈出；收回則靠點主區／
+  // 頂列、Esc 或開啟筆記。
   function isSidebarOpen() {
     const app = $('#app');
     return !!(app && app.classList.contains('sidebar-open'));
   }
-  function setSidebarOpen(v, byHover) {
+  function setSidebarOpen(v) {
     const app = $('#app');
     if (!app) return;
     app.classList.toggle('sidebar-open', !!v);
-    sidebarHoverOpened = !!v && !!byHover;
   }
   function toggleSidebar() { setSidebarOpen(!isSidebarOpen()); }
   function initSidebarDrawer() {
@@ -2628,24 +2626,9 @@
     const handle = $('#sidebar-reopen');
     const toggleBtn = $('#sidebar-collapse');
     if (!sidebar) return;
-    // 滑到左緣把手 → 拉出；滑鼠離開抽屜（且沒釘住）→ 收回
-    if (handle) {
-      handle.addEventListener('mouseenter', function () { if (!isSidebarOpen()) setSidebarOpen(true, true); });
-      handle.addEventListener('click', function () { setSidebarOpen(true); });
-    }
-    // 用 document 的 mousemove 而不是抽屜的 mouseleave：滑鼠從把手直接跳到主區時，
-    // 瀏覽器可能從沒把游標算進抽屜裡，mouseleave 根本不會發生。
-    document.addEventListener('mousemove', function (e) {
-      if (!sidebarHoverOpened) return;
-      if (e.buttons) return;                 // 拖曳筆記到資料夾途中滑出抽屜不算離開
-      // 用抽屜「滑出後」的位置判斷，而不是游標下的元素：滑入動畫還沒跑完時，
-      // 停在把手上的游標其實還在抽屜外面，若看元素會立刻誤判成離開。
-      const inside = e.clientX <= sidebar.offsetWidth + 4 && e.clientY >= sidebar.getBoundingClientRect().top;
-      if (inside) return;
-      setSidebarOpen(false);
-    });
-    sidebar.addEventListener('mousedown', function () { sidebarHoverOpened = false; });
-    sidebar.addEventListener('focusin', function () { sidebarHoverOpened = false; });
+    // 點左緣把手（中間那條帶箭頭的把手）才拉出抽屜——刻意不再用滑過去自動彈出，
+    // 免得開著筆記時游標一碰到左邊就跳出來擋住內容。
+    if (handle) handle.addEventListener('click', function () { setSidebarOpen(true); });
     // 點到主區或頂列（抽屜鈕除外）→ 收回；右鍵選單、對話框等都在這兩區之外，不受影響
     document.addEventListener('mousedown', function (e) {
       if (!isSidebarOpen()) return;
