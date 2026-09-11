@@ -601,6 +601,8 @@
   // annotation editor calls this after saving, otherwise the stale URL would
   // keep showing the un-annotated picture.
   function invalidateImage(id) {
+    // Drop the shared blob too, or the next fetch returns the pre-annotation bytes.
+    if (global.Store && Store.invalidateImage) Store.invalidateImage(id);
     if (!urlCache[id]) return;
     try { URL.revokeObjectURL(urlCache[id]); } catch (e) {}
     delete urlCache[id];
@@ -612,9 +614,9 @@
       const id = img.getAttribute('data-img-id');
       if (!id) return;
       if (urlCache[id]) { img.src = urlCache[id]; return; }
-      Store.getImage(id).then(function (rec) {
-        if (rec && rec.blob) {
-          const url = URL.createObjectURL(rec.blob);
+      Store.getImageBlob(id).then(function (blob) {
+        if (blob) {
+          const url = URL.createObjectURL(blob);
           urlCache[id] = url;
           img.src = url;
         } else {
@@ -649,9 +651,9 @@
     const imgs = Array.prototype.slice.call(container.querySelectorAll('img[data-img-id]'));
     return Promise.all(imgs.map(function (img) {
       const id = img.getAttribute('data-img-id');
-      return Store.getImage(id).then(function (rec) {
-        if (!rec || !rec.blob) return;
-        return blobToDataURL(rec.blob).then(function (durl) {
+      return Store.getImageBlob(id).then(function (blob) {
+        if (!blob) return;
+        return blobToDataURL(blob).then(function (durl) {
           img.setAttribute('src', durl);
           img.removeAttribute('data-img-id');
         });

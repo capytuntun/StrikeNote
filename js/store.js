@@ -19,6 +19,9 @@
     return Object.assign({ 'X-Requested-With': 'report-notes' }, extra || {});
   }
 
+  // Image bytes fetched this session, keyed by id (see getImageBlob).
+  const imgBlobCache = {};
+
   function delay(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
   function req(method, path, body, opts, attempt) {
@@ -227,11 +230,28 @@
       return req('POST', '/api/images', blob, { raw: true, headers: { 'Content-Type': blob.type || 'image/png' } })
         .then(r => r.id);
     },
+    // Image bytes, cached by id for this session. The on-screen preview
+    // (MD.resolveImages) and the PDF export (MD.inlineImagesAsDataURL) both go
+    // through here, so a note's screenshots are fetched from the server once and
+    // then reused — the PDF no longer re-downloads every image the preview
+    // already has, which is what made exporting an image-heavy report crawl.
+    // Cleared by invalidateImage after an annotation rewrites an image.
+    getImageBlob: function (id) {
+      if (imgBlobCache[id]) return Promise.resolve(imgBlobCache[id]);
+      return req('GET', '/api/images/' + id, undefined, { blob: true })
+        .then(function (blob) { imgBlobCache[id] = blob; return blob; })
+        .catch(function () { return null; });
+    },
+    invalidateImage: function (id) { delete imgBlobCache[id]; },
+    // Blob + annotation metadata (shapes / canAnnotate / mime). Only the
+    // annotation editor needs the metadata; rendering and PDF want the bytes
+    // only and call getImageBlob, so the /meta request is not on the hot path.
     getImage: function (id) {
       return Promise.all([
-        req('GET', '/api/images/' + id, undefined, { blob: true }),
-        req('GET', '/api/images/' + id + '/meta')
+        Store.getImageBlob(id),
+        req('GET', '/api/images/' + id + '/meta').catch(function () { return {}; })
       ]).then(function (res) {
+        if (!res[0]) return null;
         return { id: id, blob: res[0], type: res[1].mime, shapes: res[1].shapes, canAnnotate: res[1].canAnnotate };
       }).catch(function () { return null; });
     },
