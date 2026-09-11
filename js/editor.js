@@ -260,7 +260,12 @@
       } else {
         changed = block.replace(/^/gm, '  ');
       }
-      replaceRange(lineStart, blockEnd, changed, lineStart, lineStart + changed.length);
+      // Multi-line: keep the block selected so Tab can be pressed again. Single
+      // line: move the caret with the text — selecting the line here meant the
+      // next key typed wiped it.
+      if (multi) { replaceRange(lineStart, blockEnd, changed, lineStart, lineStart + changed.length); return; }
+      const delta = changed.length - block.length;
+      replaceRange(lineStart, blockEnd, changed, Math.max(lineStart, s + delta), Math.max(lineStart, en + delta));
     }
 
     // ---------------- autocomplete ----------------
@@ -348,8 +353,11 @@
       if (!item || !ctx) { closePopup(); return; }
       if (item.kind === 'lang') {
         // ```bash= — the '=' turns on line numbers, which every new block gets by default.
+        // If the '=' (and the rest of the block) is already there — the /code snippet
+        // leaves the caret at ```|=\n\n``` — only fill in the language; appending a
+        // second "=\n\n```" used to leave a stray ```= line and an extra empty block.
         const from = ctx.from, to = ctx.to;
-        const text = item.label + '=\n\n```';
+        const text = ta.value[to] === '=' ? item.label : item.label + '=\n\n```';
         const caret = from + item.label.length + 2;
         replaceRange(from, to, text, caret, caret);
       } else if (item.kind === 'callout') {

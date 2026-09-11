@@ -545,8 +545,13 @@
     }
   };
 
+  // breaks: true — HackMD semantics, which this editor is modelled on: a newline in
+  // the source is a <br> in the output, so "one sentence per line" reads the same
+  // in the preview as in the editor. CommonMark's default (a single newline is a
+  // soft break that collapses to a space) is what people switching from HackMD
+  // report as "the preview merged my lines".
   marked.use({
-    gfm: true, breaks: false,
+    gfm: true, breaks: true,
     extensions: [tocExtension, riskExtension, calloutExtension, containerExtension, wikiLinkExtension, hashtagExtension],
     renderer: renderer
   });

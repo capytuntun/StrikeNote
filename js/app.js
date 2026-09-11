@@ -1562,7 +1562,12 @@
       return (ordered ? (i + 1) + '. ' : prefix) + l;
     }).join('\n');
     const nv = g.v.slice(0, lineStart) + newBlock + g.v.slice(lineEnd);
-    setRange(nv, lineStart, lineStart + newBlock.length);
+    // Multi-line: keep the whole block selected so a second click applies to the
+    // same lines. Single line: just shift the caret past the prefix. Selecting
+    // that one line (the old behaviour) meant the very next key typed replaced it.
+    if (block.indexOf('\n') >= 0) { setRange(nv, lineStart, lineStart + newBlock.length); return; }
+    const delta = newBlock.length - block.length;
+    setRange(nv, g.s + delta, g.e + delta);
   }
   function applyFormat(fmt) {
     switch (fmt) {
