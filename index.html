@@ -66,13 +66,19 @@
 
       <!-- 開啟筆記時，標題與編輯按鈕直接顯示在這條 bar 上（display:contents 併入 topbar）-->
       <div id="topbar-note" class="topbar-note">
+        <!-- 檢視模式（分割／編輯／預覽）靠左：放在彈性空間之前，就會緊接在 logo 後面 -->
+        <div class="mode-switch" role="group" aria-label="檢視模式">
+          <button data-mode="split" class="mode-btn active" title="分割檢視" data-icon="columns">分割</button>
+          <button data-mode="edit" class="mode-btn" title="純編輯" data-icon="pen-line">編輯</button>
+          <button data-mode="preview" class="mode-btn" title="純預覽" data-icon="eye">預覽</button>
+        </div>
         <!-- 標題連同資料夾路徑前綴（如 測試資料夾\測試筆記）包成一組，整組絕對定位
              置中在頂列正中線；輸入框寬度由 app.js 依文字量測，兩者才接得起來 -->
         <div class="note-title-wrap">
           <span id="note-path" class="note-path" title="所在資料夾"></span>
           <input id="note-title" class="note-title" placeholder="未命名筆記" />
         </div>
-        <!-- 保留標題原本吃掉的彈性空間，讓水豚／檢視模式／版本／分享／PDF 這些按鈕的位置不受影響 -->
+        <!-- 保留標題原本吃掉的彈性空間，把水豚／版本／分享／PDF 這些右側按鈕推到最右 -->
         <div class="note-title-spacer" aria-hidden="true"></div>
         <!-- 彩蛋：打字時會出現一隻正面跳舞的小水豚 -->
         <span id="capybara" class="capybara" aria-hidden="true" title="卡皮巴拉正在為你加油 🎵">
@@ -94,11 +100,6 @@
           </svg>
         </span>
         <div id="presence" class="presence" aria-label="在線協作者"></div>
-        <div class="mode-switch" role="group" aria-label="檢視模式">
-          <button data-mode="split" class="mode-btn active" title="分割檢視" data-icon="columns">分割</button>
-          <button data-mode="edit" class="mode-btn" title="純編輯" data-icon="pen-line">編輯</button>
-          <button data-mode="preview" class="mode-btn" title="純預覽" data-icon="eye">預覽</button>
-        </div>
         <button id="history-btn" class="btn" title="版本紀錄" data-icon="history">版本</button>
         <button id="share-btn" class="btn" title="分享這篇筆記">分享</button>
         <button id="export-pdf" class="btn btn-primary" title="輸出 PDF" data-icon="download">PDF</button>
