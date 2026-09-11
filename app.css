@@ -246,8 +246,18 @@ input, select, textarea { transition: border-color var(--dur-1) var(--ease-out),
 :root[data-theme="dark"] .theme-ic-light { display: none; }
 :root[data-theme="dark"] .theme-ic-dark { display: inline-flex; }
 
-#app { display: flex; flex-direction: column; height: 100vh; }
-#app-body { display: flex; flex: 1; min-height: 0; }
+/* The app shell must never scroll — the topbar is a fixed-height first row and the
+   scrolling lives in the inner panes (#editor, .preview-scroll, .empty-state, …).
+   `overflow: clip` (not `hidden`: hidden still allows programmatic scrolling) makes
+   #app/#app-body impossible to scroll, so a transient overflow — a reflow during
+   load, an image resizing the preview, scroll-chaining off an inner pane, or a
+   scrollIntoView/focus walking up the ancestors — can never push the topbar off the
+   top and leave a white strip at the bottom (the whole bar would vanish otherwise).
+   `position: relative` makes #app the containing block for any stray absolutely
+   positioned descendant, so `clip` actually clips it instead of it escaping to the
+   viewport. At rest nothing overflows, so nothing is clipped away. */
+#app { display: flex; flex-direction: column; height: 100vh; position: relative; overflow: clip; }
+#app-body { display: flex; flex: 1; min-height: 0; overflow: clip; }
 
 /* ---------- 全域頂列 ---------- */
 .topbar {
