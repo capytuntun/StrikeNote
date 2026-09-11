@@ -1479,6 +1479,10 @@
   }
 
   // ---- Paste image -------------------------------------------------------
+  // Store.putImage() is a network round-trip, so the caret must be captured
+  // synchronously at paste time — reading editorEl.selectionStart only once the
+  // upload resolves inserts wherever the user's cursor has drifted to *by then*
+  // (they kept typing elsewhere, or switched notes entirely), not where they pasted.
   function handlePaste(e) {
     const items = (e.clipboardData || {}).items;
     if (!items) return;
@@ -1487,8 +1491,9 @@
       if (it.kind === 'file' && it.type.indexOf('image/') === 0) {
         e.preventDefault();
         const blob = it.getAsFile();
+        const at = { s: editorEl.selectionStart, e: editorEl.selectionEnd, noteId: state.currentId };
         Store.putImage(blob).then(function (id) {
-          insertAtCursor('\n![貼上的圖片](img:' + id + ')\n');
+          if (!insertAtCursor('\n![貼上的圖片](img:' + id + ')\n', at)) return;
           if (editorEl._hlRefresh) editorEl._hlRefresh();
           scheduleSave();
           renderPreviewNow();
@@ -1498,13 +1503,23 @@
     }
   }
 
-  function insertAtCursor(text) {
-    const start = editorEl.selectionStart, end = editorEl.selectionEnd;
+  // `at` (optional): { s, e, noteId } captured before an async upload, so the
+  // insert lands where the user acted, not wherever the caret/note ended up by
+  // the time the upload finished. Returns false (and skips the insert) if the
+  // note was switched away from in the meantime, rather than splicing the text
+  // into whatever note now happens to be open.
+  function insertAtCursor(text, at) {
+    if (at && at.noteId !== state.currentId) {
+      toast('圖片已上傳，但筆記已切換，未插入內容');
+      return false;
+    }
+    const start = at ? at.s : editorEl.selectionStart, end = at ? at.e : editorEl.selectionEnd;
     const v = editorEl.value;
     editorEl.value = v.slice(0, start) + text + v.slice(end);
     const pos = start + text.length;
     editorEl.selectionStart = editorEl.selectionEnd = pos;
     updateStatus();
+    return true;
   }
 
   // ---- Formatting toolbar ------------------------------------------------
@@ -1708,10 +1723,11 @@
   function insertPdfFile(file) {
     if (!file || file.type !== 'application/pdf') return false;
     statusSave.textContent = '上傳 PDF…';
+    const at = { s: editorEl.selectionStart, e: editorEl.selectionEnd, noteId: state.currentId };
     Store.putImage(file).then(function (id) {
       const name = (file.name || 'PDF').replace(/\.pdf$/i, '');
-      editorEl.focus();
-      insertAtCursor('\n![' + name + '](pdf:' + id + ')\n');
+      if (at.noteId === state.currentId) editorEl.focus();
+      if (!insertAtCursor('\n![' + name + '](pdf:' + id + ')\n', at)) return;
       if (editorEl._hlRefresh) editorEl._hlRefresh();
       scheduleSave();
       renderPreviewNow();
@@ -1831,14 +1847,15 @@
     });
     if (!images.length) return false;
     statusSave.textContent = '插入圖片…';
+    const at = { s: editorEl.selectionStart, e: editorEl.selectionEnd, noteId: state.currentId };
     Promise.all(images.map(function (f) {
       return Store.putImage(f).then(function (id) {
         const name = (f.name || '圖片').replace(/\.[^.]+$/, '');
         return '![' + name + '](img:' + id + ')';
       });
     })).then(function (mds) {
-      editorEl.focus();
-      insertAtCursor('\n' + mds.join('\n') + '\n');
+      if (at.noteId === state.currentId) editorEl.focus();
+      if (!insertAtCursor('\n' + mds.join('\n') + '\n', at)) return;
       if (editorEl._hlRefresh) editorEl._hlRefresh();
       scheduleSave();
       renderPreviewNow();

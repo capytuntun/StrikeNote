@@ -274,6 +274,18 @@
       openPopup();
     }
 
+    // Whether the text before `lineStart` leaves us inside an already-open fence —
+    // a bare ``` typed there is someone closing that block, not opening a new one,
+    // so it must not offer (and Enter must not accept) the language autocomplete.
+    function inFenceBefore(lineStart) {
+      const before = ta.value.slice(0, lineStart).split('\n');
+      let inFence = false;
+      for (let i = 0; i < before.length; i++) {
+        if (/^\s*(```|~~~)/.test(before[i])) inFence = !inFence;
+      }
+      return inFence;
+    }
+
     function detectContext() {
       const caret = ta.selectionStart;
       if (caret !== ta.selectionEnd) return null;
@@ -281,7 +293,7 @@
       const lineStart = v.lastIndexOf('\n', caret - 1) + 1;
       const line = v.slice(lineStart, caret);
       let m;
-      if ((m = line.match(/^```([a-zA-Z0-9+#.-]*)$/))) {
+      if ((m = line.match(/^```([a-zA-Z0-9+#.-]*)$/)) && !inFenceBefore(lineStart)) {
         return { type: 'lang', query: m[1].toLowerCase(), from: lineStart + 3, to: caret };
       }
       // '[[' -> offer note titles to link to
