@@ -1002,8 +1002,11 @@ mark.search-hit {
 /* 工具列裡的按鈕保持自身寬度，不像側邊欄那樣被 fl:1 撐開而擠壓整條 bar */
 .toolbar-right .btn { flex: 0 0 auto; }
 
-/* 頂列筆記控制項統一尺寸：模式切換 / 分享 / PDF 同高、同字級 */
+/* 頂列筆記控制項統一尺寸：模式切換 / 版本 / 分享 / PDF 同高、同字級。
+   #history-btn（版本）沒被收進來時會沿用基底 .btn（padding 7px、fs-base），
+   比旁邊的 #share-btn 高一截，所以三顆一起指定。 */
 #topbar .mode-switch,
+#topbar #history-btn,
 #topbar #share-btn,
 #topbar #export-pdf {
   height: 32px; font-size: var(--fs-sm); line-height: 1;
@@ -1011,6 +1014,7 @@ mark.search-hit {
 #topbar .mode-btn {
   display: inline-flex; align-items: center; height: 100%; padding: 0 11px; font-size: var(--fs-sm);
 }
+#topbar #history-btn,
 #topbar #share-btn,
 #topbar #export-pdf {
   display: inline-flex; align-items: center; padding: 0 12px;
