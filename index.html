@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=95">
+  <link rel="stylesheet" href="app.css?v=96">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -142,9 +142,10 @@
         </div>
         <button id="new-folder" class="btn" data-icon="folder-plus">資料夾</button>
       </div>
-      <!-- 工具列：關聯圖（反向連結＋標籤的力導向圖） -->
+      <!-- 工具列：關聯圖（反向連結＋標籤的力導向圖）、垃圾桶（刪除的筆記保留期內可復原） -->
       <div class="sidebar-actions sidebar-tools">
         <button id="graph-open-btn" class="btn" title="用力導向圖看所有筆記的反向連結跟標籤關聯" data-icon="graph">關聯圖</button>
+        <button id="trash-open-btn" class="btn" title="刪除的筆記會先放在這裡，保留期內可以復原或永久刪除" data-icon="trash">垃圾桶</button>
       </div>
       <div class="search-box">
         <input id="search-input" type="text" placeholder="搜尋筆記…（Ctrl+K）"
@@ -156,7 +157,7 @@
         <span class="batch-count"></span>
         <div class="batch-actions">
           <button id="batch-move" class="batch-btn" type="button" title="移動所選筆記到資料夾" data-icon="folder">移動</button>
-          <button id="batch-delete" class="batch-btn danger" type="button" title="刪除所選筆記" data-icon="trash">刪除</button>
+          <button id="batch-delete" class="batch-btn danger" type="button" title="把所選筆記移到垃圾桶" data-icon="trash">刪除</button>
           <button id="batch-clear" class="batch-btn ghost" type="button" title="取消選取" data-icon="x"></button>
         </div>
       </div>
@@ -302,7 +303,7 @@
   <script src="js/merge.js?v=2"></script>
   <script src="js/mindmap.js?v=3"></script>
   <script src="js/graph.js?v=3"></script>
-  <script src="js/store.js?v=47"></script>
+  <script src="js/store.js?v=48"></script>
   <script src="js/auth.js?v=46"></script>
   <script src="js/migrate.js?v=41"></script>
   <script src="js/admin.js?v=48"></script>
@@ -321,6 +322,7 @@
   <script src="js/pdf.js?v=48"></script>
   <script src="js/book.js?v=4"></script>
   <script src="js/versions.js?v=2"></script>
-  <script src="js/app.js?v=73"></script>
+  <script src="js/trash.js?v=1"></script>
+  <script src="js/app.js?v=74"></script>
 </body>
 </html>

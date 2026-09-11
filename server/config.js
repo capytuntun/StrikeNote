@@ -71,7 +71,11 @@ const config = {
   // Low-disk warning for admins (storage panel + startup/hourly log line):
   // trip when free space on the MariaDB data directory drops below either.
   storageWarnMb: int(process.env.STORAGE_WARN_MB, 1024),
-  storageWarnPct: int(process.env.STORAGE_WARN_PCT, 10)
+  storageWarnPct: int(process.env.STORAGE_WARN_PCT, 10),
+
+  // Deleting a note only moves it to the trash; it is deleted for good this many
+  // days later (hourly sweep), or sooner if the owner empties the trash.
+  trashKeepDays: int(process.env.TRASH_KEEP_DAYS, 30)
 };
 
 // An invite code that only exists in memory would change on every restart, so

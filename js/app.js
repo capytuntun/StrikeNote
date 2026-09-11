@@ -397,9 +397,9 @@
     const ids = Array.from(selected);
     if (!ids.length) return;
     showConfirm({
-      title: '刪除筆記',
-      message: '確定刪除所選的 ' + ids.length + ' 篇筆記？\n此動作無法復原。',
-      ok: '刪除', danger: true
+      title: '移至垃圾桶',
+      message: '把所選的 ' + ids.length + ' 篇筆記移到垃圾桶？\n保留期內可以從側邊欄的「垃圾桶」復原。',
+      ok: '移至垃圾桶'
     }).then(function (ok) {
       if (!ok) return;
       Promise.all(ids.map(function (id) { return Store.deleteNote(id).catch(function () {}); })).then(function () {
@@ -409,6 +409,7 @@
         if (state.currentId && gone[state.currentId]) showEmpty();
         selected.clear();
         refreshViews();
+        toast('已移至垃圾桶 ' + ids.length + ' 篇筆記');
       });
     });
   }
@@ -1934,7 +1935,7 @@
       { icon: 'link', label: '複製連結', fn: function () { copyNoteLink(note); } },
       { icon: 'users', label: '分享…', fn: function () { showShareDialog(note); } },
       { icon: 'copy', label: '複製筆記', fn: function () { duplicateNote(note); } },
-      { icon: 'trash', label: '刪除這篇筆記', fn: function () { deleteNote(note); }, danger: true }
+      { icon: 'trash', label: '移至垃圾桶', fn: function () { deleteNote(note); }, danger: true }
     ];
     openMenuAt(r.right, r.bottom + 4, actions, { alignRight: true });
   }
@@ -2023,7 +2024,7 @@
       actions.push({ icon: 'users', label: '分享…', fn: function () { showShareDialog(item); } });
       actions.push({ icon: 'pencil', label: '重新命名', fn: function () { renameNote(item); } });
       actions.push({ icon: 'copy', label: '複製', fn: function () { duplicateNote(item); } });
-      actions.push({ icon: 'trash', label: '刪除筆記', fn: function () { deleteNote(item); }, danger: true });
+      actions.push({ icon: 'trash', label: '移至垃圾桶', fn: function () { deleteNote(item); }, danger: true });
     }
     openMenuAt(e.clientX, e.clientY, actions);
   }
@@ -2390,18 +2391,21 @@
       });
     });
   }
+  // "Delete" is a move to the trash (server keeps the row with deleted_at set);
+  // the trash dialog (js/trash.js) is where it is restored or really deleted.
   function deleteNote(note) {
     showConfirm({
-      title: '刪除筆記',
-      message: '確定刪除筆記「' + (note.title || '未命名筆記') + '」？\n此動作無法復原。',
-      ok: '刪除', danger: true
+      title: '移至垃圾桶',
+      message: '把筆記「' + (note.title || '未命名筆記') + '」移到垃圾桶？\n保留期內可以從側邊欄的「垃圾桶」復原。',
+      ok: '移至垃圾桶'
     }).then(function (ok) {
       if (!ok) return;
       Store.deleteNote(note.id).then(function () {
         state.notes = state.notes.filter(function (n) { return n.id !== note.id; });
         if (state.currentId === note.id) showEmpty();
         refreshViews();
-      });
+        toast('已移至垃圾桶');
+      }).catch(function (e) { toast('刪除失敗：' + (e && e.message || e)); });
     });
   }
   function deleteFolder(folder) {
@@ -2412,7 +2416,7 @@
     if (subFolders > 0) detail += '、' + subFolders + ' 個子資料夾';
     showConfirm({
       title: '刪除資料夾',
-      message: '確定刪除資料夾「' + folder.name + '」？\n將一併刪除其中所有內容（' + detail + '）。\n此動作無法復原。',
+      message: '確定刪除資料夾「' + folder.name + '」？（' + detail + '）\n資料夾本身會直接刪除；裡面的筆記會移到垃圾桶，保留期內可以復原（復原後放在最上層）。',
       ok: '刪除', danger: true
     }).then(function (ok) {
       if (!ok) return;
@@ -2803,6 +2807,17 @@
       Graph.open(state.notes, {
         onOpenNote: function (note) { openNote(note.id); },
         onOpenTag: function (tag) { browseTag(tag); }
+      });
+    });
+    // 垃圾桶：復原／永久刪除過之後只重抓筆記清單，不走 loadData（它會重開上一篇筆記）
+    const trashBtn = $('#trash-open-btn');
+    if (trashBtn) trashBtn.addEventListener('click', function () {
+      if (!window.Trash) return;
+      Trash.open({
+        folders: state.folders,
+        onChanged: function () {
+          Store.getNotes().then(function (notes) { state.notes = notes; refreshViews(); });
+        }
       });
     });
 

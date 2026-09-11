@@ -260,7 +260,10 @@ const MIGRATIONS = [
   ['notes', 'rev', 'INT NOT NULL DEFAULT 0'],
   ['notes', 'access', "VARCHAR(16) NOT NULL DEFAULT 'restricted'"],
   ['notes', 'access_perm', "VARCHAR(8) NOT NULL DEFAULT 'read'"],
-  ['folders', 'is_book', 'TINYINT(1) NOT NULL DEFAULT 0']
+  ['folders', 'is_book', 'TINYINT(1) NOT NULL DEFAULT 0'],
+  // Soft delete: ms epoch when the note went into the trash, NULL = live. Shares,
+  // versions and images stay attached so a restore brings everything back.
+  ['notes', 'deleted_at', 'BIGINT NULL']
 ];
 
 async function addColumnIfMissing(table, col, ddl) {
@@ -364,20 +367,21 @@ const q = {
   deleteFolder: stmt('DELETE FROM folders WHERE id = ? AND owner_id = ?'),
 
   // notes
-  notesOwned: stmt('SELECT * FROM notes WHERE owner_id = ?'),
+  // Every listing excludes trashed notes; only the trash statements below see them.
+  notesOwned: stmt('SELECT * FROM notes WHERE owner_id = ? AND deleted_at IS NULL'),
   notesSharedWith: stmt(`
     SELECT n.*, s.perm AS share_perm, u.username AS owner_name
     FROM notes n
     JOIN shares s ON s.note_id = n.id
     JOIN users u ON u.id = n.owner_id
-    WHERE s.user_id = ?`),
+    WHERE s.user_id = ? AND n.deleted_at IS NULL`),
   // Notes opened up to the whole site by their owner. An explicit share for the
   // same person takes precedence (it may grant more), so those rows are skipped.
   notesSiteWide: stmt(`
     SELECT n.*, n.access_perm AS share_perm, u.username AS owner_name
     FROM notes n
     JOIN users u ON u.id = n.owner_id
-    WHERE n.access = 'site' AND n.owner_id != ?
+    WHERE n.access = 'site' AND n.owner_id != ? AND n.deleted_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM shares s WHERE s.note_id = n.id AND s.user_id = ?)`),
   setAccess: stmt('UPDATE notes SET access = ?, access_perm = ? WHERE id = ?'),
   noteById: stmt('SELECT * FROM notes WHERE id = ?'),
@@ -390,7 +394,25 @@ const q = {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
   updateNote: stmt(
     'UPDATE notes SET folder_id = ?, title = ?, content = ?, meta = ?, updated_at = ?, rev = ? WHERE id = ?'),
+  // Hard delete — only the trash sweep / purge call this; "delete" in the UI is trashNote.
   deleteNote: stmt('DELETE FROM notes WHERE id = ?'),
+
+  // trash
+  trashNote: stmt('UPDATE notes SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL'),
+  // The folder may have been deleted while the note sat in the trash; a dangling
+  // folder_id would make the restored note invisible on the dashboard, so it
+  // lands at the top level instead.
+  restoreNote: stmt(`
+    UPDATE notes n
+    LEFT JOIN folders f ON f.id = n.folder_id
+    SET n.deleted_at = NULL, n.folder_id = IF(f.id IS NULL, NULL, n.folder_id)
+    WHERE n.id = ? AND n.deleted_at IS NOT NULL`),
+  // The list never carries note bodies, only sizes (CHAR_LENGTH: the UI shows characters).
+  trashOf: stmt(`
+    SELECT id, folder_id, title, deleted_at, updated_at, CHAR_LENGTH(content) AS chars
+    FROM notes WHERE owner_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC`),
+  trashExpired: stmt('SELECT id FROM notes WHERE deleted_at IS NOT NULL AND deleted_at < ?'),
+  purgeTrashOf: stmt('DELETE FROM notes WHERE owner_id = ? AND deleted_at IS NOT NULL'),
 
   // note versions — the list view never selects `content`, only its length, so
   // opening the history of a long note costs one small row per version.
@@ -474,7 +496,7 @@ const q = {
   // Params: (needle, userId, userId)
   imageVisibleTo: stmt(`
     SELECT 1 AS ok FROM notes n
-    WHERE INSTR(n.content, ?) > 0
+    WHERE INSTR(n.content, ?) > 0 AND n.deleted_at IS NULL
       AND (n.owner_id = ? OR n.access = 'site'
            OR EXISTS (SELECT 1 FROM shares s WHERE s.note_id = n.id AND s.user_id = ?))
     LIMIT 1`),

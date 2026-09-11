@@ -289,6 +289,61 @@ async function main() {
   r = await call(bob, 'POST', '/api/books/' + fid + '/links', { html: html });
   ok(r.status === 404, "bob cannot share admin's folder", r.status);
 
+  if (!OLD) {
+    section('trash (soft delete, restore, purge)');
+    r = await call(admin, 'POST', '/api/notes', { title: '垃圾桶測試', content: 'bin me' });
+    const binId = r.data.note.id;
+    r = await call(bob, 'DELETE', '/api/notes/' + binId);
+    ok(r.status === 404, 'stranger cannot trash a note', r.status);
+    r = await call(admin, 'DELETE', '/api/notes/' + binId);
+    ok(r.status === 200, 'owner moves a note to the trash');
+    r = await call(admin, 'GET', '/api/notes/' + binId);
+    ok(r.status === 404, 'trashed note is 404 on GET', r.status);
+    r = await call(admin, 'GET', '/api/notes');
+    ok(!r.data.notes.some(n => n.id === binId), 'trashed note is gone from the list');
+    r = await call(admin, 'PUT', '/api/notes/' + binId, { title: 'x', content: 'y' });
+    ok(r.status === 404, 'trashed note cannot be saved to', r.status);
+    r = await call(admin, 'GET', '/api/trash');
+    ok(r.status === 200 && typeof r.data.keepDays === 'number' &&
+       r.data.notes.some(n => n.id === binId && n.deletedAt && n.expiresAt > n.deletedAt && n.title === '垃圾桶測試'),
+      'trash lists it with an expiry', r.data);
+    r = await call(bob, 'GET', '/api/trash');
+    ok(r.status === 200 && !r.data.notes.some(n => n.id === binId), 'trash is per owner');
+    r = await call(bob, 'POST', '/api/notes/' + binId + '/restore');
+    ok(r.status === 404, 'stranger cannot restore', r.status);
+    r = await call(admin, 'POST', '/api/notes/' + binId + '/restore');
+    ok(r.status === 200 && r.data.note && r.data.note.id === binId, 'owner restores', r.data);
+    r = await call(admin, 'GET', '/api/notes/' + binId);
+    ok(r.status === 200 && r.data.note.content === 'bin me', 'restored note reads back intact');
+    r = await call(admin, 'POST', '/api/notes/' + binId + '/restore');
+    ok(r.status === 404, 'restoring a live note is 404', r.status);
+    await call(admin, 'DELETE', '/api/notes/' + binId);
+    r = await call(bob, 'DELETE', '/api/trash/' + binId);
+    ok(r.status === 404, 'stranger cannot purge', r.status);
+    r = await call(admin, 'DELETE', '/api/trash/' + binId);
+    ok(r.status === 200, 'owner purges for good');
+    r = await call(admin, 'GET', '/api/trash');
+    ok(!r.data.notes.some(n => n.id === binId), 'purged note left the trash');
+    r = await call(admin, 'POST', '/api/notes/' + binId + '/restore');
+    ok(r.status === 404, 'purged note cannot be restored', r.status);
+    // Restoring after the folder it lived in was deleted lands at the top level.
+    r = await call(admin, 'POST', '/api/folders', { name: '暫存夾' });
+    const tmpFolder = r.data.folder.id;
+    r = await call(admin, 'POST', '/api/notes', { title: '夾內', content: 'in folder', folderId: tmpFolder });
+    const bin3 = r.data.note.id;
+    await call(admin, 'DELETE', '/api/notes/' + bin3);
+    await call(admin, 'DELETE', '/api/folders/' + tmpFolder);
+    r = await call(admin, 'POST', '/api/notes/' + bin3 + '/restore');
+    ok(r.status === 200 && r.data.note.folderId === null, 'restore after its folder was deleted → top level', r.data);
+    r = await call(admin, 'POST', '/api/notes', { title: '清空測試', content: 'z' });
+    await call(admin, 'DELETE', '/api/notes/' + r.data.note.id);
+    await call(admin, 'DELETE', '/api/notes/' + bin3);
+    r = await call(admin, 'DELETE', '/api/trash');
+    ok(r.status === 200 && r.data.purged === 2, 'empty trash reports what it removed', r.data);
+    r = await call(admin, 'GET', '/api/trash');
+    ok(r.status === 200 && r.data.notes.length === 0, 'trash is empty afterwards');
+  }
+
   section('SSE');
   {
     const ac = new AbortController();

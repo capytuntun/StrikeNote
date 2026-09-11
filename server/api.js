@@ -27,7 +27,10 @@ function uid(prefix) {
 
 // ---------------- permissions ----------------
 async function permFor(user, note) {
-  if (!note) return null;
+  // A trashed note does not exist as far as every normal route is concerned —
+  // reading, saving, versions, shares, images all 404. Only the trash endpoints
+  // (listTrash / restoreNote / purgeNote) look at those rows, owner-only.
+  if (!note || note.deleted_at) return null;
   if (note.owner_id === user.id) return 'owner';
   const s = await q.shareFor.get(note.id, user.id);
   if (s) return s.perm;              // 'read' | 'edit'
@@ -566,13 +569,60 @@ async function broadcastCursor(user, id, body) {
   return { ok: true };
 }
 
+// "Delete" moves the note to the trash. The row stays in `notes` with deleted_at
+// set, so shares, versions and images survive and a restore is a one-column
+// update; it is deleted for good by purgeNote / emptyTrash / the retention sweep.
 async function deleteNote(user, id) {
   const row = await q.noteById.get(id);
   const perm = await permFor(user, row);
   if (!canRead(perm)) return { status: 404 };
   if (perm !== 'owner') return { status: 403, error: '只有擁有者可以刪除筆記' };
+  await q.trashNote.run(Date.now(), id);
+  return { ok: true };
+}
+
+// ---------------- trash ----------------
+const cfg = require('./config');
+const trashKeepMs = () => cfg.trashKeepDays * 86400000;
+
+async function listTrash(user) {
+  const rows = await q.trashOf.all(user.id);
+  return {
+    keepDays: cfg.trashKeepDays,
+    notes: rows.map(r => ({
+      id: r.id, title: r.title, folderId: r.folder_id, chars: r.chars,
+      updatedAt: r.updated_at, deletedAt: r.deleted_at, expiresAt: r.deleted_at + trashKeepMs()
+    }))
+  };
+}
+
+// Owner-only, and only for rows that are actually in the trash: a live note (or
+// someone else's) is 404 here exactly as a trashed one is 404 everywhere else.
+async function trashedRowOf(user, id) {
+  const row = await q.noteById.get(id);
+  return row && row.owner_id === user.id && row.deleted_at ? row : null;
+}
+async function restoreNote(user, id) {
+  if (!(await trashedRowOf(user, id))) return { status: 404 };
+  const r = await q.restoreNote.run(id);
+  if (!r.affectedRows) return { status: 404 };
+  return { note: shapeNote(await q.noteById.get(id), 'owner') };
+}
+async function purgeNote(user, id) {
+  if (!(await trashedRowOf(user, id))) return { status: 404 };
   await q.deleteNote.run(id);
   return { ok: true };
+}
+async function emptyTrash(user) {
+  const r = await q.purgeTrashOf.run(user.id);
+  return { ok: true, purged: r.affectedRows };
+}
+// Retention sweep (server.js runs it at start and hourly). One hard delete per
+// row so the FK cascades do the same work they do for a manual purge.
+async function purgeExpiredTrash() {
+  const rows = await q.trashExpired.all(Date.now() - trashKeepMs());
+  for (const r of rows) await q.deleteNote.run(r.id);
+  return rows.length;
 }
 
 // ---------------- folders ----------------
@@ -797,6 +847,7 @@ async function adminStorage() {
 module.exports = {
   adminListUsers, adminSetDisabled, adminSetRole, adminDeleteUser, adminStorage, storageSummary,
   listNotes, getNote, createNote, updateNote, deleteNote, broadcastCursor, setAccess,
+  listTrash, restoreNote, purgeNote, emptyTrash, purgeExpiredTrash,
   listVersions, getVersion, createVersion, renameVersion, deleteVersion, restoreVersion,
   listBookVersions, createBookVersion, getBookVersion, getBookVersionChapter,
   restoreBookVersion, deleteBookVersion,

@@ -1640,9 +1640,8 @@ mark.search-hit {
 .tp-label { text-align: center; font-size: var(--fs-sm); color: var(--text-dim); margin-top: 8px; }
 
 /* ---------- OSCP report generator ---------- */
-/* 工具列（關聯圖）：跨滿兩欄、跟上一列同高，淡藍底跟新增鈕區分開 */
+/* 工具列（關聯圖、垃圾桶）：兩顆並排，淡藍底跟新增鈕區分開 */
 .sidebar-tools .btn {
-  grid-column: 1 / -1;
   background: var(--accent-weak); border-color: transparent; color: var(--accent);
 }
 .sidebar-tools .btn:hover { background: var(--accent); color: #fff; }
@@ -2203,10 +2202,19 @@ select.sec-info-input { cursor: pointer; }
 }
 
 /* scrollbars */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border-strong); border: 3px solid transparent; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-faint); border: 3px solid transparent; background-clip: padding-box; }
+/* 捲軸：軌道固定 14px（版面不動），平常只畫一條 6px 的細滑塊；游標碰到滑塊或正在拖曳時
+   把透明邊框收窄，滑塊放大到 12px 好抓。放大靠改邊框而不是改 ::-webkit-scrollbar 的
+   width——那會重排版面，編輯器的文字換行點會跟著跳、跟底下的語法上色層對不上。 */
+::-webkit-scrollbar { width: 14px; height: 14px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong); background-clip: padding-box;
+  border: 4px solid transparent; min-height: 40px;
+}
+::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:active {
+  background: var(--text-faint); background-clip: padding-box;
+  border-width: 1px;
+}
 
 /* ---------- Migration prompt ---------- */
 .migrate-bar {
@@ -2670,6 +2678,23 @@ div.ver-item.ver-now { cursor: default; }
 }
 
 /* ---------- 電子書公開分享連結 ---------- */
+/* ---------- 垃圾桶（js/trash.js） ---------- */
+.modal.trash-modal { width: min(720px, 94vw); max-height: 86vh; display: flex; flex-direction: column; }
+.trash-hint { font-size: var(--fs-sm); color: var(--text-faint); line-height: 1.6; margin-bottom: 10px; }
+.trash-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; border: 1px solid var(--border); background: var(--bg-2); }
+.trash-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.trash-item:last-child { border-bottom: 0; }
+.trash-item > .ic-svg { width: 16px; height: 16px; color: var(--text-faint); flex: 0 0 auto; }
+.trash-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.trash-title { font-size: var(--fs-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trash-meta { font-size: var(--fs-xs); color: var(--text-faint); }
+.trash-meta .soon { color: var(--danger); font-weight: 600; }
+.trash-acts { display: flex; gap: 6px; flex: 0 0 auto; }
+.trash-acts .btn { flex: 0 0 auto; padding: 5px 10px; font-size: var(--fs-sm); }
+.trash-empty { padding: 28px 16px; text-align: center; color: var(--text-faint); font-size: var(--fs-sm); line-height: 1.7; }
+.trash-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; }
+.trash-foot .btn { flex: 0 0 auto; }
+
 .modal.share-modal { width: min(760px, 94vw); max-height: 88vh; display: flex; flex-direction: column; }
 .share-body { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 

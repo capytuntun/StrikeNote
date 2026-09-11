@@ -331,6 +331,13 @@ async function handleApi(req, res, url) {
     if (method === 'DELETE') return send(await api.deleteNote(user, id));
   }
 
+  // Trash: owner-only. DELETE /api/notes/:id above only moves a note here; these
+  // are the only routes that can see a trashed row again.
+  if (p === '/api/trash' && method === 'GET') return json(res, 200, await api.listTrash(user));
+  if (p === '/api/trash' && method === 'DELETE') return send(await api.emptyTrash(user));
+  if ((m = p.match(/^\/api\/trash\/([\w.-]+)$/)) && method === 'DELETE') return send(await api.purgeNote(user, m[1]));
+  if ((m = p.match(/^\/api\/notes\/([\w.-]+)\/restore$/)) && method === 'POST') return send(await api.restoreNote(user, m[1]));
+
   // Live-collaboration event stream (Server-Sent Events). Held open; the client's
   // EventSource reconnects on its own if the socket drops. The 25 s keepalive
   // ping in hub.js stays under Cloudflare's idle timeout.
@@ -617,10 +624,20 @@ function checkStorage() {
   } catch (e) { /* statfs unsupported here */ }
 }
 
+// Trash retention: notes in the bin longer than TRASH_KEEP_DAYS are deleted for
+// good — the same hard delete as emptying the bin — at startup and then hourly.
+function purgeTrash() {
+  api.purgeExpiredTrash().then(function (n) {
+    if (n) console.log('[trash] 已永久刪除 ' + n + ' 篇在垃圾桶超過 ' + config.trashKeepDays + ' 天的筆記');
+  }).catch(function (e) { console.warn('[trash] 清理失敗：' + (e && e.message || e)); });
+}
+
 function start() {
   auth.startHousekeeping();
   checkStorage();
   setInterval(checkStorage, 3600000).unref();
+  purgeTrash();
+  setInterval(purgeTrash, 3600000).unref();
   server.listen(config.port, config.host, function () {
     console.log('StrikeNote — http://' + config.host + ':' + config.port);
     console.log('  資料庫:   MariaDB ' + (config.db.socket ? config.db.socket : config.db.host + ':' + config.db.port) +

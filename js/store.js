@@ -124,6 +124,14 @@
     },
     deleteNote: function (id) { return req('DELETE', '/api/notes/' + id); },
 
+    // Trash. deleteNote above only moves a note into it; these are the way back
+    // out (restore) or all the way out (purge). getTrash resolves to
+    // { keepDays, notes: [{ id, title, folderId, chars, deletedAt, expiresAt }] }.
+    getTrash: function () { return req('GET', '/api/trash'); },
+    restoreNote: function (id) { return req('POST', '/api/notes/' + id + '/restore').then(r => r.note); },
+    purgeNote: function (id) { return req('DELETE', '/api/trash/' + id); },
+    emptyTrash: function () { return req('DELETE', '/api/trash'); },
+
     // Version history. The list never carries note bodies — only sizes — so
     // opening the panel on a long note stays cheap.
     getVersions: function (noteId) { return req('GET', '/api/notes/' + noteId + '/versions'); },
