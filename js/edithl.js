@@ -39,23 +39,25 @@
     });
   }
 
-  function scrollbarWidth() {
-    const d = document.createElement('div');
-    d.style.cssText = 'position:absolute;top:-9999px;width:100px;height:100px;overflow:scroll';
-    document.body.appendChild(d);
-    const w = d.offsetWidth - d.clientWidth;
-    d.remove();
-    return w;
-  }
-
   function attach(ta, backdrop) {
     let lines = backdrop.querySelector('.cm-lines');
     if (!lines) { lines = document.createElement('div'); lines.className = 'cm-lines'; backdrop.appendChild(lines); }
 
-    const sbw = scrollbarWidth();
-    backdrop.style.setProperty('--sbw', sbw + 'px');
+    // ta's own scrollbar, measured live off the real element — the same technique
+    // app.js's caret-mirror uses for this textarea (syncMirrorStyle). A generic
+    // throwaway <div>'s scrollbar can be a pixel narrower/wider than the textarea's
+    // actual one (subpixel/DPI/overlay-scrollbar differences) or simply wrong when
+    // the note is short enough that ta has no scrollbar at all yet. One line that
+    // wraps differently because of that pixel throws every row below it out of
+    // alignment with the real caret — invisible near the top of a note, a full
+    // line of drift by a few hundred lines down. Recomputed on every render so it
+    // tracks the scrollbar actually appearing/disappearing as content changes.
+    function syncScrollbarWidth() {
+      backdrop.style.setProperty('--sbw', (ta.offsetWidth - ta.clientWidth) + 'px');
+    }
 
     function build() {
+      syncScrollbarWidth();
       const arr = highlightLines(ta.value);
       let out = '';
       for (let i = 0; i < arr.length; i++) {
@@ -79,6 +81,9 @@
     ta.addEventListener('keyup', updateActive);
     ta.addEventListener('click', updateActive);
     document.addEventListener('selectionchange', function () { if (document.activeElement === ta) updateActive(); });
+    // Dragging the split-pane divider or resizing the window changes ta's width —
+    // and therefore where long lines wrap — without firing 'input'.
+    if (window.ResizeObserver) new ResizeObserver(render).observe(ta);
 
     ta._hlRefresh = render;
     render();
