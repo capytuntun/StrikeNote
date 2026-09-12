@@ -202,12 +202,25 @@
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-html, body { height: 100%; margin: 0; }
+/* `overflow` has to go on html *and* body: a scrollIntoView/focus() that can't
+   scroll the clipped #app/#app-body shell below keeps walking up, and the element
+   that actually ends up scrolling is the *viewport* — document.scrollingElement,
+   normally <html> — not the <body> box itself (the browser propagates body's
+   overflow to the viewport for `visible`/`hidden`/`auto`/`scroll`, but NOT for
+   `clip`, so a body-only `overflow: clip` leaves <html> at its default `visible`
+   and the loophole wide open — confirmed with a scripted repro: window.scrollTo()
+   during a genuine overflow still moved document.scrollingElement (===<html>)
+   under body-only clip, and stopped moving only once html itself carried it too).
+   Setting it on both is the same "disable scroll" trick as the old overflow:hidden hack,
+   just with clip's stronger guarantee that hidden lacked (hidden still permits
+   *programmatic* scrolling; clip does not). Nothing in this app scrolls body/window
+   on purpose (no window.scrollTo / body.scrollTop / documentElement.scrollTop
+   usage), so there is nothing to preserve by leaving either one open. */
+html, body { height: 100%; margin: 0; overflow: clip; }
 body {
   font-family: var(--sans);
   color: var(--text);
   background: var(--bg);
-  overflow: hidden;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
