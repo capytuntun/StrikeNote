@@ -137,7 +137,8 @@
     let div = caretCoords._d;
     if (!div) { div = document.createElement('div'); caretCoords._d = div; document.body.appendChild(div); }
     const cs = getComputedStyle(el), st = div.style;
-    st.position = 'absolute'; st.visibility = 'hidden'; st.whiteSpace = 'pre-wrap'; st.wordWrap = 'break-word'; st.overflow = 'hidden';
+    // fixed, not absolute: see the same note in js/editor.js caretCoords().
+    st.position = 'fixed'; st.top = '0'; st.left = '0'; st.pointerEvents = 'none'; st.visibility = 'hidden'; st.whiteSpace = 'pre-wrap'; st.wordWrap = 'break-word'; st.overflow = 'hidden';
     MIRROR.forEach(function (p) { st[p] = cs[p]; });
     div.textContent = el.value.substring(0, pos);
     const span = document.createElement('span');

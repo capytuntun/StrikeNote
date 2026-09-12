@@ -202,22 +202,35 @@
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-/* `overflow` has to go on html *and* body: a scrollIntoView/focus() that can't
-   scroll the clipped #app/#app-body shell below keeps walking up, and the element
-   that actually ends up scrolling is the *viewport* — document.scrollingElement,
-   normally <html> — not the <body> box itself (the browser propagates body's
-   overflow to the viewport for `visible`/`hidden`/`auto`/`scroll`, but NOT for
-   `clip`, so a body-only `overflow: clip` leaves <html> at its default `visible`
-   and the loophole wide open — confirmed with a scripted repro: window.scrollTo()
-   during a genuine overflow still moved document.scrollingElement (===<html>)
-   under body-only clip, and stopped moving only once html itself carried it too).
-   Setting it on both is the same "disable scroll" trick as the old overflow:hidden hack,
-   just with clip's stronger guarantee that hidden lacked (hidden still permits
-   *programmatic* scrolling; clip does not). Nothing in this app scrolls body/window
-   on purpose (no window.scrollTo / body.scrollTop / documentElement.scrollTop
-   usage), so there is nothing to preserve by leaving either one open. */
+/* The shell must never scroll. Two things make that true and BOTH are needed:
+   1. `overflow: clip` on html, body, #app and #app-body. On an element, `clip`
+      (unlike `hidden`) means "not a scroll container at all", so a
+      scrollIntoView()/focus() skips it and keeps walking up — all the way to the
+      *viewport*. On <html>, though, `clip` is applied to the viewport as `hidden`
+      (css-overflow-3: "if clip is applied to the viewport it must be interpreted
+      as hidden"), and `hidden` still permits *programmatic* scrolling. Measured in
+      Chrome 152: with anything sticking out below the fold, window.scrollTo() and a
+      preview heading's scrollIntoView({block:'start'}) both moved
+      document.scrollingElement, the latter by exactly the topbar height.
+   2. `body { position: relative }`, so that nothing *can* stick out. An absolutely
+      positioned child of body whose containing block is the initial containing
+      block (i.e. body unpositioned) escapes body's clip entirely and grows the
+      viewport's scrollable overflow; with body positioned, body contains and clips
+      it. This was the actual bug, three fixes in a row: the caret-measuring mirror
+      <div>s in js/editor.js (slash popup) and js/table.js (table toolbar) are
+      appended to body once and cached, copy the textarea's height, and were
+      position:absolute with no offsets — parked just below #app, ~editor height
+      tall, from the first "/" onward, until the next TOC click scrolled the whole
+      shell up 52px (topbar gone, body's background as a strip under the statusbar).
+      They are position:fixed now, but the containment is what makes the next stray
+      element harmless.
+   To check a live page: document.scrollingElement.scrollHeight must equal its
+   clientHeight; if not, list document.body.children for the one with a height
+   below the fold. Chrome clamps scrollTop back to 0 the moment the overflow goes
+   away, so the symptom sticks only while the offending element persists. */
 html, body { height: 100%; margin: 0; overflow: clip; }
 body {
+  position: relative; /* containment for absolutely positioned body children — see above */
   font-family: var(--sans);
   color: var(--text);
   background: var(--bg);

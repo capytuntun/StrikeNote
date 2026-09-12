@@ -481,7 +481,13 @@
     }
     const style = div.style;
     const computed = getComputedStyle(el);
-    style.position = 'absolute';
+    // fixed, not absolute: a body-level absolute box escapes body's overflow:clip and
+    // grows the viewport's scrollable overflow (the mirror is ~editor height), which is
+    // what let scrollIntoView push the topbar off-screen. Fixed never contributes.
+    style.position = 'fixed';
+    style.top = '0';
+    style.left = '0';
+    style.pointerEvents = 'none';
     style.visibility = 'hidden';
     style.whiteSpace = 'pre-wrap';
     style.wordWrap = 'break-word';
