@@ -753,6 +753,7 @@
     if (previewTimer) { clearTimeout(previewTimer); previewTimer = null; }
     previewEl.innerHTML = MD.render(editorEl.value);
     MD.resolveImages(previewEl);
+    if (window.LineSync) LineSync.rebuild(editorEl.value);
     restoreInlineTocState();
     // Mind maps are edited in place in the preview, and the preview is rebuilt
     // from scratch here, so the selection has to be re-applied every time.
@@ -2842,6 +2843,9 @@
     window.addEventListener('drop', function (e) { if (hasFiles(e)) e.preventDefault(); });
     // Editor syntax-highlight backdrop + line numbers
     if (window.EditorHL) EditorHL.attach(editorEl, $('#editor-backdrop'));
+    // Click a line in the editor or the preview, the matching line underlines
+    // on the other side.
+    if (window.LineSync) LineSync.init(editorEl, previewEl);
     // Markdown editing helpers + autocomplete (auto-pairs, list continuation, suggestions)
     if (window.Editor) Editor.attach(editorEl);
     // Mind maps are editable directly in the preview; every change writes the
