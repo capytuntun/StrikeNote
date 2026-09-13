@@ -752,8 +752,11 @@
   function renderPreviewNow() {
     if (previewTimer) { clearTimeout(previewTimer); previewTimer = null; }
     previewEl.innerHTML = MD.render(editorEl.value);
-    MD.resolveImages(previewEl);
+    // LineSync before resolveImages: it rewrites paragraph/list-item innerHTML,
+    // and resolveImages sets img.src asynchronously — the other way round the
+    // src lands on a discarded <img> and pictures stay blank until a re-render.
     if (window.LineSync) LineSync.rebuild(editorEl.value);
+    MD.resolveImages(previewEl);
     restoreInlineTocState();
     // Mind maps are edited in place in the preview, and the preview is rebuilt
     // from scratch here, so the selection has to be re-applied every time.

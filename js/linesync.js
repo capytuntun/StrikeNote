@@ -7,16 +7,22 @@
  * markdown.js, MD.render(), or any renderer/extension, so it cannot affect
  * PDF export, the published e-book, or search, none of which call it. It
  * works by:
- *   1. Scanning the raw source text into an ordered list of blocks (heading,
- *      paragraph, list, table, code fence, quote/callout/container/RISK
- *      finding, hr) with a start/end source-line range each — a plain regex
- *      scan, independent of marked's own tokenizer.
- *   2. Querying the ALREADY-RENDERED preview DOM for the matching element
- *      types, in document order, and pairing them 1:1 with the scanned
- *      blocks by position (heading #3 in the source pairs with the 3rd
- *      <h1..h6> in the preview, and so on) — the same "same type, same
- *      order" idea app.js already uses for the editor/preview scroll anchors
- *      (see editorBlocks()/previewBlocks() in app.js).
+ *   1. Asking marked's own lexer — the same `marked` instance, carrying the
+ *      callout / container / RISK / [toc] extensions markdown.js registered —
+ *      for the note's top-level blocks, and finding each token's `raw` text in
+ *      the source to get its start/end line. An earlier version re-scanned the
+ *      source with its own regexes instead; everywhere those disagreed with
+ *      marked (a raw-HTML line such as <br>, indented code, a setext heading,
+ *      a lazy continuation line, text straight after a table) it counted one
+ *      paragraph more than the preview had, and every paragraph after that
+ *      paired with its neighbour. Lexing has no side effects: markdown.js's
+ *      per-render counters live in its renderers, which this never calls.
+ *   2. Collecting the ALREADY-RENDERED preview's blocks of each kind, in
+ *      document order, and pairing them 1:1 with the tokens by position
+ *      (heading #3 pairs with the 3rd heading, and so on) — the same "same
+ *      type, same order" idea app.js uses for the scroll anchors (see
+ *      editorBlocks()/previewBlocks() in app.js). A raw-HTML token renders as
+ *      whatever it says, so the blocks it produces are counted and skipped.
  *   3. For paragraphs, list items and line-numbered code, splitting the
  *      block's own rendered HTML at each <br> (breaks:true turns every
  *      source newline into one) into one <span data-line0 data-line1> per
@@ -41,97 +47,80 @@
 (function (global) {
   'use strict';
 
-  // ---- 1) scan the raw source into ordered blocks ------------------------
-  function isBlank(s) { return !s || !s.trim(); }
-  const RE_FENCE = /^ {0,3}(`{3,}|~{3,})/;
-  const RE_CONTAINER = /^ {0,3}:::/;
-  const RE_QUOTE = /^ {0,3}>/;
-  const RE_HEADING = /^ {0,3}#{1,6}\s/;
-  const RE_HR = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
-  const RE_LIST = /^( {0,3})([-*+]|\d{1,9}[.)])\s/;
-  const RE_TABLE_ROW = /^ {0,3}\|/;
-  const RE_TABLE_SEP = /^ {0,3}\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+  // ---- 1) top-level blocks, straight from marked's lexer ------------------
+  // Token type -> the kind of rendered element it turns into. Types not listed
+  // (space, def) render nothing. `html` renders as whatever the HTML says.
+  const KIND_OF = {
+    heading: 'heading', hr: 'hr', table: 'table', code: 'code', list: 'list',
+    paragraph: 'para', blockquote: 'quote', callout: 'quote', container: 'quote',
+    risk: 'quote', toc: 'toc', html: 'html'
+  };
+
+  function countNewlines(s, from, to) {
+    let n = 0;
+    for (let i = from; i < to; i++) if (s.charCodeAt(i) === 10) n++;
+    return n;
+  }
+
+  function trimNewlines(s) { return String(s || '').replace(/^\n+|\n+$/g, ''); }
+
+  // First occurrence of `needle` at or after `from` that starts a line.
+  function indexAtLineStart(src, needle, from) {
+    let at = src.indexOf(needle, from);
+    while (at > 0 && src.charCodeAt(at - 1) !== 10) at = src.indexOf(needle, at + 1);
+    return at;
+  }
+
+  // Walk tokens (top-level blocks, or one list's items) through `src` from
+  // offset `pos` / line `line`, giving each its 1-based start and end line.
+  function locate(tokens, src, pos, line, fn) {
+    tokens.forEach(function (t) {
+      const raw = trimNewlines(t.raw);
+      if (!raw) return;
+      let at = indexAtLineStart(src, raw, pos);
+      if (at < 0) { at = pos; while (src.charCodeAt(at) === 10) at++; }
+      line += countNewlines(src, pos, at);
+      const end = line + countNewlines(raw, 0, raw.length);
+      fn(t, raw, at, line, end);
+      pos = at + raw.length;
+      line = end;
+    });
+  }
 
   function sourceBlocks(text) {
-    const lines = String(text || '').split('\n');
-    const n = lines.length;
-    const blocks = [];
-    let i = 0;
-    while (i < n) {
-      const line = lines[i];
-      if (isBlank(line)) { i++; continue; }
+    if (!global.marked || !marked.lexer) return [];
+    // marked normalises line endings and expands leading tabs before it
+    // tokenizes, so `raw` is only findable in a copy given the same treatment.
+    // Neither step adds or removes a newline, so line numbers still match.
+    const src = String(text || '').replace(/\r\n|\r/g, '\n')
+      .replace(/^( *)(\t+)/gm, function (m, sp, tabs) { return sp + '    '.repeat(tabs.length); });
+    let tokens;
+    try { tokens = marked.lexer(src); } catch (e) { return []; }
 
-      const fence = RE_FENCE.exec(line);
-      if (fence) {
-        const marker = fence[1].charAt(0) === '`' ? '`' : '~';
-        const minLen = fence[1].length;
-        const closeRe = new RegExp('^ {0,3}' + marker + '{' + minLen + ',}\\s*$');
-        const start = i + 1;
-        i++;
-        while (i < n && !closeRe.test(lines[i])) i++;
-        if (i < n) i++; // consume the closing fence line
-        blocks.push({ kind: 'code', start: start, end: i });
-        continue;
+    const blocks = [];
+    locate(tokens.filter(function (t) { return KIND_OF[t.type]; }), src, 0, 1, function (t, raw, at, start, end) {
+      const b = { kind: KIND_OF[t.type], start: start, end: end, raw: raw, token: t };
+      if (b.kind === 'list') {
+        b.items = [];
+        locate(t.items || [], src, at, start, function (it, itemRaw, itemAt, s, e) {
+          b.items.push({ start: s, end: e, raw: itemRaw });
+        });
       }
-      if (RE_CONTAINER.test(line)) {
-        const start = i + 1;
-        i++;
-        while (i < n && lines[i].trim() !== ':::') i++;
-        if (i < n) i++;
-        blocks.push({ kind: 'quote', start: start, end: i });
-        continue;
-      }
-      if (RE_QUOTE.test(line)) {
-        const start = i + 1;
-        while (i < n && RE_QUOTE.test(lines[i])) i++;
-        blocks.push({ kind: 'quote', start: start, end: i });
-        continue;
-      }
-      if (RE_HEADING.test(line)) { blocks.push({ kind: 'heading', start: i + 1, end: i + 1 }); i++; continue; }
-      if (RE_HR.test(line) && !RE_LIST.test(line)) { blocks.push({ kind: 'hr', start: i + 1, end: i + 1 }); i++; continue; }
-      if (RE_TABLE_ROW.test(line) && i + 1 < n && RE_TABLE_SEP.test(lines[i + 1])) {
-        const start = i + 1;
-        i += 2; // header + separator (separator has no own row in the render)
-        let rows = 0;
-        while (i < n && RE_TABLE_ROW.test(lines[i])) { rows++; i++; }
-        blocks.push({ kind: 'table', start: start, end: start + 1 + rows });
-        continue;
-      }
-      const listM = RE_LIST.exec(line);
-      if (listM) {
-        const indent = listM[1].length;
-        const blockStart = i;
-        const items = [];
-        let itemStart = i;
-        i++;
-        while (i < n) {
-          if (isBlank(lines[i])) {
-            let j = i;
-            while (j < n && isBlank(lines[j])) j++;
-            if (j >= n) { i = j; break; }
-            const nm = RE_LIST.exec(lines[j]);
-            const contIndent = (lines[j].match(/^\s*/) || [''])[0].length;
-            if (nm && nm[1].length === indent) { items.push({ start: itemStart + 1, end: i }); itemStart = j; i = j; continue; }
-            if (contIndent > indent) { i = j; continue; }
-            items.push({ start: itemStart + 1, end: i }); i = j; break;
-          }
-          const nm = RE_LIST.exec(lines[i]);
-          if (nm && nm[1].length === indent) { items.push({ start: itemStart + 1, end: i }); itemStart = i; i++; continue; }
-          const contIndent = (lines[i].match(/^\s*/) || [''])[0].length;
-          if (nm || contIndent > indent) { i++; continue; } // wrapped continuation, or a nested (deeper) list/para
-          break;
-        }
-        items.push({ start: itemStart + 1, end: i });
-        blocks.push({ kind: 'list', start: blockStart + 1, end: i, items: items });
-        continue;
-      }
-      // plain paragraph: consecutive lines that don't open anything above
-      const pStart = i;
-      while (i < n && !isBlank(lines[i]) && !RE_FENCE.test(lines[i]) && !RE_CONTAINER.test(lines[i]) &&
-        !RE_QUOTE.test(lines[i]) && !RE_HEADING.test(lines[i]) && !RE_TABLE_ROW.test(lines[i]) && !RE_LIST.test(lines[i])) i++;
-      blocks.push({ kind: 'para', start: pStart + 1, end: i });
-    }
+      blocks.push(b);
+    });
     return blocks;
+  }
+
+  // The source line each <br>-separated piece of a block's rendered text came
+  // from: every source newline is one <br> (breaks:true), and a literal <br>
+  // typed into the text is one more on that same line.
+  function brLines(raw, start) {
+    const out = [];
+    raw.split('\n').forEach(function (l, i) {
+      const typed = (l.match(/<br\s*\/?>/gi) || []).length;
+      for (let k = 0; k <= typed; k++) out.push(start + i);
+    });
+    return out;
   }
 
   // ---- 2) split a block's OWN rendered HTML at <br> into per-line spans -
@@ -167,49 +156,90 @@
     return lines;
   }
 
-  // Nested block-level content inside a top-level <li> (a sub-list) is left
-  // completely untouched — split only the li's OWN text, up to that point.
-  const NESTED_BLOCK_RE = /<(ul|ol|blockquote|pre|table)[ >]/;
+  // Nested block-level content inside a top-level <li> (a sub-list, a code
+  // block, a second paragraph) is left completely untouched — split only the
+  // li's OWN text, up to that point.
+  const NESTED_BLOCK_RE = /<(?:ul|ol|blockquote|pre|table|div|p|h[1-6]|hr|nav)[\s\/>]/i;
 
-  function wrapOwnLines(el, startLine) {
+  function wrapOwnLines(el, lineOf) {
     const html = el.innerHTML;
     const cut = NESTED_BLOCK_RE.exec(html);
     const ownHtml = cut ? html.slice(0, cut.index) : html;
+    if (!ownHtml.trim()) return;
     const restHtml = cut ? html.slice(cut.index) : '';
     const lines = splitByBr(ownHtml);
     const wrapped = lines.map(function (lineHtml, i) {
-      const ln = startLine + i;
+      const ln = i < lineOf.length ? lineOf[i] : lineOf[lineOf.length - 1];
       return '<span class="sync-ln" data-line0="' + ln + '" data-line1="' + ln + '">' + lineHtml + '</span>';
     }).join('<br>');
     el.innerHTML = wrapped + restHtml;
-    return lines.length;
   }
 
-  // ---- 3) pair scanned blocks with the rendered preview DOM --------------
+  // ---- 3) pair the tokens with the rendered preview DOM -------------------
+  const SELECTOR = {
+    heading: 'h1, h2, h3, h4, h5, h6',
+    hr: 'hr',
+    table: 'table',
+    code: '.code-block, .mindmap-block',
+    quote: 'blockquote, .callout, .finding',
+    list: 'ul, ol',
+    para: 'p, a.page-card',
+    toc: '.md-toc'
+  };
+  const KINDS = Object.keys(SELECTOR);
+
+  function kindOf(el) {
+    for (let i = 0; i < KINDS.length; i++) if (el.matches(SELECTOR[KINDS[i]])) return KINDS[i];
+    return null;
+  }
+
+  // Every block under `root`, by kind, in document order. The walk stops at
+  // the first block on each path, so it finds the outermost blocks rather than
+  // only direct children: a raw-HTML wrapper such as <details> or
+  // <div align="center"> can enclose ordinary markdown blocks, while a <p>
+  // inside a callout or a loose list item belongs to that block, not the page.
+  function renderedBlocks(root) {
+    const groups = {};
+    KINDS.forEach(function (k) { groups[k] = []; });
+    (function walk(parent) {
+      for (let el = parent.firstElementChild; el; el = el.nextElementSibling) {
+        const kind = kindOf(el);
+        if (kind) groups[kind].push(el);
+        else walk(el);
+      }
+    })(root);
+    return groups;
+  }
+
   function tag(el, start, end) {
     if (!el) return;
     el.setAttribute('data-line0', start);
     el.setAttribute('data-line1', end);
   }
 
+  function pushSpans(ranges, el) {
+    el.querySelectorAll(':scope > .sync-ln').forEach(function (sp) {
+      const ln = parseInt(sp.getAttribute('data-line0'), 10);
+      ranges.push({ start: ln, end: ln, el: sp });
+    });
+  }
+
   function buildRanges(previewEl, blocks) {
-    const groups = {
-      heading: previewEl.querySelectorAll(':scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6'),
-      hr: previewEl.querySelectorAll(':scope > hr'),
-      table: previewEl.querySelectorAll(':scope > table'),
-      code: previewEl.querySelectorAll(':scope > .code-block, :scope > .mindmap-block'),
-      quote: previewEl.querySelectorAll(':scope > blockquote, :scope > .callout, :scope > .finding'),
-      list: previewEl.querySelectorAll(':scope > ul, :scope > ol'),
-      para: previewEl.querySelectorAll(':scope > p, :scope > a.page-card')
-    };
-    const idx = { heading: 0, hr: 0, table: 0, code: 0, quote: 0, list: 0, para: 0 };
+    const groups = renderedBlocks(previewEl);
+    const idx = {};
+    KINDS.forEach(function (k) { idx[k] = 0; });
     const ranges = [];
 
     blocks.forEach(function (b) {
-      const arr = groups[b.kind];
-      if (!arr) return;
-      const el = arr[idx[b.kind]++];
-      if (!el) return;
+      if (b.kind === 'html') {
+        const tpl = document.createElement('template');
+        tpl.innerHTML = b.raw;
+        const inner = renderedBlocks(tpl.content);
+        KINDS.forEach(function (k) { idx[k] += inner[k].length; });
+        return;
+      }
+      const el = groups[b.kind][idx[b.kind]++];
+      if (!el || b.kind === 'toc') return;
 
       if (b.kind === 'heading' || b.kind === 'hr') {
         tag(el, b.start, b.end);
@@ -241,11 +271,8 @@
       } else if (b.kind === 'para') {
         tag(el, b.start, b.end);
         ranges.push({ start: b.start, end: b.end, el: el }); // fallback if the split below undercounts
-        wrapOwnLines(el, b.start);
-        el.querySelectorAll(':scope > .sync-ln').forEach(function (sp) {
-          const ln = parseInt(sp.getAttribute('data-line0'), 10);
-          ranges.push({ start: ln, end: ln, el: sp });
-        });
+        wrapOwnLines(el, brLines(b.raw, b.start));
+        pushSpans(ranges, el);
       } else if (b.kind === 'list') {
         const lis = el.querySelectorAll(':scope > li');
         b.items.forEach(function (item, i) {
@@ -253,11 +280,10 @@
           if (!li) return;
           tag(li, item.start, item.end);
           ranges.push({ start: item.start, end: item.end, el: li });
-          wrapOwnLines(li, item.start);
-          li.querySelectorAll(':scope > .sync-ln').forEach(function (sp) {
-            const ln = parseInt(sp.getAttribute('data-line0'), 10);
-            ranges.push({ start: ln, end: ln, el: sp });
-          });
+          // A loose list wraps each item's text in its own <p>.
+          const own = li.firstChild && li.firstChild.nodeName === 'P' ? li.firstChild : li;
+          wrapOwnLines(own, brLines(item.raw, item.start));
+          pushSpans(ranges, own);
         });
       }
     });
@@ -280,11 +306,12 @@
 
   // ---- 4) wiring: two click/caret listeners, one underline each side -----
   let editorEl = null, previewEl = null, ranges = [];
-  let curPreviewEl = null;
+  let curPreviewEls = [];
   let curRowStart = -1, curRowEnd = -1;
 
   function clearPreviewHit() {
-    if (curPreviewEl) { curPreviewEl.classList.remove('sync-hit'); curPreviewEl = null; }
+    curPreviewEls.forEach(function (el) { el.classList.remove('sync-hit'); });
+    curPreviewEls = [];
   }
   function clearEditorHit() {
     if (curRowStart < 0) return;
@@ -299,12 +326,19 @@
   }
 
   function onEditorMove() {
-    if (!ranges.length) { clearPreviewHit(); return; }
-    const r = rangeFor(ranges, lineAtCaret());
     clearPreviewHit();
-    if (!r || !r.el) return;
-    r.el.classList.add('sync-hit');
-    curPreviewEl = r.el;
+    const best = ranges.length ? rangeFor(ranges, lineAtCaret()) : null;
+    if (!best) return;
+    // Light every element with exactly that range: a literal <br> typed
+    // mid-line splits one source line into several spans. Skip an element that
+    // contains another hit — a one-line <p> and its own span share a range, and
+    // only the span carries the underline style.
+    const hits = ranges.filter(function (r) { return r.start === best.start && r.end === best.end; })
+      .map(function (r) { return r.el; });
+    curPreviewEls = hits.filter(function (el) {
+      return !hits.some(function (other) { return other !== el && el.contains(other); });
+    });
+    curPreviewEls.forEach(function (el) { el.classList.add('sync-hit'); });
   }
 
   function onPreviewClick(e) {
@@ -324,7 +358,7 @@
     if (!previewEl) return;
     ranges = buildRanges(previewEl, sourceBlocks(sourceText));
     // A fresh render wiped out any element the previous highlight pointed at.
-    curPreviewEl = null;
+    curPreviewEls = [];
   }
 
   function init(ed, pv) {
