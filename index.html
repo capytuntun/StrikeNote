@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=103">
+  <link rel="stylesheet" href="app.css?v=104">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -143,12 +143,6 @@
         </div>
         <button id="new-folder" class="btn" data-icon="folder-plus">資料夾</button>
       </div>
-      <!-- 工具列：關聯圖（反向連結＋標籤的力導向圖）、圖片（上傳過的圖片／PDF 與它們用在哪些筆記）、垃圾桶（刪除的筆記保留期內可復原） -->
-      <div class="sidebar-actions sidebar-tools">
-        <button id="graph-open-btn" class="btn" title="用力導向圖看所有筆記的反向連結跟標籤關聯" data-icon="graph">關聯圖</button>
-        <button id="images-open-btn" class="btn" title="上傳過的圖片與 PDF：看每個用在哪些筆記，清掉沒有筆記在用的" data-icon="image">圖片</button>
-        <button id="trash-open-btn" class="btn" title="刪除的筆記會先放在這裡，保留期內可以復原或永久刪除" data-icon="trash">垃圾桶</button>
-      </div>
       <div class="search-box">
         <input id="search-input" type="text" placeholder="搜尋筆記…（Ctrl+K）"
                autocomplete="off" spellcheck="false" aria-label="搜尋筆記">
@@ -165,6 +159,14 @@
       </div>
       <div id="tree" class="tree" data-root="true"></div>
       <div id="search-results" class="search-results" hidden></div>
+      <!-- 左下角工具，一顆一列、跟側邊欄等寬：關聯圖（反向連結＋標籤的力導向圖）、
+           圖片管理（上傳過的圖片／PDF 與它們用在哪些筆記）、垃圾桶（刪除的筆記保留期內可復原）。
+           id 沿用原本頂端按鈕的，app.js 裡的 click 處理不用改。 -->
+      <nav class="sidebar-nav" aria-label="工具">
+        <button id="graph-open-btn" class="sidebar-nav-item" type="button" title="用力導向圖看所有筆記的反向連結跟標籤關聯" data-icon="graph">關聯圖</button>
+        <button id="images-open-btn" class="sidebar-nav-item" type="button" title="上傳過的圖片與 PDF：看每個用在哪些筆記，清掉沒有筆記在用的" data-icon="image">圖片管理</button>
+        <button id="trash-open-btn" class="sidebar-nav-item" type="button" title="刪除的筆記會先放在這裡，保留期內可以復原或永久刪除" data-icon="trash">垃圾桶</button>
+      </nav>
       <div class="sidebar-foot">
         <button id="import-btn" class="link-btn">匯入 .md</button>
         <input type="file" id="import-input" accept=".md,.markdown,text/markdown" hidden>
@@ -301,7 +303,7 @@
   <script src="vendor/hljs-dos.min.js"></script>
 
   <!-- App -->
-  <script src="js/icons.js?v=5"></script>
+  <script src="js/icons.js?v=6"></script>
   <script src="js/merge.js?v=2"></script>
   <script src="js/mindmap.js?v=3"></script>
   <script src="js/graph.js?v=3"></script>
@@ -325,7 +327,7 @@
   <script src="js/book.js?v=4"></script>
   <script src="js/versions.js?v=2"></script>
   <script src="js/trash.js?v=1"></script>
-  <script src="js/imagelib.js?v=1"></script>
+  <script src="js/imagelib.js?v=2"></script>
   <script src="js/linesync.js?v=3"></script>
   <script src="js/app.js?v=78"></script>
 </body>

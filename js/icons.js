@@ -79,6 +79,7 @@
     'book-open':       '<path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/>',
     download:          '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 17v4h16v-4"/>',
     image:             '<rect x="3" y="3" width="18" height="18"/><circle cx="9" cy="9" r="2"/><path d="m21 15-4-4L6 21"/>',
+    filter:            '<path d="M3 4h18l-7 8.5V19l-4 2v-8.5z"/>',
     table:             '<rect x="3" y="3" width="18" height="18"/><path d="M3 9h18M3 15h18M12 3v18"/>',
     monitor:           '<rect x="2" y="3" width="20" height="14"/><path d="M8 21h8M12 17v4"/>',
     network:           '<rect x="9" y="2" width="6" height="6"/><rect x="2" y="16" width="6" height="6"/><rect x="16" y="16" width="6" height="6"/><path d="M12 8v4M5 16v-2h14v2"/>',

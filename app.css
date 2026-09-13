@@ -799,6 +799,20 @@ mark.search-hit {
 .link-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: var(--fs-sm); padding: 0; font-weight: 500; }
 .link-btn:hover { color: var(--accent); }
 
+/* 左下角工具（關聯圖、圖片管理、垃圾桶）：一顆一列、跟側邊欄等寬，貼在匯入列上方。
+   樹狀清單是 flex: 1，所以這一塊永遠被推到抽屜最底下。 */
+.sidebar-nav { flex: 0 0 auto; display: flex; flex-direction: column; padding: 4px 0; border-top: 1px solid var(--border); }
+.sidebar-nav-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 16px;
+  border: 0; background: transparent; color: var(--text-dim); cursor: pointer;
+  font: inherit; font-size: var(--fs-base); font-weight: 500; text-align: left; white-space: nowrap;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.sidebar-nav-item .ic-svg { width: 16px; height: 16px; flex: 0 0 auto; color: var(--text-faint); transition: color var(--dur-1) var(--ease-out); }
+.sidebar-nav-item:hover { background: var(--row-hover); color: var(--text); }
+.sidebar-nav-item:hover .ic-svg { color: var(--accent); }
+.sidebar-nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
 /* ---------- Main ---------- */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .empty-state { flex: 1; min-height: 0; overflow-y: auto; color: var(--text); background: var(--bg-2); }
@@ -1701,16 +1715,6 @@ hr.sync-hit, table.sync-hit, .callout.sync-hit, .finding.sync-hit, blockquote.sy
 .tp-label { text-align: center; font-size: var(--fs-sm); color: var(--text-dim); margin-top: 8px; }
 
 /* ---------- OSCP report generator ---------- */
-/* 工具列（關聯圖、圖片、垃圾桶）：三顆並排，淡藍底跟新增鈕區分開。三等分後每顆只剩
-   80px 上下，左右內距收窄才放得下「圖示＋三個字」；側邊欄被拖得更窄時只留文字——
-   container query 看的是這一列自己的寬度，不是視窗寬度。 */
-.sidebar-tools { grid-template-columns: repeat(3, 1fr); gap: 4px; container-type: inline-size; }
-.sidebar-tools .btn {
-  background: var(--accent-weak); border-color: transparent; color: var(--accent);
-  padding-left: 6px; padding-right: 6px; gap: 5px;
-}
-@container (max-width: 240px) { .sidebar-tools .btn .ic-svg { display: none; } }
-.sidebar-tools .btn:hover { background: var(--accent); color: #fff; }
 .oscp-form { width: min(560px, 94vw); max-height: 86vh; overflow-y: auto; }
 .oscp-hint { font-size: var(--fs-base); color: var(--text-dim); margin: -4px 0 16px; line-height: 1.5; }
 .oscp-field { margin-bottom: 14px; }
@@ -2803,6 +2807,69 @@ div.ver-item.ver-now { cursor: default; }
 .imglib-search input { width: 100%; padding: 0 10px 0 32px; }
 .imglib-sort { padding: 0 8px; cursor: pointer; }
 .imglib-search input:focus, .imglib-sort:focus { border-color: var(--accent); box-shadow: var(--ring); }
+/* 依筆記篩選：下拉鈕 + 選好後貼在右邊的清除鈕 + 可搜尋、依資料夾分組的選單 */
+.imglib-notesel { position: relative; display: flex; min-width: 0; max-width: 280px; }
+.imglib-notesel-btn {
+  display: inline-flex; align-items: center; gap: 7px; min-width: 0; height: 32px; padding: 0 8px 0 10px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer;
+  font: inherit; font-size: var(--fs-sm); font-weight: 600;
+  transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+.imglib-notesel-btn:hover { border-color: var(--border-strong); }
+.imglib-notesel-btn[aria-expanded="true"] { border-color: var(--accent); box-shadow: var(--ring); }
+.imglib-notesel-btn > .ic-svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--text-faint); }
+.imglib-notesel-btn .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imglib-notesel-btn .caret { display: inline-flex; flex: 0 0 auto; color: var(--text-faint); }
+.imglib-notesel-btn .caret .ic-svg { width: 13px; height: 13px; }
+.imglib-notesel.is-filtered .imglib-notesel-btn { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); }
+.imglib-notesel.is-filtered .imglib-notesel-btn > .ic-svg,
+.imglib-notesel.is-filtered .imglib-notesel-btn .caret { color: var(--accent); }
+.imglib-notesel-clear {
+  flex: 0 0 32px; height: 32px; margin-left: -1px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--accent); background: var(--accent-weak); color: var(--accent); cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.imglib-notesel-clear:hover { background: var(--accent); color: var(--bg); }
+.imglib-notesel-clear .ic-svg { width: 14px; height: 14px; }
+.imglib-notepop {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; width: 320px; max-width: 80vw;
+  display: flex; flex-direction: column;
+  background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow);
+  animation: pop-in var(--dur-2) var(--ease-out); transform-origin: top left;
+}
+.imglib-notepop-search { position: relative; display: block; padding: 8px; border-bottom: 1px solid var(--border); }
+.imglib-notepop-search .ic-svg {
+  position: absolute; left: 17px; top: 50%; width: 14px; height: 14px; transform: translateY(-50%);
+  color: var(--text-faint); pointer-events: none;
+}
+.imglib-notepop-search input {
+  width: 100%; height: 30px; padding: 0 8px 0 28px;
+  border: 1px solid var(--border); background: var(--bg-2); color: var(--text);
+  font: inherit; font-size: var(--fs-sm); outline: none;
+}
+.imglib-notepop-search input:focus { border-color: var(--accent); background: var(--bg); }
+.imglib-notepop-list { max-height: 340px; overflow-y: auto; padding: 4px 0 6px; }
+.imglib-notepop-group {
+  padding: 9px 12px 4px; font-size: var(--fs-micro); font-weight: 700; letter-spacing: .04em; color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.imglib-noteopt {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 12px;
+  border: 0; background: transparent; color: var(--text); cursor: pointer;
+  font: inherit; font-size: var(--fs-sm); text-align: left;
+}
+.imglib-noteopt:hover, .imglib-noteopt:focus-visible { background: var(--row-hover); outline: none; }
+.imglib-noteopt.is-on { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+.imglib-noteopt > .ic-svg { width: 14px; height: 14px; flex: 0 0 auto; color: var(--text-faint); }
+.imglib-noteopt.is-on > .ic-svg { color: var(--accent); }
+.imglib-noteopt .o-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imglib-noteopt .o-n {
+  flex: 0 0 auto; min-width: 20px; padding: 0 6px; line-height: 17px; text-align: center;
+  font-size: var(--fs-micro); font-variant-numeric: tabular-nums; color: var(--text-dim); background: var(--bg-3);
+}
+.imglib-noteopt.is-on .o-n { color: var(--bg); background: var(--accent); }
+.imglib-notepop-empty { padding: 16px 12px; text-align: center; font-size: var(--fs-sm); color: var(--text-faint); }
 
 .imglib-body { flex: 1 1 auto; min-height: 0; display: flex; border: 1px solid var(--border); background: var(--bg-2); }
 .imglib-grid-wrap { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 16px; }
@@ -2918,13 +2985,23 @@ div.ver-item.ver-now { cursor: default; }
 .imglib-props dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; }
 .imglib-d-sec { margin-bottom: 8px; font-size: var(--fs-xs); font-weight: 700; color: var(--text-dim); }
 .imglib-uses { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); }
+.imglib-use-row { display: flex; align-items: stretch; border-bottom: 1px solid var(--border); }
+.imglib-use-row:last-child { border-bottom: 0; }
 .imglib-use {
-  display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px;
-  border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text);
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 9px; padding: 8px 10px;
+  border: 0; background: transparent; color: var(--text);
   font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer;
   transition: background var(--dur-1) var(--ease-out);
 }
-.imglib-uses li:last-child .imglib-use { border-bottom: 0; }
+/* 每一列右邊的漏斗：只看這篇筆記用到的檔案 */
+.imglib-use-filter {
+  flex: 0 0 34px; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+  border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--text-faint); cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.imglib-use-filter .ic-svg { width: 14px; height: 14px; }
+.imglib-use-filter:hover { background: var(--row-hover); color: var(--accent); }
+.imglib-use-filter.is-on { background: var(--accent-weak); color: var(--accent); }
 button.imglib-use:hover:not(:disabled) { background: var(--row-hover); }
 button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: translateX(2px); }
 .imglib-use:disabled, .imglib-use.is-hidden { cursor: default; color: var(--text-dim); }
