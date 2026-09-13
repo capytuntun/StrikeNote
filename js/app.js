@@ -631,6 +631,7 @@
     trashWrapEl.hidden = false;
     trashWrapEl.scrollTop = 0;
     setNavActive('trash-open-btn', true);
+    setSidebarOpen(true);    // 跟首頁一樣開著抽屜，點頁面內容也不會收回
     setHash('trash');
     Trash.render(trashPageEl, trashOpts());
     renderTree();
@@ -2688,8 +2689,8 @@
     document.addEventListener('mousedown', function (e) {
       if (!isSidebarOpen()) return;
       if (toggleBtn && toggleBtn.contains(e.target)) return;
-      // 首頁預設開著抽屜：點儀表板不收回，只有 ☰、Esc 或開啟筆記才會收
-      if (!emptyEl.hidden) return;
+      // 首頁與垃圾桶頁預設開著抽屜：點頁面內容不收回，只有 ☰、Esc 或開啟筆記才會收
+      if (!emptyEl.hidden || (trashWrapEl && !trashWrapEl.hidden)) return;
       const main = $('#main'), top = $('#topbar');
       if ((main && main.contains(e.target)) || (top && top.contains(e.target))) setSidebarOpen(false);
     });
