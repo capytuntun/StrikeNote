@@ -344,6 +344,50 @@ async function main() {
     ok(r.status === 200 && r.data.notes.length === 0, 'trash is empty afterwards');
   }
 
+  if (!OLD) {
+    section('image library');
+    const upload = async function () {
+      const res = await call(admin, 'POST', '/api/images', PNG, { raw: true, contentType: 'image/png' });
+      return res.data.id;
+    };
+    const usedId = await upload(), binOnlyId = await upload(), unusedId = await upload(), foreignRefId = await upload();
+    r = await call(admin, 'POST', '/api/notes', {
+      title: '圖庫：使用中',
+      content: '![螢幕截圖](img:' + usedId + ')\n\n又一次 ![](img:' + usedId + ')，句尾引用 img:' + foreignRefId + '.'
+    });
+    const libLive = r.data.note.id;
+    r = await call(admin, 'POST', '/api/notes', { title: '圖庫：垃圾桶', content: '![bin](img:' + binOnlyId + ')' });
+    await call(admin, 'DELETE', '/api/notes/' + r.data.note.id);
+    // Bob pastes one of admin's image ids into a private note of his own.
+    await call(bob, 'POST', '/api/notes', { title: 'bob 的私人筆記', content: '![不該外洩的替代文字](img:' + foreignRefId + ')' });
+    r = await call(admin, 'GET', '/api/images');
+    const lib = r.status === 200 && Array.isArray(r.data.images) ? r.data.images : [];
+    const entry = id => lib.find(i => i.id === id) || { notes: [] };
+    ok(lib.length >= 4 && lib.every(i => typeof i.bytes === 'number' && i.data === undefined && Array.isArray(i.notes)),
+      'lists own uploads, metadata only', r.status);
+    const used = entry(usedId);
+    ok(used.notes.length === 1 && used.notes[0].id === libLive && used.notes[0].count === 2 && used.name === '螢幕截圖',
+      'used image: which note, how often, alt text as name', used);
+    const binOnly = entry(binOnlyId);
+    ok(binOnly.notes.length === 1 && binOnly.notes[0].trashed === true, 'image used only by a trashed note says so', binOnly);
+    const unused = entry(unusedId);
+    ok(unused.notes.length === 0 && unused.hiddenNotes === 0, 'unused image has no notes', unused);
+    const foreign = entry(foreignRefId);
+    ok(foreign.notes.length === 1 && foreign.hiddenNotes === 1 && foreign.name === '',
+      'a note the owner cannot read is counted, not named, and its alt text is not used', foreign);
+    ok(entry(imgId).notes.some(n => n.id === noteIds[0]) && entry(pdfId).name === 'report' && entry(pdfId).mime === 'application/pdf',
+      'earlier image and PDF resolve to their notes', { img: entry(imgId), pdf: entry(pdfId) });
+    r = await call(bob, 'GET', '/api/images');
+    ok(r.status === 200 && !r.data.images.some(i => i.id === usedId || i.id === foreignRefId), "bob's library does not list admin's uploads", r.data);
+    await call(bob, 'DELETE', '/api/images/' + unusedId);
+    r = await call(admin, 'GET', '/api/images');
+    ok(r.data.images.some(i => i.id === unusedId), "a stranger's delete leaves the image alone");
+    r = await call(admin, 'DELETE', '/api/images/' + unusedId);
+    ok(r.status === 200, 'owner deletes an unused image');
+    r = await call(admin, 'GET', '/api/images');
+    ok(!r.data.images.some(i => i.id === unusedId), 'deleted image left the library');
+  }
+
   section('SSE');
   {
     const ac = new AbortController();

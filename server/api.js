@@ -691,6 +691,58 @@ async function deleteImage(user, id) {
   return { ok: true };
 }
 
+// ---------------- image library ----------------
+// Everything the caller uploaded, each with the notes that embed it, for the
+// image manager (js/imagelib.js). "Embeds" is read from note text exactly the
+// way image visibility is decided above (img:<id> or pdf:<id> anywhere in the
+// content), and across every note, not only the caller's: an upload pasted into
+// someone else's note is still in use, and calling it unused would invite a
+// delete that breaks their note. A note the caller cannot open is counted in
+// hiddenNotes but never named, and its alt text is never used as the name.
+// The caller's own trashed notes are listed (flagged) since the owner can
+// restore them; anyone else's trash is invisible, so it counts as hidden.
+const MEDIA_REF = /(?:!\[([^\]\n]*)\]\()?(?:img|pdf):([\w.-]+)/g;
+
+async function listImages(user) {
+  const images = (await q.imagesOf.all(user.id)).map(r => ({
+    id: r.id, mime: r.mime, createdAt: Number(r.created_at),
+    bytes: Number(r.bytes) + Number(r.original_bytes), annotated: !!r.annotated,
+    name: '', notes: [], hiddenNotes: 0
+  }));
+  if (!images.length) return { images: images };
+  const byId = new Map(images.map(i => [i.id, i]));
+
+  for (const n of await q.notesEmbeddingMedia.all()) {
+    const hits = new Map();                 // image id -> { count, alt }
+    for (const m of String(n.content).matchAll(MEDIA_REF)) {
+      // [\w.-]+ also swallows a full stop that ends a sentence ("see img:img_x.").
+      let id = m[2];
+      if (!byId.has(id)) id = id.replace(/[.-]+$/, '');
+      if (!byId.has(id)) continue;
+      const h = hits.get(id) || { count: 0, alt: '' };
+      h.count++;
+      if (!h.alt && m[1] && m[1] !== '__cover_logo__') h.alt = m[1].trim();
+      hits.set(id, h);
+    }
+    if (!hits.size) continue;
+
+    const mine = n.owner_id === user.id;
+    const visible = mine || !!(await permFor(user, n));
+    for (const [id, h] of hits) {
+      const img = byId.get(id);
+      if (!visible) { img.hiddenNotes++; continue; }
+      if (!img.name && h.alt) img.name = h.alt;
+      img.notes.push({
+        id: n.id, title: n.title, folderId: mine ? n.folder_id : null, count: h.count,
+        trashed: !!n.deleted_at, sharedBy: mine ? undefined : n.owner_name, updatedAt: Number(n.updated_at)
+      });
+    }
+  }
+  // Live notes first, then the most recently edited.
+  for (const img of images) img.notes.sort((a, b) => (a.trashed - b.trashed) || (b.updatedAt - a.updatedAt));
+  return { images: images };
+}
+
 // ---------------- shares ----------------
 async function listShares(user, noteId) {
   const row = await q.noteById.get(noteId);
@@ -853,6 +905,6 @@ module.exports = {
   restoreBookVersion, deleteBookVersion,
   listBookLinks, createBookLink, updateBookLink, deleteBookLink, publicBook,
   listFolders, createFolder, updateFolder, deleteFolder,
-  createImage, getImage, saveImage, deleteImage,
+  createImage, getImage, saveImage, deleteImage, listImages,
   listShares, addShare, removeShare
 };

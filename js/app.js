@@ -2808,6 +2808,16 @@
       });
     });
 
+    // 圖片管理：上傳過的圖片／PDF，每個用在哪些筆記、哪些沒有筆記在用
+    const imagesBtn = $('#images-open-btn');
+    if (imagesBtn) imagesBtn.addEventListener('click', function () {
+      if (!window.ImageLib) return;
+      ImageLib.open({
+        folders: state.folders,
+        onOpenNote: function (id) { openNote(id); }
+      });
+    });
+
     editorEl.addEventListener('input', function () {
       renderPreview();
       scheduleSave();

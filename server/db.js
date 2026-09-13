@@ -480,6 +480,16 @@ const q = {
     VALUES (?, ?, ?, ?, ?, ?, ?)`),
   updateImage: stmt('UPDATE images SET mime = ?, data = ?, original = ?, shapes = ? WHERE id = ?'),
   deleteImage: stmt('DELETE FROM images WHERE id = ? AND owner_id = ?'),
+  // Image library (api.js listImages): the owner's uploads without their bytes,
+  // and every note, any owner, trashed or not, whose text could embed an upload.
+  // The INSTR filter only trims the scan; listImages does the exact matching.
+  imagesOf: stmt(
+    'SELECT id, mime, created_at, LENGTH(data) AS bytes, COALESCE(LENGTH(original), 0) AS original_bytes, ' +
+    '(original IS NOT NULL) AS annotated FROM images WHERE owner_id = ? ORDER BY created_at DESC'),
+  notesEmbeddingMedia: stmt(
+    'SELECT n.id, n.owner_id, u.username AS owner_name, n.title, n.folder_id, n.access, n.access_perm, ' +
+    'n.deleted_at, n.updated_at, n.content FROM notes n JOIN users u ON u.id = n.owner_id ' +
+    "WHERE INSTR(n.content, 'img:') > 0 OR INSTR(n.content, 'pdf:') > 0"),
 
   // shares
   shareFor: stmt('SELECT * FROM shares WHERE note_id = ? AND user_id = ?'),

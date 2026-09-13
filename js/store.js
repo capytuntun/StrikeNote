@@ -273,6 +273,8 @@
       });
     },
     deleteImage: function (id) { return req('DELETE', '/api/images/' + id); },
+    // Image library: every upload of mine (no bytes) with the notes that embed it.
+    listImages: function () { return req('GET', '/api/images'); },
 
     // Auth
     login: function (username, password) {

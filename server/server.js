@@ -423,6 +423,8 @@ async function handleApi(req, res, url) {
     if (method === 'DELETE') return send(await api.deleteFolder(user, m[1]));
   }
 
+  // Image library (js/imagelib.js): the caller's uploads, metadata only, each with the notes that embed it.
+  if (p === '/api/images' && method === 'GET') return json(res, 200, await api.listImages(user));
   if (p === '/api/images' && method === 'POST') {
     const mime = String(req.headers['content-type'] || 'image/png').split(';')[0];
     // Images plus PDF attachments (embedded in notes with the pdf: scheme).
