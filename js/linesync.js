@@ -1,6 +1,6 @@
-/* linesync.js — click a line in the MD editor and the matching text in the
- * preview gets underlined, or the other way round: click text in the preview
- * and its source line underlines in the editor.
+/* linesync.js — click a line on either side, the MD editor or the preview,
+ * and that line is underlined on BOTH sides: the editor row and the matching
+ * text, image or code line in the preview.
  *
  * This is deliberately a companion pass that runs AFTER markdown.js has
  * already produced and sanitized the preview HTML — it never changes
@@ -23,15 +23,16 @@
  *      type, same order" idea app.js uses for the scroll anchors (see
  *      editorBlocks()/previewBlocks() in app.js). A raw-HTML token renders as
  *      whatever it says, so the blocks it produces are counted and skipped.
- *   3. For paragraphs, list items and line-numbered code, splitting the
- *      block's own rendered HTML at each <br> (breaks:true turns every
- *      source newline into one) into one <span data-line0 data-line1> per
- *      source line, so a 5-line paragraph highlights exactly the line you
- *      clicked rather than the whole paragraph.
- *   4. For blockquote/callout/RISK-finding, un-numbered code, and mindmap
- *      blocks, tagging the WHOLE block with one range instead — a `>` or
- *      `:::` block isn't addressable line-by-line the way plain text is, so
- *      clicking any line inside one highlights/underlines the whole thing.
+ *   3. For paragraphs, list items and code blocks, splitting the block's own
+ *      rendered HTML into one <span data-line0 data-line1> per source line —
+ *      at each <br> in text (breaks:true turns every source newline into one),
+ *      at each newline inside <code> — so a 5-line paragraph or a 20-line
+ *      command block highlights exactly the line you clicked rather than the
+ *      whole block. Line-numbered code already has one <li> per line.
+ *   4. For blockquote/callout/RISK-finding and mindmap blocks, tagging the
+ *      WHOLE block with one range instead — a `>` or `:::` block isn't
+ *      addressable line-by-line the way plain text is, so clicking any line
+ *      inside one highlights/underlines the whole thing.
  *
  * Every element gets `data-line0`/`data-line1` set directly (coarse
  * containers AND, where refined, the inner per-line spans within them), so
@@ -42,7 +43,8 @@
  * but edithl.js already renders one `.cm-row` per source line (index i =
  * line i+1) for syntax highlighting, kept in step with the textarea. This
  * module reuses those same rows purely as a paint target for the underline,
- * without touching edithl.js.
+ * without touching edithl.js; since edithl replaces every row on each input
+ * and resize, a MutationObserver puts the underline back.
  */
 (function (global) {
   'use strict';
@@ -123,31 +125,40 @@
     return out;
   }
 
-  // ---- 2) split a block's OWN rendered HTML at <br> into per-line spans -
+  // ---- 2) split a block's OWN rendered HTML into per-line spans ----------
   // Void elements (img, input — inline images, task checkboxes) are emitted
   // but never pushed onto the open-tag stack, since they have no closing tag
   // and would otherwise "leak" into every following line.
   const VOID_TAGS = { img: 1, input: 1, br: 1, hr: 1, area: 1, base: 1, col: 1, embed: 1, link: 1, meta: 1, param: 1, source: 1, track: 1, wbr: 1 };
 
-  function splitByBr(html) {
+  // One HTML fragment per line, re-closing and re-opening any element that
+  // straddles a break so each fragment is valid on its own. Text breaks at
+  // each <br>; code (`inCode`) at each newline, where a <br> never appears
+  // and hljs spans can run across lines.
+  function splitLines(html, inCode) {
     const openTags = [];
     const lines = [];
     let cur = '';
+    function breakLine() {
+      for (let j = openTags.length - 1; j >= 0; j--) cur += '</' + openTags[j].name + '>';
+      lines.push(cur);
+      cur = '';
+      for (let j = 0; j < openTags.length; j++) cur += openTags[j].open;
+    }
     const re = /<br\s*\/?>|<([a-zA-Z][\w-]*)\b[^>]*>|<\/([a-zA-Z][\w-]*)>|[^<]+/g;
     let m;
     while ((m = re.exec(html))) {
       const tok = m[0];
       if (/^<br/i.test(tok)) {
-        for (let j = openTags.length - 1; j >= 0; j--) cur += '</' + openTags[j].name + '>';
-        lines.push(cur);
-        cur = '';
-        for (let j = 0; j < openTags.length; j++) cur += openTags[j].open;
+        if (inCode) cur += tok; else breakLine();
       } else if (m[1]) {
         cur += tok;
         if (!VOID_TAGS[m[1].toLowerCase()]) openTags.push({ name: m[1], open: tok });
       } else if (m[2]) {
         cur += tok;
         openTags.pop();
+      } else if (inCode) {
+        tok.split('\n').forEach(function (part, i) { if (i) breakLine(); cur += part; });
       } else {
         cur += tok;
       }
@@ -161,18 +172,16 @@
   // li's OWN text, up to that point.
   const NESTED_BLOCK_RE = /<(?:ul|ol|blockquote|pre|table|div|p|h[1-6]|hr|nav)[\s\/>]/i;
 
-  function wrapOwnLines(el, lineOf) {
+  function wrapLines(el, lineOf, inCode) {
     const html = el.innerHTML;
-    const cut = NESTED_BLOCK_RE.exec(html);
+    const cut = inCode ? null : NESTED_BLOCK_RE.exec(html);
     const ownHtml = cut ? html.slice(0, cut.index) : html;
     if (!ownHtml.trim()) return;
     const restHtml = cut ? html.slice(cut.index) : '';
-    const lines = splitByBr(ownHtml);
-    const wrapped = lines.map(function (lineHtml, i) {
+    el.innerHTML = splitLines(ownHtml, inCode).map(function (lineHtml, i) {
       const ln = i < lineOf.length ? lineOf[i] : lineOf[lineOf.length - 1];
       return '<span class="sync-ln" data-line0="' + ln + '" data-line1="' + ln + '">' + lineHtml + '</span>';
-    }).join('<br>');
-    el.innerHTML = wrapped + restHtml;
+    }).join(inCode ? '\n' : '<br>') + restHtml;
   }
 
   // ---- 3) pair the tokens with the rendered preview DOM -------------------
@@ -251,6 +260,9 @@
           ranges.push({ start: ln, end: ln, el: tr });
         });
       } else if (b.kind === 'code') {
+        // The whole block answers for its fence lines, and for a mind map.
+        tag(el, b.start, b.end);
+        ranges.push({ start: b.start, end: b.end, el: el });
         // `data-ln` is the GUTTER number the ```lang=N syntax asked to display
         // (often reset to 1, independent of where the fence actually sits in
         // the note) — not the source line. The real source line is simply the
@@ -258,12 +270,20 @@
         const numbered = el.querySelectorAll('li[data-ln]');
         if (numbered.length) {
           numbered.forEach(function (li, i) {
-            const ln = b.start + 1 + i;
+            const ln = Math.min(b.start + 1 + i, b.end);
             tag(li, ln, ln); ranges.push({ start: ln, end: ln, el: li });
           });
         } else {
-          tag(el, b.start, b.end);
-          ranges.push({ start: b.start, end: b.end, el: el });
+          const code = el.querySelector('pre > code');
+          if (code) {
+            // An indented block has no fence line above its first line of code.
+            const first = b.token.codeBlockStyle === 'indented' ? b.start : b.start + 1;
+            const count = String(b.token.text || '').split('\n').length;
+            const lineOf = [];
+            for (let i = 0; i < count; i++) lineOf.push(Math.min(first + i, b.end));
+            wrapLines(code, lineOf, true);
+            pushSpans(ranges, code);
+          }
         }
       } else if (b.kind === 'quote') {
         tag(el, b.start, b.end);
@@ -271,7 +291,7 @@
       } else if (b.kind === 'para') {
         tag(el, b.start, b.end);
         ranges.push({ start: b.start, end: b.end, el: el }); // fallback if the split below undercounts
-        wrapOwnLines(el, brLines(b.raw, b.start));
+        wrapLines(el, brLines(b.raw, b.start), false);
         pushSpans(ranges, el);
       } else if (b.kind === 'list') {
         const lis = el.querySelectorAll(':scope > li');
@@ -282,7 +302,7 @@
           ranges.push({ start: item.start, end: item.end, el: li });
           // A loose list wraps each item's text in its own <p>.
           const own = li.firstChild && li.firstChild.nodeName === 'P' ? li.firstChild : li;
-          wrapOwnLines(own, brLines(item.raw, item.start));
+          wrapLines(own, brLines(item.raw, item.start), false);
           pushSpans(ranges, own);
         });
       }
@@ -304,20 +324,48 @@
     return best;
   }
 
-  // ---- 4) wiring: two click/caret listeners, one underline each side -----
+  // ---- 4) wiring: whichever side is clicked, both sides get the underline --
   let editorEl = null, previewEl = null, ranges = [];
-  let curPreviewEls = [];
-  let curRowStart = -1, curRowEnd = -1;
+  let hitEls = [];                  // preview elements carrying .sync-hit
+  let hitStart = -1, hitEnd = -1;   // source lines underlined in the editor
+  let observedRows = null;
 
-  function clearPreviewHit() {
-    curPreviewEls.forEach(function (el) { el.classList.remove('sync-hit'); });
-    curPreviewEls = [];
+  function setRows(on) {
+    const box = document.querySelector('#editor-backdrop .cm-lines');
+    if (!box || hitStart < 1) return;
+    if (box !== observedRows && global.MutationObserver) {
+      // edithl.js replaces every row on each input and resize, which drops the
+      // class; put it back whenever that happens.
+      new MutationObserver(function () { setRows(true); }).observe(box, { childList: true });
+      observedRows = box;
+    }
+    const rows = box.children;
+    for (let i = hitStart - 1; i < hitEnd && i < rows.length; i++) rows[i].classList.toggle('sync-hit', on);
   }
-  function clearEditorHit() {
-    if (curRowStart < 0) return;
-    const lines = document.querySelectorAll('#editor-backdrop .cm-lines .cm-row');
-    for (let i = curRowStart; i <= curRowEnd && i < lines.length; i++) lines[i].classList.remove('sync-hit');
-    curRowStart = curRowEnd = -1;
+
+  function clearHit() {
+    hitEls.forEach(function (el) { el.classList.remove('sync-hit'); });
+    hitEls = [];
+    setRows(false);
+    hitStart = hitEnd = -1;
+  }
+
+  // Underline source lines start..end in the editor, and every preview element
+  // tagged with exactly that range — several when a literal <br> splits one
+  // line. An element that contains another hit (a one-line <p> and its own
+  // span share a range) is skipped: only the innermost carries the style.
+  function showHit(start, end) {
+    if (start === hitStart && end === hitEnd && hitEls.length && hitEls[0].isConnected) return;
+    clearHit();
+    const hits = ranges.filter(function (r) { return r.start === start && r.end === end; })
+      .map(function (r) { return r.el; });
+    hitEls = hits.filter(function (el) {
+      return !hits.some(function (other) { return other !== el && el.contains(other); });
+    });
+    hitEls.forEach(function (el) { el.classList.add('sync-hit'); });
+    hitStart = start;
+    hitEnd = end;
+    setRows(true);
   }
 
   function lineAtCaret() {
@@ -326,39 +374,28 @@
   }
 
   function onEditorMove() {
-    clearPreviewHit();
-    const best = ranges.length ? rangeFor(ranges, lineAtCaret()) : null;
-    if (!best) return;
-    // Light every element with exactly that range: a literal <br> typed
-    // mid-line splits one source line into several spans. Skip an element that
-    // contains another hit — a one-line <p> and its own span share a range, and
-    // only the span carries the underline style.
-    const hits = ranges.filter(function (r) { return r.start === best.start && r.end === best.end; })
-      .map(function (r) { return r.el; });
-    curPreviewEls = hits.filter(function (el) {
-      return !hits.some(function (other) { return other !== el && el.contains(other); });
-    });
-    curPreviewEls.forEach(function (el) { el.classList.add('sync-hit'); });
+    const r = ranges.length ? rangeFor(ranges, lineAtCaret()) : null;
+    if (r) showHit(r.start, r.end);
+    else clearHit();
   }
 
   function onPreviewClick(e) {
     const hit = e.target.closest && e.target.closest('[data-line0]');
-    clearEditorHit();
-    if (!hit) return;
+    if (!hit || !previewEl.contains(hit)) { clearHit(); return; }
     const start = parseInt(hit.getAttribute('data-line0'), 10);
     const end = parseInt(hit.getAttribute('data-line1'), 10) || start;
-    const lines = document.querySelectorAll('#editor-backdrop .cm-lines .cm-row');
-    if (!lines.length) return;
-    curRowStart = Math.max(0, start - 1);
-    curRowEnd = Math.min(lines.length - 1, end - 1);
-    for (let i = curRowStart; i <= curRowEnd; i++) lines[i].classList.add('sync-hit');
+    showHit(start, end);
   }
 
   function rebuild(sourceText) {
     if (!previewEl) return;
     ranges = buildRanges(previewEl, sourceBlocks(sourceText));
-    // A fresh render wiped out any element the previous highlight pointed at.
-    curPreviewEls = [];
+    // The render replaced every preview element the underline was on. While
+    // the editor has focus, re-derive both sides from the caret; otherwise drop
+    // both, since the same line numbers may no longer hold the same text.
+    hitEls = [];
+    if (document.activeElement === editorEl) onEditorMove();
+    else clearHit();
   }
 
   function init(ed, pv) {
