@@ -812,6 +812,8 @@ mark.search-hit {
 .sidebar-nav-item:hover { background: var(--row-hover); color: var(--text); }
 .sidebar-nav-item:hover .ic-svg { color: var(--accent); }
 .sidebar-nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sidebar-nav-item.is-active { background: var(--accent-weak); color: var(--accent); }
+.sidebar-nav-item.is-active .ic-svg { color: var(--accent); }
 
 /* ---------- Main ---------- */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -2748,22 +2750,89 @@ div.ver-item.ver-now { cursor: default; }
 }
 
 /* ---------- 電子書公開分享連結 ---------- */
-/* ---------- 垃圾桶（js/trash.js） ---------- */
-.modal.trash-modal { width: min(720px, 94vw); max-height: 86vh; display: flex; flex-direction: column; }
-.trash-hint { font-size: var(--fs-sm); color: var(--text-faint); line-height: 1.6; margin-bottom: 10px; }
-.trash-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; border: 1px solid var(--border); background: var(--bg-2); }
-.trash-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
-.trash-item:last-child { border-bottom: 0; }
-.trash-item > .ic-svg { width: 16px; height: 16px; color: var(--text-faint); flex: 0 0 auto; }
-.trash-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.trash-title { font-size: var(--fs-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.trash-meta { font-size: var(--fs-xs); color: var(--text-faint); }
-.trash-meta .soon { color: var(--danger); font-weight: 600; }
-.trash-acts { display: flex; gap: 6px; flex: 0 0 auto; }
-.trash-acts .btn { flex: 0 0 auto; padding: 5px 10px; font-size: var(--fs-sm); }
-.trash-empty { padding: 28px 16px; text-align: center; color: var(--text-faint); font-size: var(--fs-sm); line-height: 1.7; }
-.trash-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; }
-.trash-foot .btn { flex: 0 0 auto; }
+/* ---------- 垃圾桶頁（js/trash.js，網址 #trash） ----------
+   跟首頁同一套版面：麵包屑頁首、區段標題、無框條列（沿用 .dash-* 與 .dash-note-wrap）。
+   #trash-wrap 跟 .empty-state 一樣是自己捲動的內層窗格，外殼永遠不捲。 */
+.trash-wrap { flex: 1; min-height: 0; overflow-y: auto; color: var(--text); background: var(--bg-2); }
+.trash-search { position: relative; display: block; width: 240px; }
+.trash-search .ic-svg {
+  position: absolute; left: 10px; top: 50%; width: 15px; height: 15px; transform: translateY(-50%);
+  color: var(--text-faint); pointer-events: none;
+}
+.trash-search input {
+  width: 100%; height: 34px; padding: 0 10px 0 32px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font: inherit; font-size: var(--fs-sm); outline: none;
+  transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+.trash-search input:focus { border-color: var(--accent); box-shadow: var(--ring); }
+.trash-empty-btn { flex: 0 0 auto; height: 34px; font-size: var(--fs-sm); color: var(--danger); }
+.trash-empty-btn:hover { background: var(--danger-weak); border-color: var(--danger); color: var(--danger); }
+
+/* 勾選後出現的批次操作列：黏在捲動窗格頂端，往下捲也找得到 */
+.trash-batch {
+  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px;
+  margin: 16px 0 -10px; padding: 8px 10px 8px 14px;
+  background: var(--accent-weak); border: 1px solid var(--accent); box-shadow: var(--shadow-sm);
+  animation: pop-in var(--dur-2) var(--ease-out);
+}
+.trash-batch-count { margin-right: auto; font-size: var(--fs-sm); font-weight: 700; color: var(--accent); }
+.trash-batch .btn { flex: 0 0 auto; padding: 5px 12px; font-size: var(--fs-sm); }
+.trash-purge-btn { color: var(--danger); }
+.trash-purge-btn:hover { background: var(--danger-weak); border-color: var(--danger); color: var(--danger); }
+
+.trash-section.is-soon .dash-section-head { color: var(--danger); }
+.trash-section.is-soon .dash-section-count { color: var(--danger); background: var(--danger-weak); }
+.trash-selall {
+  margin-left: auto; padding: 2px 8px; border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text-dim);
+}
+.trash-selall:hover { color: var(--accent); background: var(--accent-weak); }
+
+.trash-row-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.trash-row-text .dash-row-title { flex: none; }
+.trash-row-from {
+  display: flex; align-items: center; gap: 5px; min-width: 0;
+  font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.trash-row-from .ic-svg { width: 12px; height: 12px; flex: 0 0 auto; }
+.trash-row-from.gone { color: var(--warn); }
+.trash-left {
+  padding: 2px 7px; white-space: nowrap; font-size: var(--fs-micro); font-weight: 700; font-variant-numeric: tabular-nums;
+  background: var(--bg-3); color: var(--text-dim);
+}
+.trash-left.soon { background: var(--danger-weak); color: var(--danger); }
+.trash-row-size { min-width: 52px; text-align: right; white-space: nowrap; font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.trash-row-acts { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; margin-left: 8px; }
+.trash-act {
+  display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px;
+  border: 1px solid transparent; background: transparent; color: var(--text-dim); cursor: pointer;
+  font: inherit; font-size: var(--fs-sm); font-weight: 600; white-space: nowrap;
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.trash-act .ic-svg { width: 14px; height: 14px; }
+.trash-act.restore { color: var(--accent); }
+.trash-act.restore:hover { background: var(--accent-weak); border-color: var(--accent); }
+.trash-act.purge:hover { background: var(--danger-weak); border-color: var(--danger); color: var(--danger); }
+.trash-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.trash-page.is-busy .trash-row-acts, .trash-page.is-busy .trash-batch, .trash-page.is-busy .dash-head-right {
+  opacity: .5; pointer-events: none;
+}
+
+.trash-emptystate { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 96px 16px; text-align: center; }
+.trash-emptystate-ic {
+  display: inline-flex; align-items: center; justify-content: center; width: 64px; height: 64px; margin-bottom: 6px;
+  background: var(--bg-3); color: var(--text-faint);
+}
+.trash-emptystate-ic .ic-svg { width: 28px; height: 28px; }
+.trash-emptystate-title { font-size: var(--fs-lg); font-weight: 700; color: var(--text); }
+.trash-emptystate-sub { margin-bottom: 8px; font-size: var(--fs-sm); color: var(--text-faint); }
+.trash-emptystate .btn { flex: 0 0 auto; }
+@media (max-width: 760px) {
+  .trash-page .dash-head-right { width: 100%; }
+  .trash-search { flex: 1 1 auto; width: auto; }
+  .trash-row-size, .trash-page .dash-row-time { display: none; }
+}
 
 /* ---------- 圖片管理（js/imagelib.js） ---------- */
 .modal.imglib-modal {

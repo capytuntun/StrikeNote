@@ -93,11 +93,13 @@
       state.folders = res[0];
       state.notes = res[1];
       renderTree();
-      // 網址帶 #note/<id> 或 #book/<id>（複製連結）優先；否則回到上次開的筆記
+      // 網址帶 #trash、#note/<id> 或 #book/<id>（複製連結）優先；否則回到上次開的筆記
       const wantNote = noteIdFromHash();
       const wantBook = bookIdFromHash();
       const last = wantNote || LS.get('lastNote', null);
-      if (wantBook && state.folders.some(function (f) { return f.id === wantBook; })) {
+      if (location.hash === '#trash') {
+        openTrash();
+      } else if (wantBook && state.folders.some(function (f) { return f.id === wantBook; })) {
         openBook(wantBook);
       } else if (last && state.notes.some(function (n) { return n.id === last; })) {
         openNote(last);
@@ -355,6 +357,7 @@
   function refreshViews() {
     renderTree();
     if (!emptyEl.hidden && window.Dashboard) Dashboard.refresh(dashOpts());
+    if (trashWrapEl && !trashWrapEl.hidden && window.Trash) Trash.render(trashPageEl, trashOpts());
   }
   // 儀表板需要的資料與回呼，集中一處，render / refresh 共用
   function dashOpts() {
@@ -491,6 +494,8 @@
   const secWrapEl = $('#sec-wrap');
   const perfWrapEl = $('#perf-wrap');
   const bookWrapEl = $('#book-wrap');
+  const trashWrapEl = $('#trash-wrap');
+  const trashPageEl = $('#trash-page');
   // 切換頂列的「筆記模式」：開一般筆記時顯示標題與編輯按鈕，回首頁時只留 logo + 帳號。
   function noteBar(on) {
     const app = document.getElementById('app');
@@ -573,6 +578,7 @@
     if (secWrapEl) secWrapEl.hidden = true;
     if (perfWrapEl) perfWrapEl.hidden = true;
     closeBookView();
+    closeTrashView();
     if (window.Dashboard) {
       Dashboard.render(dashOpts());
     }
@@ -587,6 +593,49 @@
     if (!bookWrapEl.hidden && window.Book && Book.close) Book.close();
     bookWrapEl.hidden = true;
   }
+  // ---- 垃圾桶頁（#trash）------------------------------------------------------
+  // 跟首頁、電子書一樣是主區域的一個檢視：收起其他檢視、打開 #trash-wrap，內容由
+  // trash.js 畫。復原／永久刪除後只重抓筆記清單、重畫側邊欄，不走 loadData——
+  // 它會依網址重開這一頁，也可能重開上一篇筆記。
+  function trashOpts() {
+    return {
+      folders: state.folders,
+      onHome: goHome,
+      onChanged: function () {
+        Store.getNotes().then(function (notes) { state.notes = notes; renderTree(); });
+      }
+    };
+  }
+  function setNavActive(id, on) {
+    const b = document.getElementById(id);
+    if (b) b.classList.toggle('is-active', !!on);
+  }
+  function closeTrashView() {
+    if (!trashWrapEl) return;
+    trashWrapEl.hidden = true;
+    setNavActive('trash-open-btn', false);
+  }
+  function openTrash() {
+    if (!window.Trash || !trashWrapEl) return;
+    saveNow();
+    closeStream();
+    LS.set('lastNote', '');
+    noteBar(false);
+    if (notePathEl) notePathEl.textContent = '';
+    state.currentId = null; state.current = null;
+    emptyEl.hidden = true;
+    wrapEl.hidden = true;
+    if (secWrapEl) secWrapEl.hidden = true;
+    if (perfWrapEl) perfWrapEl.hidden = true;
+    closeBookView();
+    trashWrapEl.hidden = false;
+    trashWrapEl.scrollTop = 0;
+    setNavActive('trash-open-btn', true);
+    setHash('trash');
+    Trash.render(trashPageEl, trashOpts());
+    renderTree();
+  }
+
   function openBook(folderId) {
     if (!window.Book || !bookWrapEl) return;
     saveNow();
@@ -599,6 +648,7 @@
     wrapEl.hidden = true;
     if (secWrapEl) secWrapEl.hidden = true;
     if (perfWrapEl) perfWrapEl.hidden = true;
+    closeTrashView();
     bookWrapEl.hidden = false;
     setSidebarOpen(false);
     setHash('book/' + folderId);
@@ -686,6 +736,7 @@
       tocOpen.clear();         // 目錄的展開狀態是每篇筆記各自的
       emptyEl.hidden = true;
       closeBookView();
+      closeTrashView();
       setSidebarOpen(false);   // 從抽屜點開筆記後收回，把整個寬度留給筆記
 
       // 儲存後同步樹狀標題 / 記憶體中的筆記（給步驟式與表格式編輯器共用）。
@@ -2396,7 +2447,7 @@
     });
   }
   // "Delete" is a move to the trash (server keeps the row with deleted_at set);
-  // the trash dialog (js/trash.js) is where it is restored or really deleted.
+  // the trash page (#trash, js/trash.js) is where it is restored or really deleted.
   function deleteNote(note) {
     showConfirm({
       title: '移至垃圾桶',
@@ -2777,13 +2828,17 @@
         if (nid !== state.currentId && state.notes.some(function (n) { return n.id === nid; })) openNote(nid);
         return;
       }
+      if (location.hash === '#trash') {
+        if (trashWrapEl && trashWrapEl.hidden) openTrash();
+        return;
+      }
       const bid = bookIdFromHash();
       if (bid) {
         if (state.folders.some(function (f) { return f.id === bid; })) openBook(bid);
         return;
       }
       // hash 變回空字串：通常是「上一頁」退回首頁那一層，把畫面切回儀表板
-      if (state.currentId || (bookWrapEl && !bookWrapEl.hidden)) goHome();
+      if (state.currentId || (bookWrapEl && !bookWrapEl.hidden) || (trashWrapEl && !trashWrapEl.hidden)) goHome();
     });
     // 新增 → 電子書：挑一個資料夾做成電子書；開過就會出現在首頁的「電子書」區
     const newBook = $('#new-book');
@@ -2796,17 +2851,9 @@
         onOpenTag: function (tag) { browseTag(tag); }
       });
     });
-    // 垃圾桶：復原／永久刪除過之後只重抓筆記清單，不走 loadData（它會重開上一篇筆記）
+    // 垃圾桶：獨立頁面（#trash），見 openTrash()
     const trashBtn = $('#trash-open-btn');
-    if (trashBtn) trashBtn.addEventListener('click', function () {
-      if (!window.Trash) return;
-      Trash.open({
-        folders: state.folders,
-        onChanged: function () {
-          Store.getNotes().then(function (notes) { state.notes = notes; refreshViews(); });
-        }
-      });
-    });
+    if (trashBtn) trashBtn.addEventListener('click', function () { openTrash(); });
 
     // 圖片管理：上傳過的圖片／PDF，每個用在哪些筆記、哪些沒有筆記在用
     const imagesBtn = $('#images-open-btn');

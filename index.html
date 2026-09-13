@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=104">
+  <link rel="stylesheet" href="app.css?v=105">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -287,6 +287,10 @@
       </div>
       <!-- 電子書模式：把一個資料夾當成一本書來閱讀（GitBook 式三欄），可出版成單檔 HTML -->
       <div id="book-wrap" class="book-wrap" hidden></div>
+      <!-- 垃圾桶頁（#trash）：刪除的筆記保留期內可復原或永久刪除，內容由 js/trash.js 畫 -->
+      <div id="trash-wrap" class="trash-wrap" hidden>
+        <div id="trash-page" class="dashboard trash-page"></div>
+      </div>
     </main>
     </div><!-- /#app-body -->
   </div>
@@ -326,9 +330,9 @@
   <script src="js/pdf.js?v=48"></script>
   <script src="js/book.js?v=4"></script>
   <script src="js/versions.js?v=2"></script>
-  <script src="js/trash.js?v=1"></script>
+  <script src="js/trash.js?v=2"></script>
   <script src="js/imagelib.js?v=2"></script>
   <script src="js/linesync.js?v=3"></script>
-  <script src="js/app.js?v=78"></script>
+  <script src="js/app.js?v=79"></script>
 </body>
 </html>
