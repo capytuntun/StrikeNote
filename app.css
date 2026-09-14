@@ -1695,21 +1695,29 @@ hr.sync-hit, table.sync-hit, .callout.sync-hit, .finding.sync-hit, blockquote.sy
   width: 100%; box-sizing: border-box;
 }
 .code-block pre { margin: 0; width: 100%; }
+/* 複製鈕和語言標籤疊在右上角同一格（同一個 grid area、靠右對齊）：鈕永遠固定在角落，
+   不會隨語言名稱長短左右跑。滑過區塊時鈕出現、蓋住標籤，標籤同時藏起來，免得
+   POWERSHELL 這種比鈕寬的名稱從旁邊露出半截。 */
 .code-block .code-tools {
   position: absolute; top: 6px; right: 6px; z-index: 1;
-  display: flex; align-items: center; gap: 4px;
+  display: grid; justify-items: end; align-items: center;
 }
+.code-block .code-tools > * { grid-area: 1 / 1; }
 .code-block .code-lang {
   font-size: var(--fs-micro); font-weight: 600; padding: 3px 8px; color: var(--text-faint);
   background: transparent;
   text-transform: uppercase; letter-spacing: .06em; font-family: var(--sans);
 }
 .code-block .code-copy {
+  position: relative; z-index: 1;
   opacity: 0; transition: opacity .12s, background .12s; cursor: pointer; font-family: var(--sans);
   border: 1px solid var(--border); background: var(--bg); color: var(--text-dim);
   font-size: var(--fs-xs); font-weight: 600; padding: 3px 9px; margin: 0;
 }
 .code-block:hover .code-copy, .code-copy:focus { opacity: 1; }
+.code-block:hover .code-lang,
+.code-copy:focus + .code-lang,
+.code-copy.copied + .code-lang { visibility: hidden; }
 .code-block .code-copy:hover { color: var(--text); background: var(--bg-3); }
 .code-block .code-copy.copied { color: var(--success); border-color: var(--success); opacity: 1; }
 /* line numbers — each source line is its own <li> (gutter number + code as a
