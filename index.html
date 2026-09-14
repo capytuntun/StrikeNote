@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=105">
+  <link rel="stylesheet" href="app.css?v=106">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -148,12 +148,12 @@
                autocomplete="off" spellcheck="false" aria-label="搜尋筆記">
         <button id="search-clear" class="search-clear" title="清除搜尋" hidden data-icon="x"></button>
       </div>
-      <!-- 批次操作列：勾選筆記後出現，可整批移動到資料夾或刪除 -->
+      <!-- 批次操作列：勾選筆記或資料夾後出現，可整批移動到資料夾或刪除 -->
       <div id="batch-bar" class="batch-bar" hidden>
         <span class="batch-count"></span>
         <div class="batch-actions">
-          <button id="batch-move" class="batch-btn" type="button" title="移動所選筆記到資料夾" data-icon="folder">移動</button>
-          <button id="batch-delete" class="batch-btn danger" type="button" title="把所選筆記移到垃圾桶" data-icon="trash">刪除</button>
+          <button id="batch-move" class="batch-btn" type="button" title="移動所選項目到資料夾" data-icon="folder">移動</button>
+          <button id="batch-delete" class="batch-btn danger" type="button" title="刪除所選項目（資料夾直接刪除，筆記移到垃圾桶）" data-icon="trash">刪除</button>
           <button id="batch-clear" class="batch-btn ghost" type="button" title="取消選取" data-icon="x"></button>
         </div>
       </div>
@@ -333,6 +333,6 @@
   <script src="js/trash.js?v=2"></script>
   <script src="js/imagelib.js?v=2"></script>
   <script src="js/linesync.js?v=3"></script>
-  <script src="js/app.js?v=80"></script>
+  <script src="js/app.js?v=81"></script>
 </body>
 </html>

@@ -41,7 +41,8 @@
   const presenceEl = $('#presence');
   const editorAreaEl = $('#editor-area');
   const notePathEl = $('#note-path');
-  const selected = new Set();   // 批次選取的筆記 id
+  const selected = new Set();   // 批次選取的筆記 id（和儀表板共用）
+  const selectedFolders = new Set();   // 批次選取的資料夾 id（只有側邊欄能勾）
 
   // ---- Note links --------------------------------------------------------
   function normTitle(t) { return String(t || '').trim().toLowerCase(); }
@@ -165,14 +166,26 @@
     const open = !!state.expanded[folder.id];
 
     const row = document.createElement('div');
-    row.className = 'tree-row folder-row';
+    const picked = selectedFolders.has(folder.id);
+    row.className = 'tree-row folder-row selectable' + (picked ? ' selected' : '');
     row.draggable = true;
     row.dataset.type = 'folder';
     row.dataset.id = folder.id;
+    // 勾選框疊在圖示欄上（見 app.css 的 .tree-check）；資料夾一定是自己的，所以每個都能勾
     row.innerHTML =
       '<span class="twisty">' + Icons.svg(open ? 'chevron-down' : 'chevron-right') + '</span>' +
-      '<span class="ic ic-folder">' + Icons.svg('folder') + '</span>' +
+      '<span class="lead"><span class="ic ic-folder">' + Icons.svg('folder') + '</span>' +
+      '<input type="checkbox" class="tree-check" title="選取"' + (picked ? ' checked' : '') + '></span>' +
       '<span class="label">' + MD.escapeHtml(folder.name) + '</span>';
+    const cb = row.querySelector('.tree-check');
+    // 點框只切換選取：不展開／收合資料夾，連點也不進入改名
+    cb.addEventListener('click', function (e) { e.stopPropagation(); });
+    cb.addEventListener('dblclick', function (e) { e.stopPropagation(); });
+    cb.addEventListener('change', function () {
+      if (cb.checked) selectedFolders.add(folder.id); else selectedFolders.delete(folder.id);
+      row.classList.toggle('selected', cb.checked);
+      updateBatchBar();
+    });
 
     // hover actions: add subfolder / add note inside this folder
     const actions = document.createElement('span');
@@ -211,19 +224,20 @@
     const row = document.createElement('div');
     const mine = isMine(note);
     row.className = 'tree-row note-row' + (note.id === state.currentId ? ' active' : '') +
-      (mine ? '' : ' shared-row') + (selected.has(note.id) ? ' selected' : '');
+      (mine ? ' selectable' : ' shared-row') + (selected.has(note.id) ? ' selected' : '');
     row.draggable = mine;   // dragging a shared note into my folders would do nothing
     row.dataset.type = 'note';
     row.dataset.id = note.id;
-    // 只有自己的筆記才有勾選框（批次移動／刪除都需要擁有權）
+    // 只有自己的筆記才有勾選框（批次移動／刪除都需要擁有權）。空的箭頭欄讓圖示和資料夾對齊，
+    // 勾選框和資料夾列一樣疊在圖示欄上
     const checkHtml = mine
-      ? '<input type="checkbox" class="note-check" title="選取"' + (selected.has(note.id) ? ' checked' : '') + '>'
+      ? '<input type="checkbox" class="tree-check" title="選取"' + (selected.has(note.id) ? ' checked' : '') + '>'
       : '';
-    row.innerHTML = checkHtml +
-      '<span class="ic">' + Icons.svg(noteIcon(note)) + '</span>' +
+    row.innerHTML = '<span class="twisty"></span>' +
+      '<span class="lead"><span class="ic">' + Icons.svg(noteIcon(note)) + '</span>' + checkHtml + '</span>' +
       '<span class="label">' + MD.escapeHtml(note.title || '未命名筆記') + '</span>' +
       (mine ? '' : '<span class="share-by">' + MD.escapeHtml(note.sharedBy || '') + '</span>');
-    const cb = row.querySelector('.note-check');
+    const cb = row.querySelector('.tree-check');
     if (cb) {
       // 點框只切換選取，不要順便打開筆記
       cb.addEventListener('click', function (e) { e.stopPropagation(); });
@@ -308,25 +322,36 @@
   function updateBatchBar() {
     const bar = document.getElementById('batch-bar');
     if (!bar) return;
-    bar.hidden = selected.size === 0;
+    const nNotes = selected.size, nFolders = selectedFolders.size;
+    bar.hidden = nNotes + nFolders === 0;
+    // 一旦有選取，所有勾選框都露出來方便繼續勾（app.css 的 .tree.selecting）
+    treeEl.classList.toggle('selecting', nNotes + nFolders > 0);
     // 批次列在抽屜裡：從首頁勾選筆記時抽屜多半是收起的，得拉出來才看得到移動／刪除鈕
-    if (selected.size > 0 && !isSidebarOpen()) setSidebarOpen(true);
+    if (nNotes + nFolders > 0 && !isSidebarOpen()) setSidebarOpen(true);
     const c = bar.querySelector('.batch-count');
-    if (c) c.textContent = '已選 ' + selected.size + ' 篇';
+    if (!c) return;
+    // 側邊欄很窄、旁邊還有移動／刪除鈕，「已選 1 個資料夾」就會被截斷：只有筆記時照舊寫「篇」，
+    // 有資料夾就一律寫「項」，細項放在滑過的提示
+    c.textContent = '已選 ' + (nFolders ? (nNotes + nFolders) + ' 項' : nNotes + ' 篇');
+    c.title = nFolders ? nFolders + ' 個資料夾' + (nNotes ? '、' + nNotes + ' 篇筆記' : '') : '';
   }
   function clearSelection() {
+    selected.forEach(function (id) { syncDashCheck(id, false); });
     selected.clear();
-    treeEl.querySelectorAll('.note-row.selected').forEach(function (r) {
+    selectedFolders.clear();
+    treeEl.querySelectorAll('.tree-row.selected').forEach(function (r) {
       r.classList.remove('selected');
-      const cb = r.querySelector('.note-check'); if (cb) cb.checked = false;
+      const cb = r.querySelector('.tree-check'); if (cb) cb.checked = false;
     });
     updateBatchBar();
   }
-  // 丟掉已不存在（或非自己）的筆記 id，避免選取殘留
+  // 丟掉已不存在（或非自己）的筆記、已不存在的資料夾，避免選取殘留
   function pruneSelection() {
     const valid = {};
     state.notes.forEach(function (n) { if (isMine(n)) valid[n.id] = true; });
+    state.folders.forEach(function (f) { valid[f.id] = true; });
     Array.from(selected).forEach(function (id) { if (!valid[id]) selected.delete(id); });
+    Array.from(selectedFolders).forEach(function (id) { if (!valid[id]) selectedFolders.delete(id); });
     updateBatchBar();
   }
   // 側邊欄該列的勾選狀態同步（供儀表板那邊改動時反映）
@@ -334,7 +359,7 @@
     const row = treeEl.querySelector('.note-row[data-id="' + id + '"]');
     if (!row) return;
     row.classList.toggle('selected', on);
-    const c = row.querySelector('.note-check'); if (c) c.checked = on;
+    const c = row.querySelector('.tree-check'); if (c) c.checked = on;
   }
   // 儀表板「所有筆記」那邊該筆記的勾選狀態同步（供側邊欄改動時反映）
   function syncDashCheck(id, on) {
@@ -396,44 +421,110 @@
     });
   }
 
+  // 往上找：這個資料夾本身或它的某個上層是否也被勾了
+  function insideSelectedFolder(folderId) {
+    let cur = folderId;
+    while (cur) {
+      if (selectedFolders.has(cur)) return true;
+      const f = state.folders.find(function (x) { return x.id === cur; });
+      cur = f ? f.parentId : null;
+    }
+    return false;
+  }
+
+  // 先把筆記移到垃圾桶，全部成功才刪資料夾。notes.folder_id 沒有外鍵：資料夾先刪掉的話，
+  // 沒進垃圾桶的筆記會指向不存在的資料夾，側邊欄和儀表板都再也看不到它。
+  // 資料夾之間也沒有外鍵，子資料夾要由呼叫端（descendantFolderIds）一併列進 folderIds。
+  function removeNotesAndFolders(noteIds, folderIds) {
+    const trashed = {};
+    let failed = 0;
+    return Promise.all(noteIds.map(function (id) {
+      return Store.deleteNote(id).then(function () { trashed[id] = true; }, function () { failed++; });
+    })).then(function () {
+      if (failed) { failed += folderIds.length; return []; }
+      return Promise.all(folderIds.map(function (id) {
+        return Store.deleteFolder(id).then(function () { return id; }, function () { failed++; return null; });
+      }));
+    }).then(function (done) {
+      const goneFolders = done.filter(Boolean);
+      state.notes = state.notes.filter(function (n) { return !trashed[n.id]; });
+      state.folders = state.folders.filter(function (f) { return goneFolders.indexOf(f.id) < 0; });
+      if (state.currentId && trashed[state.currentId]) showEmpty();
+      refreshViews();   // renderTree 的 pruneSelection 會把已刪掉的從選取移除，失敗的留著可以再試
+      return { notes: Object.keys(trashed).length, folders: goneFolders.length, failed: failed };
+    });
+  }
+
   function batchDelete() {
-    const ids = Array.from(selected);
-    if (!ids.length) return;
-    showConfirm({
-      title: '移至垃圾桶',
-      message: '把所選的 ' + ids.length + ' 篇筆記移到垃圾桶？\n保留期內可以從側邊欄的「垃圾桶」復原。',
-      ok: '移至垃圾桶'
-    }).then(function (ok) {
+    const folderIds = [];
+    selectedFolders.forEach(function (id) {
+      descendantFolderIds(id).forEach(function (f) { if (folderIds.indexOf(f) < 0) folderIds.push(f); });
+    });
+    const noteIds = Array.from(selected);
+    state.notes.forEach(function (n) {
+      if (folderIds.indexOf(n.folderId) >= 0 && noteIds.indexOf(n.id) < 0) noteIds.push(n.id);
+    });
+    if (!noteIds.length && !folderIds.length) return;
+    const withSubs = folderIds.length > selectedFolders.size;
+    const ask = !folderIds.length
+      ? {
+        title: '移至垃圾桶',
+        message: '把所選的 ' + noteIds.length + ' 篇筆記移到垃圾桶？\n保留期內可以從側邊欄的「垃圾桶」復原。',
+        ok: '移至垃圾桶'
+      }
+      : {
+        title: '刪除所選項目',
+        message: '刪除 ' + folderIds.length + ' 個資料夾' + (withSubs ? '（含子資料夾）' : '') +
+          (noteIds.length ? '，並把 ' + noteIds.length + ' 篇筆記移到垃圾桶？' : '？') +
+          '\n資料夾本身會直接刪除' +
+          (noteIds.length ? '；筆記保留期內可以從「垃圾桶」復原（復原後放在最上層）。' : '，無法復原。'),
+        ok: '刪除', danger: true
+      };
+    showConfirm(ask).then(function (ok) {
       if (!ok) return;
-      Promise.all(ids.map(function (id) { return Store.deleteNote(id).catch(function () {}); })).then(function () {
-        const gone = {};
-        ids.forEach(function (id) { gone[id] = true; });
-        state.notes = state.notes.filter(function (n) { return !gone[n.id]; });
-        if (state.currentId && gone[state.currentId]) showEmpty();
-        selected.clear();
-        refreshViews();
-        toast('已移至垃圾桶 ' + ids.length + ' 篇筆記');
+      removeNotesAndFolders(noteIds, folderIds).then(function (r) {
+        const parts = [];
+        if (r.folders) parts.push('已刪除 ' + r.folders + ' 個資料夾');
+        if (r.notes) parts.push((r.folders ? '' : '已') + '移至垃圾桶 ' + r.notes + ' 篇筆記');
+        if (r.failed) parts.push(r.failed + ' 項沒有刪成功' + (r.folders ? '' : '，資料夾都保留'));
+        toast(parts.join('，'));
       });
     });
   }
 
   function batchMove() {
-    const ids = Array.from(selected);
-    if (!ids.length) return;
-    showFolderPicker('移動 ' + ids.length + ' 篇筆記到…').then(function (res) {
+    // 被勾選資料夾裡面的東西跟著資料夾走，不另外搬，否則會被拆出來攤平到目標資料夾
+    const notes = Array.from(selected)
+      .map(function (id) { return state.notes.find(function (x) { return x.id === id; }); })
+      .filter(function (n) { return n && isMine(n) && !insideSelectedFolder(n.folderId); });
+    const folders = Array.from(selectedFolders)
+      .map(function (id) { return state.folders.find(function (x) { return x.id === id; }); })
+      .filter(function (f) { return f && !insideSelectedFolder(f.parentId); });
+    if (!notes.length && !folders.length) return;
+    const what = [];
+    if (folders.length) what.push(folders.length + ' 個資料夾');
+    if (notes.length) what.push(notes.length + ' 篇筆記');
+    showFolderPicker('移動 ' + what.join('、') + '到…').then(function (res) {
       if (!res) return;                                  // 取消
       const target = res.folderId || null;
       const jobs = [];
-      ids.forEach(function (id) {
-        const n = state.notes.find(function (x) { return x.id === id; });
-        if (n && isMine(n) && (n.folderId || null) !== target) {
-          n.folderId = target;
-          jobs.push(Store.updateNote(n).catch(function () {}));
-        }
+      let cyclic = 0;
+      notes.forEach(function (n) {
+        if ((n.folderId || null) === target) return;
+        n.folderId = target;
+        jobs.push(Store.updateNote(n).catch(function () {}));
+      });
+      folders.forEach(function (f) {
+        if (target && isDescendant(target, f.id)) { cyclic++; return; }   // 不能搬進自己或自己的子資料夾
+        if ((f.parentId || null) === target) return;
+        f.parentId = target;
+        jobs.push(Store.updateFolder(f).catch(function () {}));
       });
       Promise.all(jobs).then(function () {
         selected.clear();
+        selectedFolders.clear();
         refreshViews();
+        if (cyclic) toast(cyclic + ' 個資料夾不能移到自己或自己的子資料夾裡，已略過');
       });
     });
   }
@@ -2476,13 +2567,9 @@
       ok: '刪除', danger: true
     }).then(function (ok) {
       if (!ok) return;
-      const noteDeletes = notesInside.map(function (n) { return Store.deleteNote(n.id); });
-      const folderDeletes = folderIds.map(function (id) { return Store.deleteFolder(id); });
-      Promise.all(noteDeletes.concat(folderDeletes)).then(function () {
-        state.notes = state.notes.filter(function (n) { return folderIds.indexOf(n.folderId) < 0; });
-        state.folders = state.folders.filter(function (f) { return folderIds.indexOf(f.id) < 0; });
-        if (state.current && folderIds.indexOf(state.current.folderId) >= 0) showEmpty();
-        refreshViews();
+      const noteIds = notesInside.map(function (n) { return n.id; });
+      removeNotesAndFolders(noteIds, folderIds).then(function (r) {
+        if (r.failed) toast('刪除資料夾時有 ' + r.failed + ' 項沒有刪成功' + (r.folders ? '' : '，資料夾都保留'));
       });
     });
   }
