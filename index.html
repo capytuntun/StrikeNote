@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=109">
+  <link rel="stylesheet" href="app.css?v=112">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -61,18 +61,18 @@
       <!-- 側邊欄是浮動抽屜（不佔寬度），用這顆鈕或 Ctrl+\ 拉出 -->
       <div class="topbar-left">
         <button id="sidebar-collapse" class="icon-btn" title="筆記清單 (Ctrl+\)" aria-label="開啟筆記清單" data-icon="panel-left"></button>
-        <span class="logo" title="回到首頁"><span class="logo-mark" aria-hidden="true"></span>StrikeNote</span>
+        <span class="logo" title="回到首頁"><span class="logo-mark" aria-hidden="true"></span><span class="logo-text">StrikeNote</span></span>
       </div>
 
       <!-- 開啟筆記時，標題與編輯按鈕直接顯示在這條 bar 上（display:contents 併入 topbar）-->
       <div id="topbar-note" class="topbar-note">
         <!-- 檢視模式（分割／編輯／預覽）靠左：放在彈性空間之前，就會緊接在 logo 後面 -->
         <div class="mode-switch" role="group" aria-label="檢視模式">
-          <button data-mode="split" class="mode-btn active" title="分割檢視" data-icon="columns">分割</button>
-          <button data-mode="edit" class="mode-btn" title="純編輯" data-icon="pen-line">編輯</button>
-          <button data-mode="preview" class="mode-btn" title="純預覽" data-icon="eye">預覽</button>
+          <button data-mode="split" class="mode-btn active" title="分割檢視" data-icon="columns"><span class="btn-label">分割</span></button>
+          <button data-mode="edit" class="mode-btn" title="純編輯" data-icon="pen-line"><span class="btn-label">編輯</span></button>
+          <button data-mode="preview" class="mode-btn" title="純預覽" data-icon="eye"><span class="btn-label">預覽</span></button>
           <!-- Blog mode（js/blogmode.js）：直接在排版好的頁面上改，語法和 Markdown 一樣 -->
-          <button data-mode="blog" class="mode-btn" title="Blog mode：直接在排版好的頁面上編輯，語法和 Markdown 一樣" data-icon="file-pen">Blog mode</button>
+          <button data-mode="blog" class="mode-btn" title="Blog mode：直接在排版好的頁面上編輯，語法和 Markdown 一樣" data-icon="file-pen"><span class="btn-label">Blog mode</span></button>
         </div>
         <!-- 標題連同資料夾路徑前綴（如 測試資料夾\測試筆記）包成一組，整組絕對定位
              置中在頂列正中線；輸入框寬度由 app.js 依文字量測，兩者才接得起來 -->
@@ -102,9 +102,12 @@
           </svg>
         </span>
         <div id="presence" class="presence" aria-label="在線協作者"></div>
-        <button id="history-btn" class="btn" title="版本紀錄" data-icon="history">版本</button>
-        <button id="share-btn" class="btn" title="分享這篇筆記">分享</button>
-        <button id="export-pdf" class="btn btn-primary" title="輸出 PDF" data-icon="download">PDF</button>
+        <button id="history-btn" class="btn" title="版本紀錄" data-icon="history"><span class="btn-label">版本</span></button>
+        <button id="share-btn" class="btn" title="分享這篇筆記"><span class="btn-label">分享</span></button>
+        <button id="export-pdf" class="btn btn-primary" title="輸出 PDF" data-icon="download"><span class="btn-label">PDF</span></button>
+        <!-- 視窗窄到連圖示都放不下版本/分享/PDF 三顆鈕時（app.js 的 fitTopbar 量出來才會顯示），
+             收成這一顆「更多」，開合原本那三顆鈕（同一組 click 處理，見 bindEvents） -->
+        <button id="topbar-more-btn" class="icon-btn topbar-more-btn" title="更多操作" data-icon="more-horizontal"></button>
       </div>
 
       <div class="topbar-right">
@@ -342,7 +345,7 @@
   <script src="js/trash.js?v=2"></script>
   <script src="js/imagelib.js?v=2"></script>
   <script src="js/linesync.js?v=5"></script>
-  <script src="js/blogmode.js?v=1"></script>
-  <script src="js/app.js?v=86"></script>
+  <script src="js/blogmode.js?v=2"></script>
+  <script src="js/app.js?v=90"></script>
 </body>
 </html>

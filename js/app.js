@@ -675,6 +675,43 @@
     }
     titleMeasure.textContent = titleEl.value || titleEl.placeholder || '';
     titleEl.style.width = Math.ceil(titleMeasure.getBoundingClientRect().width + 8) + 'px';
+    fitTopbar();
+  }
+
+  // 頂列夠不夠寬是量出來的，不是照視窗寬度猜的：標題絕對定位貼死在正中線（對齊分割檢視的
+  // 分隔線），左邊的模式切換鈕、右邊的版本／分享／PDF 都不會讓步，視窗一窄就可能疊到標題
+  // 上——加了 Blog mode 這顆鈕之後左邊變寬，疊到的臨界寬度也跟著變寬了。逐級收：先收純
+  // 裝飾（水豚、線上人數），不夠再把按鈕文字收成純圖示，最後才不得已把標題整個藏起來——
+  // 標題被蓋住看不出是哪篇筆記，比暫時看不到小水豚嚴重多了。每一級收完都重量一次，
+  // 收太多之後空間夠了（例如視窗變寬回去）也要能一路放寬回來。
+  function fitTopbar() {
+    const topbar = $('#topbar');
+    const modeSwitch = topbar && topbar.querySelector('.mode-switch');
+    const titleWrap = topbar && topbar.querySelector('.note-title-wrap');
+    const rightCluster = $('#history-btn');
+    if (!topbar || !modeSwitch || !titleWrap || !rightCluster) return;
+    function fits() {
+      // 頂列本身的內容有沒有真的超出它自己的寬度——標題藏起來之後（lvl3+）就只看這個，
+      // 不然藏起來的標題還在原來的位置，位置比對永遠算「疊到」，沒辦法再往下一級判斷。
+      if (topbar.scrollWidth > topbar.clientWidth + 1) return false;
+      if (!titleWrap.getClientRects().length) return true;   // 沒開筆記，標題根本沒畫出來
+      if (getComputedStyle(titleWrap).visibility === 'hidden') return true;
+      const gap = 12;
+      const t = titleWrap.getBoundingClientRect();
+      return t.left - gap >= modeSwitch.getBoundingClientRect().right &&
+        t.right + gap <= rightCluster.getBoundingClientRect().left;
+    }
+    topbar.classList.remove('topbar-lvl1', 'topbar-lvl2', 'topbar-lvl3', 'topbar-lvl4', 'topbar-lvl5');
+    if (fits()) return;
+    topbar.classList.add('topbar-lvl1');
+    if (fits()) return;
+    topbar.classList.add('topbar-lvl2');
+    if (fits()) return;
+    topbar.classList.add('topbar-lvl3');
+    if (fits()) return;
+    topbar.classList.add('topbar-lvl4');
+    if (fits()) return;
+    topbar.classList.add('topbar-lvl5');
   }
   // 內建字體載入後字寬會變，重量一次
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fitNoteTitle(); });
@@ -2966,6 +3003,13 @@
       logo.addEventListener('click', goHome);
     }
 
+    // 視窗變寬變窄、側邊欄拉開收起、瀏覽器縮放都可能改變頂列還剩多少空間
+    window.addEventListener('resize', fitTopbar);
+    if (window.ResizeObserver) {
+      const topbarEl = $('#topbar');
+      if (topbarEl) new ResizeObserver(fitTopbar).observe(topbarEl);
+    }
+
     $('#new-note').addEventListener('click', function () { newNote(currentFolderId()); });
     // Blog mode：排版好的頁面上每一段都能原地改（js/blogmode.js）
     if (window.BlogMode) BlogMode.init($('#blog-doc'), {
@@ -3008,6 +3052,18 @@
       if (state.current && isMine(state.current)) showShareDialog(state.current);
     });
     if (historyBtn) historyBtn.addEventListener('click', openHistory);
+    // 視窗窄到連圖示版的版本／分享／PDF 都放不下（fitTopbar 收到 lvl4）：收成一顆「更多」，
+    // 開合原本那三顆鈕，點法直接借用它們自己既有的 click 處理，不重複寫一次判斷邏輯。
+    const moreBtn = $('#topbar-more-btn');
+    if (moreBtn) moreBtn.addEventListener('click', function (e) {
+      e.stopPropagation();   // 不然這次點擊會冒泡到 document 的 hideCtx，選單開了馬上又關掉
+      const r = moreBtn.getBoundingClientRect();
+      openMenuAt(r.right, r.bottom + 4, [
+        { icon: 'history', label: '版本', fn: function () { historyBtn.click(); } },
+        { icon: 'users', label: '分享', fn: function () { shareBtn.click(); } },
+        { icon: 'download', label: 'PDF', fn: function () { $('#export-pdf').click(); } }
+      ], { alignRight: true });
+    });
 
     // 批次操作列
     const bMove = $('#batch-move'); if (bMove) bMove.addEventListener('click', batchMove);
