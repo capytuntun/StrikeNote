@@ -94,12 +94,17 @@
       state.folders = res[0];
       state.notes = res[1];
       renderTree();
-      // 網址帶 #trash、#note/<id> 或 #book/<id>（複製連結）優先；否則回到上次開的筆記
+      // 網址帶 #trash、#folder/<id>、#note/<id> 或 #book/<id>（複製連結）優先；否則回到上次開的筆記
       const wantNote = noteIdFromHash();
       const wantBook = bookIdFromHash();
+      const wantFolder = folderIdFromHash();
       const last = wantNote || LS.get('lastNote', null);
       if (location.hash === '#trash') {
         openTrash();
+      } else if (wantFolder && state.folders.some(function (f) { return f.id === wantFolder; })) {
+        // 在資料夾裡重新整理：留在那個資料夾，網址不動
+        showEmpty(true);
+        if (window.Dashboard) Dashboard.openFolder(wantFolder);
       } else if (wantBook && state.folders.some(function (f) { return f.id === wantBook; })) {
         openBook(wantBook);
       } else if (last && state.notes.some(function (n) { return n.id === last; })) {
@@ -392,6 +397,8 @@
       onPin: pinNote, onRename: renameNoteTo, onMenu: showNoteMenu,
       onFolderMenu: showFolderMenu, onFolderRename: renameFolderTo,
       onMoveNotes: moveNotesToFolder,
+      // 使用者點進／點出資料夾：留一筆 #folder/<id>（回到所有筆記則是空的 hash）
+      onNavigate: function (folderId) { setHash(folderId ? 'folder/' + encodeURIComponent(folderId) : ''); },
       selection: selectionApi
     };
   }
@@ -630,7 +637,8 @@
   function goToFolder(folderId) {
     saveNow();
     LS.set('lastNote', '');
-    showEmpty();            // render() 會回到最上層，再 navigate 進目標資料夾
+    showEmpty(true);        // render() 會回到最上層，再 navigate 進目標資料夾
+    setHash('folder/' + encodeURIComponent(folderId));   // 上一頁會回到剛才那篇筆記
     renderTree();
     if (window.Dashboard && Dashboard.openFolder) Dashboard.openFolder(folderId);
   }
@@ -671,12 +679,14 @@
   // 內建字體載入後字寬會變，重量一次
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fitNoteTitle(); });
 
-  function showEmpty() {
+  // keepHash：跟著網址切過來的（上一頁退回 #folder/<id>、重新整理）不要再改網址，
+  // 否則會多塞一筆紀錄、把「下一頁」清掉。
+  function showEmpty(keepHash) {
     closeStream();
     noteBar(false);
     if (notePathEl) notePathEl.textContent = '';
     state.currentId = null; state.current = null;
-    setHash('');
+    if (keepHash !== true) setHash('');
     emptyEl.hidden = false;
     wrapEl.hidden = true;
     if (secWrapEl) secWrapEl.hidden = true;
@@ -2237,7 +2247,13 @@
       refreshViews();
     });
   }
-  // 網址 hash：#note/<id>、#book/<folderId>——「複製連結」貼給別人就能直接開到那一篇
+  // 網址 hash：#note/<id>、#book/<folderId>——「複製連結」貼給別人就能直接開到那一篇。
+  // #folder/<id> 是首頁正在看的資料夾：點進資料夾也留一筆瀏覽紀錄，「上一頁」才會退回
+  // 「所有筆記」，而不是跳到再之前開的筆記或別的網站。
+  function folderIdFromHash() {
+    const m = location.hash.match(/^#folder\/([^\/?#]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
   function noteIdFromHash() {
     const m = location.hash.match(/^#note\/([^\/?#]+)/);
     return m ? decodeURIComponent(m[1]) : null;
@@ -3060,8 +3076,23 @@
         if (state.folders.some(function (f) { return f.id === bid; })) openBook(bid);
         return;
       }
-      // hash 變回空字串：通常是「上一頁」退回首頁那一層，把畫面切回儀表板
+      // #folder/<id>：上一頁／下一頁走到首頁的某個資料夾。只切畫面，不再 pushState。
+      const fid = folderIdFromHash();
+      if (fid) {
+        if (!state.folders.some(function (f) { return f.id === fid; })) return;
+        if (emptyEl.hidden) {
+          saveNow();
+          LS.set('lastNote', '');
+          showEmpty(true);
+          renderTree();
+        }
+        if (window.Dashboard && Dashboard.currentFolder() !== fid) Dashboard.openFolder(fid);
+        return;
+      }
+      // hash 變回空字串：「上一頁」退回首頁那一層。從筆記／電子書／垃圾桶回來就切回儀表板；
+      // 本來就在儀表板、只是停在某個資料夾裡，就回到「所有筆記」。
       if (state.currentId || (bookWrapEl && !bookWrapEl.hidden) || (trashWrapEl && !trashWrapEl.hidden)) goHome();
+      else if (window.Dashboard && Dashboard.currentFolder()) Dashboard.openFolder(null);
     });
     // 新增 → 電子書：挑一個資料夾做成電子書；開過就會出現在首頁的「電子書」區
     const newBook = $('#new-book');

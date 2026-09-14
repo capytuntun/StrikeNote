@@ -105,6 +105,13 @@
     curFolderId = folderId || null;
     paint();
   }
+  // 使用者自己點進／點出資料夾（方框、麵包屑）：切換畫面之外，也讓 app.js 在網址留一筆
+  // #folder/<id> 的瀏覽紀錄，瀏覽器的「上一頁」才會一層層退回「所有筆記」。app.js 自己
+  // 呼叫的 openFolder（例如跟著上一頁切換）直接走 navigate，不再多留紀錄。
+  function go(folderId) {
+    navigate(folderId);
+    if (lastOpts && lastOpts.onNavigate) lastOpts.onNavigate(curFolderId);
+  }
   function setTag(tag) {
     tagFilter = tag || null;
     paint();
@@ -174,7 +181,7 @@
         c.setAttribute('aria-current', 'page');
       } else {
         c.title = '回到「' + (label) + '」';
-        c.addEventListener('click', function () { tagFilter = null; navigate(folderId); });
+        c.addEventListener('click', function () { tagFilter = null; go(folderId); });
       }
       // Every crumb accepts a drop, so dragging onto an ancestor moves a note up
       // the tree — the reverse of dropping it onto a folder tile.
@@ -410,9 +417,9 @@
       e.preventDefault(); e.stopPropagation();
       renameTile(folder, nameEl, o);
     });
-    tile.addEventListener('click', function () { navigate(folder.id); });
+    tile.addEventListener('click', function () { go(folder.id); });
     tile.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(folder.id); }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(folder.id); }
       else if (e.key === 'F2') { e.preventDefault(); renameTile(folder, nameEl, o); }
     });
     return tile;
@@ -600,6 +607,7 @@
       onPin: o.onPin, onRename: o.onRename, onMenu: o.onMenu,
       onFolderMenu: o.onFolderMenu, onFolderRename: o.onFolderRename,
       onMoveNotes: o.onMoveNotes,
+      onNavigate: o.onNavigate,
       selection: o.selection
     };
   }
