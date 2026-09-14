@@ -593,9 +593,8 @@
     if (app) app.classList.toggle('note-open', !!on);
   }
 
-  // 資料夾路徑前綴：往上層走到根，組成「a/b/」，接在標題前面讀起來就是「a/b/筆記」
-  // （無資料夾時回空字串）。
-  function folderPathPrefix(folderId) {
+  // 筆記所在的資料夾路徑：往上層走到根，組成「a/b」（無資料夾時回空字串）。
+  function folderPath(folderId) {
     const parts = [];
     let cur = folderId || null, guard = 0;
     while (cur && guard++ < 50) {
@@ -604,11 +603,24 @@
       parts.unshift(f.name || '');
       cur = f.parentId || null;
     }
-    return parts.length ? parts.join('/') + '/' : '';
+    return parts.join('/');
   }
+  // 標題前面的「資料夾/」。路徑和結尾的「/」分成兩格：路徑太長時只截路徑（app.css 的
+  // .note-path-text），「/」永遠看得到，整串讀起來才是「資料夾/筆記」。
   function updateNotePath(note) {
     if (notePathEl) {
-      notePathEl.textContent = note ? folderPathPrefix(note.folderId) : '';
+      const path = note ? folderPath(note.folderId) : '';
+      notePathEl.textContent = '';
+      if (path) {
+        const text = document.createElement('span');
+        text.className = 'note-path-text';
+        text.textContent = path;
+        const sep = document.createElement('span');
+        sep.className = 'note-path-sep';
+        sep.textContent = '/';
+        notePathEl.appendChild(text);
+        notePathEl.appendChild(sep);
+      }
       const f = note && note.folderId && state.folders.find(function (x) { return x.id === note.folderId; });
       notePathEl.title = f ? '回到「' + (f.name || '未命名資料夾') + '」' : '';
     }
