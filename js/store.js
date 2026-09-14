@@ -235,12 +235,24 @@
     // through here, so a note's screenshots are fetched from the server once and
     // then reused — the PDF no longer re-downloads every image the preview
     // already has, which is what made exporting an image-heavy report crawl.
+    //
+    // The cache holds the in-flight PROMISE, not just the settled blob, so a
+    // burst of calls for the SAME id — a report reusing one small icon several
+    // times, `resolveImages` walks every `<img>` synchronously before any of
+    // them can resolve — share the one request instead of each firing its own.
+    // A rejected request is not left cached (the next call gets a fresh try);
+    // deleting only when the promise that's failing is still the current entry
+    // avoids a slow-to-fail request clobbering a newer one already in flight.
     // Cleared by invalidateImage after an annotation rewrites an image.
     getImageBlob: function (id) {
-      if (imgBlobCache[id]) return Promise.resolve(imgBlobCache[id]);
-      return req('GET', '/api/images/' + id, undefined, { blob: true })
-        .then(function (blob) { imgBlobCache[id] = blob; return blob; })
-        .catch(function () { return null; });
+      if (imgBlobCache[id]) return imgBlobCache[id];
+      const p = req('GET', '/api/images/' + id, undefined, { blob: true })
+        .catch(function () {
+          if (imgBlobCache[id] === p) delete imgBlobCache[id];
+          return null;
+        });
+      imgBlobCache[id] = p;
+      return p;
     },
     invalidateImage: function (id) { delete imgBlobCache[id]; },
     // Blob + annotation metadata (shapes / canAnnotate / mime). Only the

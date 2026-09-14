@@ -1756,11 +1756,19 @@
         e.preventDefault();
         const blob = it.getAsFile();
         const at = { s: editorEl.selectionStart, e: editorEl.selectionEnd, noteId: state.currentId };
+        // 貼上完全沒有任何提示，畫面在上傳完成前跟卡住看起來一樣——一張未壓縮的全螢幕
+        // 截圖可能好幾 MB，家用網路上傳頻寬通常遠低於下載，傳個十幾二十秒很正常。
+        // 拖曳圖片、插入 PDF（下面的 insertImageFiles／insertPdfFile）都已經有這行狀態列
+        // 訊息，只有貼上這條路漏掉，加上失敗時也沒有任何錯誤訊息。
+        statusSave.textContent = '上傳圖片中…';
         Store.putImage(blob).then(function (id) {
           if (!insertAtCursor('\n![貼上的圖片](img:' + id + ')\n', at)) return;
           if (editorEl._hlRefresh) editorEl._hlRefresh();
           scheduleSave();
           renderPreviewNow();
+        }).catch(function (err) {
+          if (at.noteId === state.currentId) statusSave.textContent = '⚠ 圖片上傳失敗：' + (err && err.message || err);
+          toast('圖片上傳失敗：' + (err && err.message || err));
         });
         return;
       }
@@ -2128,6 +2136,8 @@
       if (editorEl._hlRefresh) editorEl._hlRefresh();
       scheduleSave();
       renderPreviewNow();
+    }).catch(function (err) {
+      if (at.noteId === state.currentId) statusSave.textContent = '⚠ 圖片上傳失敗：' + (err && err.message || err);
     });
     return true;
   }
