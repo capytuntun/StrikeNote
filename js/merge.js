@@ -44,9 +44,14 @@
     return out;
   }
 
+  // Two insertions at the exact same point conflict too — see server/merge.js
+  // for why (a same-position "insert" that never counts as overlapping is
+  // what let a stale-base save keep re-embedding the other side's already-
+  // merged text, growing the note without bound).
   function overlaps(m, t) {
     const s = Math.max(m.s, t.s), e = Math.min(m.e, t.e);
     if (s < e) return true;
+    if (m.s === m.e && t.s === t.e && m.s === t.s) return true;
     if (m.e > m.s && t.s >= m.s && t.s < m.e) return true;
     if (t.e > t.s && m.s >= t.s && m.s < t.e) return true;
     return false;

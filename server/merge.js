@@ -46,10 +46,21 @@ function diffHunks(base, other) {
 }
 
 // Do two hunks (in the same base coordinate system) touch the same base lines?
-// Two pure insertions at the same point do not conflict — both are kept.
+// Two insertions at DIFFERENT points don't conflict — both are kept. Two
+// insertions at the exact SAME point do conflict: `s < e` is never true for a
+// zero-width/zero-width pair (their intersection is empty by definition), so
+// without this check both sides' inserted lines were kept side by side. That
+// silently duplicated whatever the two sides happened to insert identically
+// (e.g. both saves carry the same unchanged header when merging against a
+// stale/empty base) and, worse, compounds every time a save goes out against
+// a base that has fallen behind: each such save re-embeds the *other* side's
+// entire already-merged text as one more "insertion at the same point",
+// growing the note without bound (confirmed: a few dozen stale-base saves on
+// one note inflated it from ~3.5 KB to 1.5 MB — see the load-test findings).
 function overlaps(m, t) {
   const s = Math.max(m.s, t.s), e = Math.min(m.e, t.e);
   if (s < e) return true;                                  // ranges genuinely overlap
+  if (m.s === m.e && t.s === t.e && m.s === t.s) return true;   // same insertion point
   if (m.e > m.s && t.s >= m.s && t.s < m.e) return true;   // theirs sits inside mine's range
   if (t.e > t.s && m.s >= t.s && m.s < t.e) return true;   // mine sits inside theirs' range
   return false;
