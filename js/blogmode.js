@@ -1,12 +1,13 @@
-/* direct.js — 直接編輯模式：像 Notion／Medium 一樣，直接在排版好的頁面上寫。
+/* blogmode.js — Blog mode：像 Notion／Medium 一樣，直接在排版好的頁面上寫。
  *
+ * 跟 分割／編輯／預覽 並列的第四種檢視模式，每一篇一般 Markdown 筆記都能用。
  * 內容仍然是 Markdown，#editor 的值是唯一的真實來源——自動存檔、協作合併、
  * 搜尋、PDF、電子書、版本歷史全部照舊，這個模組只是換一種編輯它的方式：
  *
  *   - 頁面切成頂層區塊，切法直接用 LineSync.sourceBlocks()（marked 的 lexer，
  *     含 callout／:::／RISK／[toc] 擴充），每個區塊各自 MD.render()。
- *   - 點一下區塊，那一塊原地換成一個只裝這段 Markdown 的 textarea（.dsrc），字級
- *     跟排版後的樣子一致；打的語法和 MD 編輯器完全相同，editor.js 的自動完成、
+ *   - 點一下區塊，那一塊原地換成一個只裝這段 Markdown 的 textarea（.blog-src），
+ *     字級跟排版後的樣子一致；打的語法和 MD 編輯器完全相同，editor.js 的自動完成、
  *     / 指令、清單延續也掛在這個 textarea 上。點別處、Esc、方向鍵走出區塊就排版回去。
  *   - 每次輸入只把這個區塊佔的那幾行換進整份原始碼、交回 app.js（onChange），
  *     其他行一個字元都不動，所以協作的逐行合併和版本差異看到的只有真的改了的行。
@@ -19,8 +20,8 @@
 (function (global) {
   'use strict';
 
-  let root = null;        // article#direct-doc
-  let scroller = null;    // .direct-scroll
+  let root = null;        // article#blog-doc
+  let scroller = null;    // .blog-scroll
   let opts = {};
   let src = '';
   let blocks = [];        // LineSync.sourceBlocks(src)：{ kind, start, end }，1-based、含頭尾
@@ -36,7 +37,7 @@
 
   function blockText(b) { return splitLines(src).slice(b.start - 1, b.end).join('\n'); }
 
-  function elOf(i) { return root.querySelector('.dblock[data-i="' + i + '"]'); }
+  function elOf(i) { return root.querySelector('.blog-block[data-i="' + i + '"]'); }
 
   // ---- 排版 ----------------------------------------------------------------
   function render() {
@@ -48,7 +49,7 @@
     let tocHtml = null;
     blocks.forEach(function (b, i) {
       const el = document.createElement('div');
-      el.className = 'dblock';
+      el.className = 'blog-block';
       el.setAttribute('data-i', i);
       if (b.kind === 'toc') {
         if (tocHtml === null) {
@@ -65,7 +66,7 @@
     });
     if (!blocks.length) {
       const empty = document.createElement('div');
-      empty.className = 'dblock dblock-empty';
+      empty.className = 'blog-block blog-block-empty';
       empty.textContent = readOnly ? '這篇筆記還是空的' : '從這裡開始寫…　語法和 Markdown 一樣，輸入 / 可以插入區塊';
       frag.appendChild(empty);
     }
@@ -80,7 +81,7 @@
   // 依第一行猜區塊種類，讓編輯框的字級、字型跟排版後的樣子接近。
   function styleSource() {
     const first = ta.value.split('\n', 1)[0] || '';
-    let cls = 'dsrc';
+    let cls = 'blog-src';
     let m;
     if ((m = first.match(/^(#{1,6})\s/))) cls += ' is-h' + m[1].length;
     else if (/^\s*(```|~~~)/.test(first) || /^( {4}|\t)/.test(first)) cls += ' is-code';
@@ -149,8 +150,8 @@
       suffix: (next != null && next.trim() !== '') ? [''] : []
     };
     const el = document.createElement('div');
-    el.className = 'dblock';
-    const empty = root.querySelector('.dblock-empty');
+    el.className = 'blog-block';
+    const empty = root.querySelector('.blog-block-empty');
     if (empty) root.replaceChild(el, empty);
     else root.insertBefore(el, elOf(i + 1));
     mount(el, '', 'start');
@@ -249,7 +250,7 @@
   }
 
   function onKeyDown(e) {
-    // editor.js 先處理（自動完成選單的上下鍵、Enter、清單延續），它處理掉的就不管
+    // editor.js 先處理（自動完成選單的上下鍵、Enter、清單延續、Tab），它處理掉的就不管
     if (!ed || e.defaultPrevented || composing || e.isComposing || e.keyCode === 229) return;
     const v = ta.value, s = ta.selectionStart, en = ta.selectionEnd;
     const mod = e.ctrlKey || e.metaKey;
@@ -352,7 +353,7 @@
   // 待辦勾選框：改寫它所在區塊裡第 n 個 - [ ]（跳過程式碼區塊），跟預覽的做法一樣。
   function onTask(e, box) {
     if (readOnly) { e.preventDefault(); return; }
-    const el = box.closest('.dblock');
+    const el = box.closest('.blog-block');
     const b = el ? blocks[Number(el.getAttribute('data-i'))] : null;
     if (!b) return;
     const n = Array.prototype.indexOf.call(el.querySelectorAll('.task-check'), box);
@@ -411,9 +412,9 @@
     const sel = global.getSelection && global.getSelection();
     if (sel && !sel.isCollapsed && root.contains(sel.anchorNode)) return;
     if (readOnly) return;
-    const el = t.closest('.dblock');
+    const el = t.closest('.blog-block');
     if (!el || !root.contains(el) || el.classList.contains('editing')) return;
-    if (el.classList.contains('dblock-empty')) { startNew(-1); return; }
+    if (el.classList.contains('blog-block-empty')) { startNew(-1); return; }
     const b = blocks[Number(el.getAttribute('data-i'))];
     if (!b) return;
     const caret = caretFromPoint(el, blockText(b), e.clientX, e.clientY);
@@ -478,8 +479,8 @@
     e.index = e.isNew ? -1 : idx;
     if (!el) {
       el = document.createElement('div');
-      el.className = 'dblock';
-      const empty = root.querySelector('.dblock-empty');
+      el.className = 'blog-block';
+      const empty = root.querySelector('.blog-block-empty');
       if (empty) root.replaceChild(el, empty);
       else root.insertBefore(el, elOf(after));
     }
@@ -497,7 +498,7 @@
     scroller = docEl.parentElement;
     opts = o || {};
     ta = document.createElement('textarea');
-    ta.className = 'dsrc';
+    ta.className = 'blog-src';
     ta.spellcheck = false;
     ta.setAttribute('rows', '1');
     // editor.js 要先掛：它處理自動完成選單時會 preventDefault，下面的 keydown 才看得到
@@ -540,7 +541,7 @@
     remount(caret);
   }
 
-  global.Direct = {
+  global.BlogMode = {
     init: init,
     show: show,
     hide: hide,

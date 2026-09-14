@@ -109,11 +109,9 @@
     // Notes
     getNotes: function () { return req('GET', '/api/notes').then(r => r.notes); },
     getNote: function (id) { return req('GET', '/api/notes/' + id).then(r => r.note); },
-    // `meta` (optional) marks the note kind at creation, e.g. { directEdit: true }.
-    createNote: function (title, folderId, meta) {
-      const body = { title: title || '未命名筆記', folderId: folderId || null, content: '' };
-      if (meta) body.meta = meta;
-      return req('POST', '/api/notes', body).then(r => r.note);
+    createNote: function (title, folderId) {
+      return req('POST', '/api/notes', { title: title || '未命名筆記', folderId: folderId || null, content: '' })
+        .then(r => r.note);
     },
     updateNote: function (note) {
       return req('PUT', '/api/notes/' + note.id, {

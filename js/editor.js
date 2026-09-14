@@ -246,19 +246,25 @@
       return false;
     }
 
+    // One indent level is 4 spaces. On a list item, Tab / Shift+Tab move the whole
+    // line in or out a level wherever the caret is: typing "- " and pressing Tab
+    // nests that bullet instead of padding the gap after its dash.
+    const INDENT = '    ';
     function handleTab(shift, v, s, en) {
       const lineStart = v.lastIndexOf('\n', s - 1) + 1;
       const multi = v.slice(s, en).indexOf('\n') >= 0;
-      if (!shift && !multi && s === en) { replaceRange(s, en, '  '); return; }
+      const lineEnd = v.indexOf('\n', s);
+      const listLine = /^\s*(?:[-*+]|\d+[.)])(?:\s|$)/.test(v.slice(lineStart, lineEnd < 0 ? v.length : lineEnd));
+      if (!shift && !multi && s === en && !listLine) { replaceRange(s, en, INDENT); return; }
       // indent / outdent affected lines
       const endLine = v.indexOf('\n', en);
       const blockEnd = endLine === -1 ? v.length : endLine;
       const block = v.slice(lineStart, blockEnd);
       let changed;
       if (shift) {
-        changed = block.replace(/^ {1,2}/gm, '');
+        changed = block.replace(/^(?: {1,4}|\t)/gm, '');
       } else {
-        changed = block.replace(/^/gm, '  ');
+        changed = block.replace(/^/gm, INDENT);
       }
       // Multi-line: keep the block selected so Tab can be pressed again. Single
       // line: move the caret with the text — selecting the line here meant the

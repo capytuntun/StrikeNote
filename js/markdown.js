@@ -556,6 +556,26 @@
     renderer: renderer
   });
 
+  // 清單往下一層打子項目時，還沒打內容的那一行只有「-」。CommonMark 把「一行字＋底下單獨
+  // 一行 -」當成 setext 二級標題，上一層的字就突然變成大標題加底線。筆記裡單獨一個 - 幾乎
+  // 都是這種情況（真要 setext 標題會寫 --- 或 ===），所以只排除「底線只有一個 -」，其餘照舊：
+  // 回傳 false 交回 marked 原本的規則，回傳 undefined 表示這裡不是標題、改當段落處理。
+  marked.use({
+    tokenizer: {
+      lheading: function (src) {
+        let at = src.indexOf('\n');
+        while (at >= 0) {
+          const next = src.indexOf('\n', at + 1);
+          const line = src.slice(at + 1, next < 0 ? src.length : next);
+          if (!line.trim()) return false;   // setext 標題不跨空行
+          if (/^ {0,3}(?:=+|-+)[ \t]*$/.test(line)) return line.trim() === '-' ? undefined : false;
+          at = next;
+        }
+        return false;
+      }
+    }
+  });
+
   // <iframe> is only in the sanitizer's tag allow-list (below) for the PDF-embed
   // feature, and that markup never carries its own `src` — js/pdf.js's viewer sets
   // `.src` from a validated `data-pdf-id` *after* sanitizing. If a note author instead

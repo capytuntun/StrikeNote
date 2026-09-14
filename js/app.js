@@ -57,11 +57,8 @@
     if (note.perm && note.perm !== 'owner') return note.perm === 'edit' ? 'pen-line' : 'lock';
     if (note.meta && note.meta.perfReport) return 'chart';
     if (note.meta && note.meta.secReport) return 'shield';
-    if (isDirectNote(note)) return 'file-pen';
     return 'file-text';
   }
-  // 直接編輯筆記（js/direct.js）：內容一樣是 Markdown，只是打開時直接在排版好的頁面上寫。
-  function isDirectNote(note) { return !!(note && note.meta && note.meta.directEdit); }
   if (window.Editor) Editor.setNoteProvider(function (query) {
     const q = normTitle(query);
     return state.notes
@@ -596,7 +593,8 @@
     if (app) app.classList.toggle('note-open', !!on);
   }
 
-  // 資料夾路徑前綴：往上層走到根，組成「a\b\」（無資料夾時回空字串）。
+  // 資料夾路徑前綴：往上層走到根，組成「a/b/」，接在標題前面讀起來就是「a/b/筆記」
+  // （無資料夾時回空字串）。
   function folderPathPrefix(folderId) {
     const parts = [];
     let cur = folderId || null, guard = 0;
@@ -606,7 +604,7 @@
       parts.unshift(f.name || '');
       cur = f.parentId || null;
     }
-    return parts.length ? parts.join('\\') + '\\' : '';
+    return parts.length ? parts.join('/') + '/' : '';
   }
   function updateNotePath(note) {
     if (notePathEl) {
@@ -616,7 +614,7 @@
     }
     fitNoteTitle();
   }
-  // 點標題前的「資料夾\」前綴：回到首頁並直接走進那個資料夾
+  // 點標題前的「資料夾/」前綴：回到首頁並直接走進那個資料夾
   function goToFolder(folderId) {
     saveNow();
     LS.set('lastNote', '');
@@ -644,7 +642,7 @@
     }).catch(function (e) { toast('更新電子書失敗：' + (e && e.message || e)); });
   }
   // 標題輸入框依內容伸縮：它跟資料夾路徑前綴排在同一個絕對置中的容器裡，寬度
-  // 貼著文字，「測試資料夾\測試筆記」才會看起來是一整串置中的字，而不是路徑在
+  // 貼著文字，「測試資料夾/測試筆記」才會看起來是一整串置中的字，而不是路徑在
   // 左、標題在一個固定寬度的框裡各自為政。量測用同字型的隱形 span。
   let titleMeasure = null;
   function fitNoteTitle() {
@@ -819,10 +817,10 @@
 
   function openNote(id) {
     closeStream();   // stop listening to the note we're leaving
-    // 放下直接編輯中的區塊。它打的字早就寫進 #editor 了；要是等新筆記載入後才收尾，
-    // 收尾的回寫會落到新筆記上。
-    if (window.Direct) Direct.reset();
-    directNoteId = null;
+    // 放下 Blog mode 裡正在編輯的區塊。它打的字早就寫進 #editor 了；要是等新筆記載入後
+    // 才收尾，收尾的回寫會落到新筆記上。
+    if (window.BlogMode) BlogMode.reset();
+    blogNoteId = null;
     Store.getNote(id).then(function (note) {
       if (!note) { showEmpty(); return; }
       state.currentId = id;
@@ -881,20 +879,20 @@
       try { editorEl.setSelectionRange(0, 0); } catch (e) {}
       editorEl.scrollTop = 0;
       if (previewScrollEl) previewScrollEl.scrollTop = 0;
-      const directScrollEl = $('#direct-scroll');
-      if (directScrollEl) directScrollEl.scrollTop = 0;
+      const blogScrollEl = $('#blog-scroll');
+      if (blogScrollEl) blogScrollEl.scrollTop = 0;
       applyReadOnly(note);
-      updateNotePath(note);   // 標題前綴顯示所在資料夾（如 pp\）
+      updateNotePath(note);   // 標題前綴顯示所在資料夾（如 pp/）
       // Only the owner may (re)share; recipients just see the collaborators.
       if (shareBtn) shareBtn.hidden = !isMine(note);
       if (editorEl._hlRefresh) editorEl._hlRefresh();
-      // 直接編輯筆記一打開就在排版好的頁面上寫；一般筆記回到自己記住的模式
-      setMode(isDirectNote(note) ? 'direct' : (state.mode === 'direct' ? normalMode() : state.mode));
+      // 重新套用目前的檢視模式：Blog mode 要拿這篇的內容重新排版
+      setMode(state.mode);
       renderPreview();
       updateStatus();
       renderTree();
       startStream(note);   // go live: receive others' edits + presence
-      if (note.perm !== 'read' && state.mode !== 'direct') editorEl.focus();
+      if (note.perm !== 'read' && state.mode !== 'blog') editorEl.focus();
     }).catch(function () { showEmpty(); });
   }
 
@@ -905,10 +903,10 @@
   }
   function renderPreviewNow() {
     if (previewTimer) { clearTimeout(previewTimer); previewTimer = null; }
-    // 直接編輯模式看不到預覽，排版由 direct.js 自己做，把新內容交給它就好；離開這個模式時
+    // Blog mode 看不到預覽，排版由 blogmode.js 自己做，把新內容交給它就好；離開這個模式時
     // setMode 會補渲染一次預覽。PDF 匯出自己會重新渲染，不靠這裡。
-    if (state.mode === 'direct') {
-      if (window.Direct) Direct.update(editorEl.value, !!(state.current && state.current.perm === 'read'));
+    if (state.mode === 'blog') {
+      if (window.BlogMode) BlogMode.update(editorEl.value, !!(state.current && state.current.perm === 'read'));
       return;
     }
     previewEl.innerHTML = MD.render(editorEl.value);
@@ -1344,10 +1342,10 @@
     const caret = editorEl.selectionStart;
     const scroll = editorEl.scrollTop;
     editorEl.value = merged;
-    // 直接編輯模式要馬上知道，不能等 renderPreview 的 120ms：那段時間裡再打一個字，
-    // direct.js 會拿舊內容去換行，把這次合併進來的修改蓋掉。
-    if (state.mode === 'direct' && window.Direct) {
-      Direct.update(merged, !!(state.current && state.current.perm === 'read'));
+    // Blog mode 要馬上知道，不能等 renderPreview 的 120ms：那段時間裡再打一個字，
+    // blogmode.js 會拿舊內容去換行，把這次合併進來的修改蓋掉。
+    if (state.mode === 'blog' && window.BlogMode) {
+      BlogMode.update(merged, !!(state.current && state.current.perm === 'read'));
     }
     if (focused) {
       const c = mapCaret(oldV, merged, caret);
@@ -1687,43 +1685,35 @@
   }
 
   // ---- View modes --------------------------------------------------------
-  // 一般筆記記住的是自己的 分割／編輯／預覽（LS 'mode'）。直接編輯只給 meta.directEdit 的
-  // 筆記用；在那種筆記上切到其他三個只是暫時看原始碼，不去蓋掉一般筆記的偏好。
-  function normalMode() {
-    const m = LS.get('mode', 'split');
-    return (m === 'split' || m === 'edit' || m === 'preview') ? m : 'split';
-  }
-  let directNoteId = null;   // Direct 目前排版的是哪一篇；onDirectChange 只收這一篇的修改
+  const MODES = { split: 1, edit: 1, preview: 1, blog: 1 };
+  let blogNoteId = null;   // BlogMode 目前排版的是哪一篇；onBlogChange 只收這一篇的修改
   function setMode(mode) {
-    const directNote = isDirectNote(state.current);
-    if (mode === 'direct' && !directNote) mode = normalMode();
+    if (!MODES[mode]) mode = 'split';
     const was = state.mode;
-    // 先收尾再切：收尾可能清掉空區塊、經 onDirectChange 回寫，那時 state.mode 還得是 direct
-    if (was === 'direct' && mode !== 'direct' && window.Direct) Direct.hide();
+    // 先收尾再切：收尾可能清掉空區塊、經 onBlogChange 回寫，那時 state.mode 還得是 blog
+    if (was === 'blog' && mode !== 'blog' && window.BlogMode) BlogMode.hide();
     state.mode = mode;
-    if (!directNote) LS.set('mode', mode);
-    panesEl.classList.remove('mode-split', 'mode-edit', 'mode-preview', 'mode-direct');
+    LS.set('mode', mode);
+    panesEl.classList.remove('mode-split', 'mode-edit', 'mode-preview', 'mode-blog');
     panesEl.classList.add('mode-' + mode);
     document.querySelectorAll('.mode-btn').forEach(function (b) {
       b.classList.toggle('active', b.dataset.mode === mode);
     });
-    const directBtn = $('.mode-btn[data-mode="direct"]');
-    if (directBtn) directBtn.hidden = !directNote;
-    if (mode === 'direct') {
-      directNoteId = state.currentId;
-      if (window.Direct) Direct.show(editorEl.value, !!(state.current && state.current.perm === 'read'));
-    } else if (was === 'direct') {
-      directNoteId = null;
-      // 直接編輯時打的字只寫進了 #editor 的值；高亮底圖和預覽都還停在切進來之前
+    if (mode === 'blog') {
+      blogNoteId = state.currentId;
+      if (window.BlogMode) BlogMode.show(editorEl.value, !!(state.current && state.current.perm === 'read'));
+    } else if (was === 'blog') {
+      blogNoteId = null;
+      // Blog mode 裡打的字只寫進了 #editor 的值；高亮底圖和預覽都還停在切進來之前
       if (editorEl._hlRefresh) editorEl._hlRefresh();
       renderPreviewNow();
     }
     if (mode === 'preview') renderPreview();
   }
-  // Direct 每次輸入都把整份 Markdown 交回來：寫回 #editor，走一般的自動存檔。
-  function onDirectChange(text) {
+  // BlogMode 每次輸入都把整份 Markdown 交回來：寫回 #editor，走一般的自動存檔。
+  function onBlogChange(text) {
     const cur = state.current;
-    if (!cur || cur.perm === 'read' || state.mode !== 'direct' || cur.id !== directNoteId) return;
+    if (!cur || cur.perm === 'read' || state.mode !== 'blog' || cur.id !== blogNoteId) return;
     editorEl.value = text;
     scheduleSave();
     updateStatus();
@@ -2185,46 +2175,10 @@
     const actions = [
       { icon: 'link', label: '複製連結', fn: function () { copyNoteLink(note); } },
       { icon: 'users', label: '分享…', fn: function () { showShareDialog(note); } },
-      { icon: 'copy', label: '複製筆記', fn: function () { duplicateNote(note); } }
+      { icon: 'copy', label: '複製筆記', fn: function () { duplicateNote(note); } },
+      { icon: 'trash', label: '移至垃圾桶', fn: function () { deleteNote(note); }, danger: true }
     ];
-    const toggle = directEditAction(note);
-    if (toggle) actions.push(toggle);
-    actions.push({ icon: 'trash', label: '移至垃圾桶', fn: function () { deleteNote(note); }, danger: true });
     openMenuAt(r.right, r.bottom + 4, actions, { alignRight: true });
-  }
-  // 一般 Markdown 筆記 ↔ 直接編輯筆記（內容不變，只切 meta.directEdit）。資安院／成效報告
-  // 有自己的編輯器，別人分享來的筆記不是我能改種類的，都不提供。
-  function directEditAction(note) {
-    if (!isMine(note) || (note.meta && (note.meta.secReport || note.meta.perfReport))) return null;
-    const on = isDirectNote(note);
-    return {
-      icon: on ? 'columns' : 'file-pen',
-      label: on ? '改回 Markdown 分割編輯' : '改用直接編輯',
-      fn: function () { setDirectEdit(note, !on); }
-    };
-  }
-  function setDirectEdit(note, on) {
-    const open = !!(state.current && state.current.id === note.id);
-    const target = open ? state.current : (state.notes.find(function (n) { return n.id === note.id; }) || note);
-    const meta = Object.assign({}, target.meta);
-    if (on) meta.directEdit = true; else delete meta.directEdit;
-    target.meta = meta;
-    state.notes.forEach(function (n) { if (n.id === note.id) n.meta = meta; });
-    refreshViews();   // 樹狀清單與儀表板的圖示
-    const done = on ? '已改用直接編輯' : '已改回 Markdown 分割編輯';
-    if (open) {
-      saveNow();      // meta 跟著一般的存檔送出（一次只送一個，見 saveNow）
-      setMode(on ? 'direct' : normalMode());
-      toast(done);
-      return;
-    }
-    // 沒打開的筆記只改 meta。baseContent 設成要送出的內容本身，伺服器合併時就保留它手上
-    // 的文字，不會拿這份可能過時的列表副本蓋掉別人剛存的內容。
-    target.baseRev = target.rev || 0;
-    target.baseContent = target.content || '';
-    Store.updateNote(target)
-      .then(function () { toast(done); })
-      .catch(function (e) { toast('切換失敗：' + (e && e.message || e)); });
   }
   // 資料夾方框右上的「⋮」
   function showFolderMenu(folder, anchor) {
@@ -2311,8 +2265,6 @@
       actions.push({ icon: 'users', label: '分享…', fn: function () { showShareDialog(item); } });
       actions.push({ icon: 'pencil', label: '重新命名', fn: function () { renameNote(item); } });
       actions.push({ icon: 'copy', label: '複製', fn: function () { duplicateNote(item); } });
-      const toggle = directEditAction(item);
-      if (toggle) actions.push(toggle);
       actions.push({ icon: 'trash', label: '移至垃圾桶', fn: function () { deleteNote(item); }, danger: true });
     }
     openMenuAt(e.clientX, e.clientY, actions);
@@ -2540,9 +2492,9 @@
       creating[kind] = false;
     });
   }
-  function newNote(folderId, meta) {
+  function newNote(folderId) {
     createOnce('note', function () {
-      return Store.createNote('未命名筆記', folderId || null, meta).then(function (n) {
+      return Store.createNote('未命名筆記', folderId || null).then(function (n) {
         state.notes.push(n);
         if (folderId) state.expanded[folderId] = true;
         renderTree();
@@ -2977,11 +2929,9 @@
     }
 
     $('#new-note').addEventListener('click', function () { newNote(currentFolderId()); });
-    const newDirectBtn = $('#new-direct');
-    if (newDirectBtn) newDirectBtn.addEventListener('click', function () { newNote(currentFolderId(), { directEdit: true }); });
-    // 直接編輯模式：排版好的頁面上每一段都能原地改（js/direct.js）
-    if (window.Direct) Direct.init($('#direct-doc'), {
-      onChange: onDirectChange,
+    // Blog mode：排版好的頁面上每一段都能原地改（js/blogmode.js）
+    if (window.BlogMode) BlogMode.init($('#blog-doc'), {
+      onChange: onBlogChange,
       onSave: saveNow,
       uploadImage: function (blob) { return Store.putImage(blob); },
       onNoteLink: handleNoteLink,
