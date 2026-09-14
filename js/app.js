@@ -57,8 +57,11 @@
     if (note.perm && note.perm !== 'owner') return note.perm === 'edit' ? 'pen-line' : 'lock';
     if (note.meta && note.meta.perfReport) return 'chart';
     if (note.meta && note.meta.secReport) return 'shield';
+    if (isDirectNote(note)) return 'file-pen';
     return 'file-text';
   }
+  // 直接編輯筆記（js/direct.js）：內容一樣是 Markdown，只是打開時直接在排版好的頁面上寫。
+  function isDirectNote(note) { return !!(note && note.meta && note.meta.directEdit); }
   if (window.Editor) Editor.setNoteProvider(function (query) {
     const q = normTitle(query);
     return state.notes
@@ -816,6 +819,10 @@
 
   function openNote(id) {
     closeStream();   // stop listening to the note we're leaving
+    // 放下直接編輯中的區塊。它打的字早就寫進 #editor 了；要是等新筆記載入後才收尾，
+    // 收尾的回寫會落到新筆記上。
+    if (window.Direct) Direct.reset();
+    directNoteId = null;
     Store.getNote(id).then(function (note) {
       if (!note) { showEmpty(); return; }
       state.currentId = id;
@@ -874,16 +881,20 @@
       try { editorEl.setSelectionRange(0, 0); } catch (e) {}
       editorEl.scrollTop = 0;
       if (previewScrollEl) previewScrollEl.scrollTop = 0;
+      const directScrollEl = $('#direct-scroll');
+      if (directScrollEl) directScrollEl.scrollTop = 0;
       applyReadOnly(note);
       updateNotePath(note);   // 標題前綴顯示所在資料夾（如 pp\）
       // Only the owner may (re)share; recipients just see the collaborators.
       if (shareBtn) shareBtn.hidden = !isMine(note);
       if (editorEl._hlRefresh) editorEl._hlRefresh();
+      // 直接編輯筆記一打開就在排版好的頁面上寫；一般筆記回到自己記住的模式
+      setMode(isDirectNote(note) ? 'direct' : (state.mode === 'direct' ? normalMode() : state.mode));
       renderPreview();
       updateStatus();
       renderTree();
       startStream(note);   // go live: receive others' edits + presence
-      if (note.perm !== 'read') editorEl.focus();
+      if (note.perm !== 'read' && state.mode !== 'direct') editorEl.focus();
     }).catch(function () { showEmpty(); });
   }
 
@@ -894,6 +905,12 @@
   }
   function renderPreviewNow() {
     if (previewTimer) { clearTimeout(previewTimer); previewTimer = null; }
+    // 直接編輯模式看不到預覽，排版由 direct.js 自己做，把新內容交給它就好；離開這個模式時
+    // setMode 會補渲染一次預覽。PDF 匯出自己會重新渲染，不靠這裡。
+    if (state.mode === 'direct') {
+      if (window.Direct) Direct.update(editorEl.value, !!(state.current && state.current.perm === 'read'));
+      return;
+    }
     previewEl.innerHTML = MD.render(editorEl.value);
     // LineSync before resolveImages: it rewrites paragraph/list-item innerHTML,
     // and resolveImages sets img.src asynchronously — the other way round the
@@ -1327,6 +1344,11 @@
     const caret = editorEl.selectionStart;
     const scroll = editorEl.scrollTop;
     editorEl.value = merged;
+    // 直接編輯模式要馬上知道，不能等 renderPreview 的 120ms：那段時間裡再打一個字，
+    // direct.js 會拿舊內容去換行，把這次合併進來的修改蓋掉。
+    if (state.mode === 'direct' && window.Direct) {
+      Direct.update(merged, !!(state.current && state.current.perm === 'read'));
+    }
     if (focused) {
       const c = mapCaret(oldV, merged, caret);
       try { editorEl.selectionStart = editorEl.selectionEnd = c; } catch (e) {}
@@ -1552,7 +1574,18 @@
     if (!note || !Store.openNoteStream) return;
     lastSentPos = -1;
     noteStream = Store.openNoteStream(note.id, {
-      onUpdate: function (payload) { if (state.current && state.current.id === note.id) applyRemoteUpdate(payload); },
+      onUpdate: function (payload) {
+        const cur = state.current;
+        if (!cur || cur.id !== note.id) return;
+        // Our own save is still out, so merging now would measure from the wrong
+        // base — including the echo of that very save, which can arrive before its
+        // reply. Keep the newest one; afterSave() applies it once the reply is in.
+        if (cur._saving != null) {
+          if (!cur._heldRemote || payload.rev > cur._heldRemote.rev) cur._heldRemote = payload;
+          return;
+        }
+        applyRemoteUpdate(payload);
+      },
       onPresence: function (users) {
         if (state.current && state.current.id !== note.id) return;
         renderPresence(users);
@@ -1571,27 +1604,66 @@
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(saveNow, 500);
   }
+  // One save per note at a time. While a PUT is on its way the server may or may
+  // not have applied it yet, so `_syncContent` stops being a common ancestor of
+  // what a second save would carry and what the server holds. Sending one anyway
+  // made the server — and this client, when the first reply came back — merge our
+  // own in-flight edit in a second time: click Code, paste a command before that
+  // autosave returns (routine over a slow Cloudflare Tunnel), and the block's
+  // closing ``` came out twice. A save that finds one in flight is queued instead,
+  // and goes out once the reply has moved the base forward.
   function saveNow() {
-    if (!state.current || state.current.perm === 'read') return;
-    state.current.title = titleEl.value || '未命名筆記';
-    state.current.content = editorEl.value;
-    // Tell the server which revision this edit is based on, so it can merge in
-    // anyone else's concurrent changes rather than clobbering them.
-    state.current.baseRev = state.current._syncRev || 0;
-    state.current.baseContent = state.current._syncContent || '';
+    const cur = state.current;
+    if (!cur || cur.perm === 'read') return;
+    // Record the text on the note even when queuing: if the user switches notes
+    // before the reply, the queued save still carries this note's latest text.
+    cur.title = titleEl.value || '未命名筆記';
+    cur.content = editorEl.value;
     // Keep the in-memory list in step immediately — link resolution, backlinks
     // and search all read from it and must not see a stale copy.
-    const idx = state.notes.findIndex(function (n) { return n.id === state.current.id; });
-    if (idx >= 0) state.notes[idx] = state.current;
-    Store.updateNote(state.current).then(function (saved) {
-      statusSave.textContent = '已儲存 ✓';
-      // The reply is authoritative and may carry a merge of someone else's edit.
-      applyRemoteUpdate({ rev: saved.rev, content: saved.content, title: saved.title });
-      updateTitleInTree();
-      updateStatus();
+    const idx = state.notes.findIndex(function (n) { return n.id === cur.id; });
+    if (idx >= 0) state.notes[idx] = cur;
+    if (cur._saving != null) { cur._saveAgain = true; return; }
+    sendSave(cur);
+  }
+  function sendSave(cur) {
+    // Tell the server which revision this edit is based on, so it can merge in
+    // anyone else's concurrent changes rather than clobbering them.
+    cur.baseRev = cur._syncRev || 0;
+    cur.baseContent = cur._syncContent || '';
+    const sent = cur._saving = cur.content;
+    Store.updateNote(cur).then(function (saved) {
+      cur._saving = null;
+      // The server now holds `sent`, so that — not the older _syncContent — is the
+      // common ancestor of the reply and whatever has been typed since it went out.
+      cur._syncContent = sent;
+      if (state.current === cur) {
+        statusSave.textContent = '已儲存 ✓';
+        // The reply is authoritative and may carry a merge of someone else's edit.
+        applyRemoteUpdate({ rev: saved.rev, content: saved.content, title: saved.title });
+        updateTitleInTree();
+        updateStatus();
+      } else {
+        cur._syncRev = saved.rev;
+        if (!cur._saveAgain) cur.content = saved.content;
+      }
+      afterSave(cur);
     }).catch(function (e) {
-      statusSave.textContent = '⚠ 未儲存：' + (e && e.message || e);
+      cur._saving = null;
+      if (state.current === cur) statusSave.textContent = '⚠ 未儲存：' + (e && e.message || e);
+      afterSave(cur);
     });
+  }
+  function afterSave(cur) {
+    // Live updates that arrived while the save was out were held back (see
+    // startStream); merge them now, against the base the reply just set.
+    const held = cur._heldRemote;
+    cur._heldRemote = null;
+    if (held && state.current === cur) applyRemoteUpdate(held);
+    if (cur._saveAgain) {
+      cur._saveAgain = false;
+      if (state.current === cur) saveNow(); else sendSave(cur);
+    }
   }
   function updateTitleInTree() {
     const row = treeEl.querySelector('.note-row[data-id="' + state.currentId + '"] .label');
@@ -1615,15 +1687,47 @@
   }
 
   // ---- View modes --------------------------------------------------------
+  // 一般筆記記住的是自己的 分割／編輯／預覽（LS 'mode'）。直接編輯只給 meta.directEdit 的
+  // 筆記用；在那種筆記上切到其他三個只是暫時看原始碼，不去蓋掉一般筆記的偏好。
+  function normalMode() {
+    const m = LS.get('mode', 'split');
+    return (m === 'split' || m === 'edit' || m === 'preview') ? m : 'split';
+  }
+  let directNoteId = null;   // Direct 目前排版的是哪一篇；onDirectChange 只收這一篇的修改
   function setMode(mode) {
+    const directNote = isDirectNote(state.current);
+    if (mode === 'direct' && !directNote) mode = normalMode();
+    const was = state.mode;
+    // 先收尾再切：收尾可能清掉空區塊、經 onDirectChange 回寫，那時 state.mode 還得是 direct
+    if (was === 'direct' && mode !== 'direct' && window.Direct) Direct.hide();
     state.mode = mode;
-    LS.set('mode', mode);
-    panesEl.classList.remove('mode-split', 'mode-edit', 'mode-preview');
+    if (!directNote) LS.set('mode', mode);
+    panesEl.classList.remove('mode-split', 'mode-edit', 'mode-preview', 'mode-direct');
     panesEl.classList.add('mode-' + mode);
     document.querySelectorAll('.mode-btn').forEach(function (b) {
       b.classList.toggle('active', b.dataset.mode === mode);
     });
+    const directBtn = $('.mode-btn[data-mode="direct"]');
+    if (directBtn) directBtn.hidden = !directNote;
+    if (mode === 'direct') {
+      directNoteId = state.currentId;
+      if (window.Direct) Direct.show(editorEl.value, !!(state.current && state.current.perm === 'read'));
+    } else if (was === 'direct') {
+      directNoteId = null;
+      // 直接編輯時打的字只寫進了 #editor 的值；高亮底圖和預覽都還停在切進來之前
+      if (editorEl._hlRefresh) editorEl._hlRefresh();
+      renderPreviewNow();
+    }
     if (mode === 'preview') renderPreview();
+  }
+  // Direct 每次輸入都把整份 Markdown 交回來：寫回 #editor，走一般的自動存檔。
+  function onDirectChange(text) {
+    const cur = state.current;
+    if (!cur || cur.perm === 'read' || state.mode !== 'direct' || cur.id !== directNoteId) return;
+    editorEl.value = text;
+    scheduleSave();
+    updateStatus();
+    danceCapybara();
   }
 
   // ---- Paste image -------------------------------------------------------
@@ -2081,10 +2185,46 @@
     const actions = [
       { icon: 'link', label: '複製連結', fn: function () { copyNoteLink(note); } },
       { icon: 'users', label: '分享…', fn: function () { showShareDialog(note); } },
-      { icon: 'copy', label: '複製筆記', fn: function () { duplicateNote(note); } },
-      { icon: 'trash', label: '移至垃圾桶', fn: function () { deleteNote(note); }, danger: true }
+      { icon: 'copy', label: '複製筆記', fn: function () { duplicateNote(note); } }
     ];
+    const toggle = directEditAction(note);
+    if (toggle) actions.push(toggle);
+    actions.push({ icon: 'trash', label: '移至垃圾桶', fn: function () { deleteNote(note); }, danger: true });
     openMenuAt(r.right, r.bottom + 4, actions, { alignRight: true });
+  }
+  // 一般 Markdown 筆記 ↔ 直接編輯筆記（內容不變，只切 meta.directEdit）。資安院／成效報告
+  // 有自己的編輯器，別人分享來的筆記不是我能改種類的，都不提供。
+  function directEditAction(note) {
+    if (!isMine(note) || (note.meta && (note.meta.secReport || note.meta.perfReport))) return null;
+    const on = isDirectNote(note);
+    return {
+      icon: on ? 'columns' : 'file-pen',
+      label: on ? '改回 Markdown 分割編輯' : '改用直接編輯',
+      fn: function () { setDirectEdit(note, !on); }
+    };
+  }
+  function setDirectEdit(note, on) {
+    const open = !!(state.current && state.current.id === note.id);
+    const target = open ? state.current : (state.notes.find(function (n) { return n.id === note.id; }) || note);
+    const meta = Object.assign({}, target.meta);
+    if (on) meta.directEdit = true; else delete meta.directEdit;
+    target.meta = meta;
+    state.notes.forEach(function (n) { if (n.id === note.id) n.meta = meta; });
+    refreshViews();   // 樹狀清單與儀表板的圖示
+    const done = on ? '已改用直接編輯' : '已改回 Markdown 分割編輯';
+    if (open) {
+      saveNow();      // meta 跟著一般的存檔送出（一次只送一個，見 saveNow）
+      setMode(on ? 'direct' : normalMode());
+      toast(done);
+      return;
+    }
+    // 沒打開的筆記只改 meta。baseContent 設成要送出的內容本身，伺服器合併時就保留它手上
+    // 的文字，不會拿這份可能過時的列表副本蓋掉別人剛存的內容。
+    target.baseRev = target.rev || 0;
+    target.baseContent = target.content || '';
+    Store.updateNote(target)
+      .then(function () { toast(done); })
+      .catch(function (e) { toast('切換失敗：' + (e && e.message || e)); });
   }
   // 資料夾方框右上的「⋮」
   function showFolderMenu(folder, anchor) {
@@ -2171,6 +2311,8 @@
       actions.push({ icon: 'users', label: '分享…', fn: function () { showShareDialog(item); } });
       actions.push({ icon: 'pencil', label: '重新命名', fn: function () { renameNote(item); } });
       actions.push({ icon: 'copy', label: '複製', fn: function () { duplicateNote(item); } });
+      const toggle = directEditAction(item);
+      if (toggle) actions.push(toggle);
       actions.push({ icon: 'trash', label: '移至垃圾桶', fn: function () { deleteNote(item); }, danger: true });
     }
     openMenuAt(e.clientX, e.clientY, actions);
@@ -2384,13 +2526,29 @@
     }
     return null;
   }
-  function newNote(folderId) {
-    Store.createNote('未命名筆記', folderId || null).then(function (n) {
-      state.notes.push(n);
-      if (folderId) state.expanded[folderId] = true;
-      renderTree();
-      openNote(n.id);
-      setTimeout(function () { titleEl.select(); }, 50);
+  // 建立類的請求還在路上時不再送第二個。從外網經 Cloudflare Tunnel 連線時回應偶爾要等上
+  // 好幾秒甚至半分鐘；畫面沒反應就會一直按，回應一到就一次冒出一堆資料夾／筆記。
+  const creating = {};
+  function createOnce(kind, make) {
+    if (creating[kind]) { toast('已經送出了，還在等伺服器回應…'); return; }
+    creating[kind] = true;
+    const slow = setTimeout(function () { toast('伺服器回應比較慢，已經送出了，請稍候…'); }, 1500);
+    make().catch(function (e) {
+      toast('建立失敗：' + (e && e.message || e));
+    }).then(function () {
+      clearTimeout(slow);
+      creating[kind] = false;
+    });
+  }
+  function newNote(folderId, meta) {
+    createOnce('note', function () {
+      return Store.createNote('未命名筆記', folderId || null, meta).then(function (n) {
+        state.notes.push(n);
+        if (folderId) state.expanded[folderId] = true;
+        renderTree();
+        openNote(n.id);
+        setTimeout(function () { titleEl.select(); }, 50);
+      });
     });
   }
   // 資安院報告：先跳 modal 收集 單位 / Domain / IP / 弱點類型，確認後才建立筆記。
@@ -2434,12 +2592,14 @@
   }
 
   function newFolder(parentId) {
-    Store.createFolder('新資料夾', parentId || null).then(function (f) {
-      state.folders.push(f);
-      if (parentId) state.expanded[parentId] = true;
-      state.expanded[f.id] = true;
-      refreshViews();   // 儀表板立刻長出新資料夾，不用重新整理
-      startRename('folder', f.id);
+    createOnce('folder', function () {
+      return Store.createFolder('新資料夾', parentId || null).then(function (f) {
+        state.folders.push(f);
+        if (parentId) state.expanded[parentId] = true;
+        state.expanded[f.id] = true;
+        refreshViews();   // 儀表板立刻長出新資料夾，不用重新整理
+        startRename('folder', f.id);
+      });
     });
   }
   function renameNote(note) { startRename('note', note.id); }
@@ -2817,6 +2977,19 @@
     }
 
     $('#new-note').addEventListener('click', function () { newNote(currentFolderId()); });
+    const newDirectBtn = $('#new-direct');
+    if (newDirectBtn) newDirectBtn.addEventListener('click', function () { newNote(currentFolderId(), { directEdit: true }); });
+    // 直接編輯模式：排版好的頁面上每一段都能原地改（js/direct.js）
+    if (window.Direct) Direct.init($('#direct-doc'), {
+      onChange: onDirectChange,
+      onSave: saveNow,
+      uploadImage: function (blob) { return Store.putImage(blob); },
+      onNoteLink: handleNoteLink,
+      onTag: browseTag,
+      onAnnotate: openAnnotator,
+      copyText: copyText,
+      toast: toast
+    });
     $('#new-folder').addEventListener('click', function () { newFolder(null); });
     // 「新增」選單：筆記／證照範本／資安院報告／成效報告合併成一顆鈕，點開再選。
     // 選項按鈕保留原本的 id，各自的 click 處理（下面）完全不用改；選項自己的

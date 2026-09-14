@@ -408,5 +408,6 @@
     previewEl.addEventListener('click', onPreviewClick);
   }
 
-  global.LineSync = { init: init, rebuild: rebuild };
+  // sourceBlocks is also how js/direct.js cuts a note into editable blocks.
+  global.LineSync = { init: init, rebuild: rebuild, sourceBlocks: sourceBlocks };
 })(window);

@@ -57,6 +57,7 @@
     'folder-plus':     '<path d="M3 5h6l2 2h10v13H3z"/><path d="M12 10v6M9 13h6"/>',
     'file-text':       '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h6"/>',
     'file-plus':       '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/><path d="M12 11v6M9 14h6"/>',
+    'file-pen':        '<path d="M12 21H6V3h8l4 4v4"/><path d="M14 3v4h4"/><path d="M19.5 13.5a1.8 1.8 0 0 1 2.5 2.5L16 22l-3 .5.5-3z"/>',
     files:             '<path d="M16 3H8v14h12V7z"/><path d="M16 3v4h4"/><path d="M4 7v14h12"/>',
     shield:            '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/>',
     'shield-check':    '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/>',

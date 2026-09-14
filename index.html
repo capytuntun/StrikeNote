@@ -68,6 +68,8 @@
       <div id="topbar-note" class="topbar-note">
         <!-- 檢視模式（分割／編輯／預覽）靠左：放在彈性空間之前，就會緊接在 logo 後面 -->
         <div class="mode-switch" role="group" aria-label="檢視模式">
+          <!-- 只在直接編輯筆記（meta.directEdit）上出現；其他三個在那種筆記上是暫時看原始碼用 -->
+          <button data-mode="direct" class="mode-btn" title="直接在排版好的頁面上編輯" data-icon="file-pen" hidden>直接編輯</button>
           <button data-mode="split" class="mode-btn active" title="分割檢視" data-icon="columns">分割</button>
           <button data-mode="edit" class="mode-btn" title="純編輯" data-icon="pen-line">編輯</button>
           <button data-mode="preview" class="mode-btn" title="純預覽" data-icon="eye">預覽</button>
@@ -133,6 +135,7 @@
           <button id="new-btn" class="btn btn-primary new-btn" type="button" aria-haspopup="true" aria-expanded="false" data-icon="plus">新增<span class="new-caret" aria-hidden="true" data-icon="chevron-down"></span></button>
           <div id="new-dropdown" class="new-dropdown" role="menu" hidden>
             <button id="new-note" class="user-menu-item" role="menuitem" type="button" data-icon="file-plus">筆記</button>
+            <button id="new-direct" class="user-menu-item" role="menuitem" type="button" title="像 Notion 一樣直接在排版好的頁面上寫，語法和 Markdown 相同" data-icon="file-pen">直接編輯筆記</button>
             <div class="user-menu-sep" role="separator"></div>
             <button id="oscp-report" class="user-menu-item" role="menuitem" type="button" title="證照考試範本模式" data-icon="award">證照範本</button>
             <button id="sec-report" class="user-menu-item" role="menuitem" type="button" title="資安院報告模式" data-icon="shield">資安院報告</button>
@@ -231,6 +234,13 @@
               <aside id="backlinks" class="backlinks" hidden></aside>
             </div>
           </section>
+          <!-- 直接編輯模式（js/direct.js）：只給 meta.directEdit 的筆記，取代上面兩欄 -->
+          <section class="pane pane-direct" id="pane-direct">
+            <div class="direct-scroll" id="direct-scroll">
+              <p class="direct-hint">點任何一段就能直接改，語法和 Markdown 一樣：<kbd>#</kbd> 標題、<kbd>-</kbd> 清單、<kbd>```</kbd> 程式碼、<kbd>/</kbd> 插入區塊。段落最後連按兩次 <kbd>Enter</kbd> 開新段落，<kbd>Esc</kbd> 結束編輯。</p>
+              <article id="direct-doc" class="markdown-body direct-doc"></article>
+            </div>
+          </section>
         </div>
         <div class="statusbar">
           <span id="status-info"></span>
@@ -307,11 +317,11 @@
   <script src="vendor/hljs-dos.min.js"></script>
 
   <!-- App -->
-  <script src="js/icons.js?v=6"></script>
+  <script src="js/icons.js?v=7"></script>
   <script src="js/merge.js?v=2"></script>
   <script src="js/mindmap.js?v=3"></script>
   <script src="js/graph.js?v=3"></script>
-  <script src="js/store.js?v=50"></script>
+  <script src="js/store.js?v=51"></script>
   <script src="js/auth.js?v=46"></script>
   <script src="js/migrate.js?v=41"></script>
   <script src="js/admin.js?v=48"></script>
@@ -332,7 +342,8 @@
   <script src="js/versions.js?v=2"></script>
   <script src="js/trash.js?v=2"></script>
   <script src="js/imagelib.js?v=2"></script>
-  <script src="js/linesync.js?v=3"></script>
-  <script src="js/app.js?v=81"></script>
+  <script src="js/linesync.js?v=4"></script>
+  <script src="js/direct.js?v=1"></script>
+  <script src="js/app.js?v=82"></script>
 </body>
 </html>

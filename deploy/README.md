@@ -39,3 +39,25 @@ curl -fsSL https://raw.githubusercontent.com/capytuntun/StrikeNote/main/deploy/i
 5. 以 systemd（或你偏好的方式）跑 `node server/server.js`，`EnvironmentFile=/etc/strikenote/env`；`curl 127.0.0.1:8080/api/health` 應回 `{"ok":true}`。
 6. 反向代理／cloudflared 指向 `http://127.0.0.1:8080`，並確認它有送 `X-Forwarded-Proto: https`（cloudflared 會）。
 7. `backup.sh` 排進每日；第一次手動跑一次並試還原到另一個資料庫。
+
+## 從外網（Cloudflare Tunnel）連線：按了沒反應，隔半分鐘一起冒出來
+
+app 這一側已經處理掉兩件事：建立資料夾／筆記的請求還在路上時不會再送第二個（所以不會再一次冒出一堆），
+Node 的 keep-alive 也拉長到比 cloudflared 重用閒置連線的 90 秒還久（不然 POST 偶爾會直接回 502）。
+剩下「要等很久」的部分通常在 tunnel 本身，照順序查：
+
+1. **先分清楚哪一段慢。** 在 Pi 上跑 `curl -s -o /dev/null -w '%{time_total}\n' http://127.0.0.1:8080/api/health`，
+   應該是幾毫秒；再從外面的電腦對公開網址跑同一條（`https://你的網域/api/health`），多跑幾次。
+   本機一直很快、外面偶爾卡十幾二十秒 → 是 tunnel；兩邊都慢才是 Pi／MariaDB（看第 5 步）。
+2. **看 cloudflared 的紀錄：** `journalctl -u cloudflared --since "1 hour ago" | grep -iE "error|timeout|retry|buffer|quic"`。
+   常見的兩種：`failed to sufficiently increase receive buffer size`（Pi 的 UDP 緩衝太小，QUIC 會卡），
+   `timeout: no recent network activity`（路由器把閒置的 UDP 連線默默斷掉，cloudflared 要等約 30 秒才發現、重連）。
+3. **改用 HTTP/2（走 TCP）連 Cloudflare**，對家用路由器最穩：cloudflared 的 `config.yml` 加一行 `protocol: http2`
+   （或服務啟動參數加 `--protocol http2`），`sudo systemctl restart cloudflared`；紀錄裡應該看到 `protocol=http2`。
+   想留在 QUIC，至少把緩衝加大：
+   `echo 'net.core.rmem_max=2500000' | sudo tee /etc/sysctl.d/90-cloudflared.conf && sudo sysctl --system`。
+4. **瀏覽器那一段也可能是 QUIC（HTTP/3）。** DevTools → Network 打開「Protocol」欄，卡住的請求若是 `h3`，
+   換個網路（手機熱點、另一個 Wi-Fi）看是否就不卡；公司／學校網路常會擋或限速 UDP。
+5. **兩邊都慢才看 Pi：** `journalctl -u strikenote | grep '\[db\]'` 出現很多「遇到鎖」表示存檔在搶同一列；
+   `dmesg | grep -i mmc` 有錯誤表示 SD 卡出問題（MariaDB 每次 commit 都 fsync，SD 卡一卡住就拖住所有請求，
+   長期建議把系統放 USB SSD）。

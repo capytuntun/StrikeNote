@@ -534,6 +534,14 @@ const server = http.createServer(function (req, res) {
   serveStatic(req, res, url.pathname);
 });
 
+// cloudflared (and most reverse proxies) keep idle upstream connections around to
+// reuse them — cloudflared for 90 s by default — while Node closes an idle one
+// after 5 s. When the two cross, the proxy sends a request down a socket Node is
+// just closing: it retries a GET by itself, but a POST (new folder, autosave)
+// comes back as a 502. Outlasting the proxy means the proxy always closes first.
+server.keepAliveTimeout = 95 * 1000;
+server.headersTimeout = 100 * 1000;   // must exceed keepAliveTimeout
+
 async function serveSharedBook(req, res, token) {
   const row = await api.publicBook(token);
   if (!row) return sharePage(res, 404, '找不到這本書', '這個分享連結不存在，或已經被取消。');
