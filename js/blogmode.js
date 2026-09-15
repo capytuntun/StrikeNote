@@ -130,8 +130,11 @@
     const b = blocks[i];
     const el = b && elOf(i);
     if (!el || readOnly) return;
-    ed = { index: i, after: i + 1, line0: b.start, count: b.end - b.start + 1, prefix: [], suffix: [], isNew: false };
-    mount(el, blockText(b), caret);
+    const text = blockText(b);
+    // 空段落（見 blankHere）編輯時是空的框，不讓人看到 &nbsp;
+    const blank = text.trim() === BLANK;
+    ed = { index: i, after: i + 1, line0: b.start, count: b.end - b.start + 1, prefix: [], suffix: [], isNew: false, blank: blank };
+    mount(el, blank ? '' : text, blank ? 'start' : caret);
   }
 
   // 在 blocks[i] 後面（i = -1 表示最前面）開一個空白的新區塊。原始碼要等真的打了字才改，
@@ -157,8 +160,14 @@
     mount(el, '', 'start');
   }
 
-  // 把編輯框的內容換回整份原始碼：只動這個區塊佔的那幾行。清空的區塊整段拿掉。
+  // 空段落在原始碼裡的樣子。Markdown 會把連續的空行併成一個，排版後完全不佔高度，所以在 Blog
+  // 裡一直按 Enter 要往下長，每一下都得留下一個真的段落——一行 &nbsp;，排版出來是一段空白。
+  const BLANK = '&nbsp;';
+
+  // 把編輯框的內容換回整份原始碼：只動這個區塊佔的那幾行。清空的區塊整段拿掉——
+  // 空段落例外：它清空了還是空段落，要按 Backspace 才會拿掉（ed.blank 先被清掉）。
   function commitText(text) {
+    if (text === '' && ed.blank) text = BLANK;
     const ls = splitLines(src);
     const body = text === '' ? [] : ed.prefix.concat(text.split('\n'), ed.suffix);
     Array.prototype.splice.apply(ls, [ed.line0 - 1, ed.count].concat(body));
@@ -193,7 +202,7 @@
     const before = ed.count;
     commitText(text);
     let delta = ed.count - before;
-    if (text === '' && before > 0) {
+    if (text === '' && before > 0 && !ed.blank) {
       // 拿掉一整個區塊後，前後的空行接在一起就收成一個；文件開頭不留空行
       const ls = splitLines(src);
       const at = ed.line0 - 1;
@@ -276,11 +285,37 @@
       }, 0);
       return;
     }
-    if (e.key === 'Backspace' && s === 0 && v === '') { e.preventDefault(); go(-1); return; }
+    if (e.key === 'Backspace' && s === 0 && v === '') {
+      e.preventDefault();
+      // 空段落要在這裡才真的拿掉；其他空區塊本來就還沒寫進原始碼，直接走到上一段
+      if (ed.blank) {
+        ed.blank = false;
+        if (!go(-1)) finish();
+        return;
+      }
+      go(-1);
+      return;
+    }
+    // 空的區塊上按 Enter：留下一個空段落、在它後面開新區塊，連按就一直往下
+    if (e.key === 'Enter' && v.trim() === '') {
+      e.preventDefault();
+      blankHere();
+      return;
+    }
     if (e.key === 'Enter' && s === v.length && /\n$/.test(v) && !unclosed(v)) {
       e.preventDefault();
       splitHere();
     }
+  }
+
+  function blankHere() {
+    ta.value = BLANK;
+    onInput();
+    const at = ed.line0 + ed.prefix.length;   // 那一行 &nbsp; 在原始碼裡的行號
+    finish();
+    let k = -1;
+    for (let i = 0; i < blocks.length; i++) if (blocks[i].start <= at) k = i;
+    startNew(k);
   }
 
   // ---- 上傳：貼上、拖進頁面、/file ------------------------------------------
