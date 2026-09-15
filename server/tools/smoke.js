@@ -515,6 +515,38 @@ async function main() {
     'storage panel numbers', r.data && { images: r.data.images, notes: r.data.notes, links: r.data.links, dbBytes: r.data.dbBytes, dataDir: r.data.dataDir });
 
   if (!OLD) {
+    section('registration settings');
+    r = await call(bob, 'GET', '/api/admin/settings');
+    ok(r.status === 403, 'a non-admin cannot read registration settings', r.status);
+    r = await call(admin, 'GET', '/api/admin/settings');
+    ok(r.status === 200 && r.data.registerMode === 'open', 'settings start from REGISTER_MODE', r.data);
+    r = await call(admin, 'PUT', '/api/admin/settings', { registerMode: 'invite', inviteCode: 'smoke-invite-1' });
+    ok(r.status === 200 && r.data.registerMode === 'invite' && r.data.inviteCode === 'smoke-invite-1',
+      'switch to invite with a chosen code', r.data);
+    r = await call(anon, 'GET', '/api/me');
+    ok(r.data && r.data.registerMode === 'invite', '/api/me reports the new mode at once', r.data);
+    const carol = jar();
+    r = await call(carol, 'POST', '/api/register', { username: 'carol', password: 'carol-password-123', invite: '' });
+    ok(r.status === 400, 'invite mode refuses a missing code', r.data);
+    r = await call(carol, 'POST', '/api/register', { username: 'carol', password: 'carol-password-123', invite: '邀請碼邀請碼' });
+    ok(r.status === 400, 'a wrong multi-byte code is a plain refusal, not a crash', r.status);
+    r = await call(carol, 'POST', '/api/register', { username: 'carol', password: 'carol-password-123', invite: 'smoke-invite-1' });
+    ok(r.status === 200 && r.data.user, 'the right code registers', r.data);
+    if (r.data && r.data.user) await call(admin, 'DELETE', '/api/admin/users/' + r.data.user.id);
+    r = await call(admin, 'PUT', '/api/admin/settings', { regenerateInvite: true });
+    ok(r.status === 200 && r.data.inviteCode && r.data.inviteCode !== 'smoke-invite-1', 'regenerate replaces the code', r.data);
+    r = await call(admin, 'PUT', '/api/admin/settings', { inviteCode: 'has space' });
+    ok(r.status === 400, 'an invite code with a space is refused', r.status);
+    r = await call(admin, 'PUT', '/api/admin/settings', { registerMode: 'everyone' });
+    ok(r.status === 400, 'an unknown mode is refused', r.status);
+    await call(admin, 'PUT', '/api/admin/settings', { registerMode: 'closed' });
+    r = await call(jar(), 'POST', '/api/register', { username: 'dave', password: 'dave-password-123', invite: '' });
+    ok(r.status === 400, 'closed mode refuses registration', r.data);
+    r = await call(admin, 'PUT', '/api/admin/settings', { registerMode: 'open' });
+    ok(r.status === 200 && r.data.registerMode === 'open', 'back to open', r.data);
+  }
+
+  if (!OLD) {
     section('request limits and static allow-list (MariaDB build only)');
     const big = JSON.stringify({ title: 'x', content: 'y'.repeat(BODY_LIMIT + 1024) });
     r = await call(admin, 'POST', '/api/notes', big, { raw: true, contentType: 'application/json' });

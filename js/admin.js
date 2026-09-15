@@ -91,6 +91,24 @@
       '<div class="modal-title">' + (global.Icons ? Icons.svg('users') : '') + ' 帳號管理</div>' +
       '<div class="admin-hint">管理員只看得到帳號與權限，<b>看不到任何人的筆記內容</b>——要讀同事的報告，仍然得請對方分享。</div>' +
       '<div class="admin-error" hidden></div>' +
+      '<section class="admin-reg" aria-label="註冊設定">' +
+        '<div class="admin-reg-row">' +
+          '<span class="admin-reg-label">註冊方式</span>' +
+          '<div class="imglib-seg admin-seg" role="radiogroup" aria-label="註冊方式">' +
+            '<button type="button" role="radio" data-mode="invite">邀請制</button>' +
+            '<button type="button" role="radio" data-mode="open">開放註冊</button>' +
+            '<button type="button" role="radio" data-mode="closed">關閉註冊</button>' +
+          '</div>' +
+          '<span class="admin-reg-desc">讀取中…</span>' +
+        '</div>' +
+        '<div class="admin-reg-row admin-invite-row" hidden>' +
+          '<span class="admin-reg-label">邀請碼</span>' +
+          '<input class="admin-invite" type="text" spellcheck="false" autocomplete="off" maxlength="64" aria-label="邀請碼">' +
+          '<button type="button" class="btn admin-invite-copy">複製</button>' +
+          '<button type="button" class="btn admin-invite-save" disabled>儲存</button>' +
+          '<button type="button" class="btn admin-invite-new">產生新的</button>' +
+        '</div>' +
+      '</section>' +
       '<div class="admin-wrap"><table class="admin-table">' +
       '<thead><tr><th>帳號</th><th>權限</th><th>狀態</th><th class="num">筆記</th>' +
       '<th class="num">分享出</th><th class="num">收到</th><th>最後登入</th><th>動作</th></tr></thead>' +
@@ -103,6 +121,96 @@
     const tbody = modal.querySelector('tbody');
     const errEl = modal.querySelector('.admin-error');
     const err = m => { errEl.textContent = m || ''; errEl.hidden = !m; };
+
+    // ---- 註冊方式與邀請碼（server/settings.js）----
+    const seg = modal.querySelector('.admin-seg');
+    const regDesc = modal.querySelector('.admin-reg-desc');
+    const inviteRow = modal.querySelector('.admin-invite-row');
+    const inviteInput = modal.querySelector('.admin-invite');
+    const inviteSave = modal.querySelector('.admin-invite-save');
+    const REG_DESC = {
+      invite: '要輸入邀請碼才能註冊，把下面的邀請碼給要加入的人。',
+      open: '任何連得到這個網站的人都能自己建立帳號，不需要邀請碼。',
+      closed: '不開放註冊，登入頁不顯示「建立帳號」。'
+    };
+    let reg = null;
+    function paintReg(s) {
+      reg = s;
+      seg.querySelectorAll('button[data-mode]').forEach(function (b) {
+        const on = b.getAttribute('data-mode') === s.registerMode;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+      regDesc.textContent = REG_DESC[s.registerMode] || '';
+      inviteRow.hidden = s.registerMode !== 'invite';
+      inviteInput.value = s.inviteCode || '';
+      inviteSave.disabled = true;
+    }
+    // 成功 resolve true；失敗顯示錯誤、畫面退回伺服器上的值，resolve false
+    function saveReg(patch) {
+      err('');
+      return Store.adminSaveSettings(patch).then(function (s) { paintReg(s); return true; }, function (e) {
+        err(e.message);
+        if (reg) paintReg(reg);
+        return false;
+      });
+    }
+    Store.adminGetSettings().then(paintReg).catch(function (e) {
+      regDesc.textContent = '';
+      err(/not found|404/i.test(String(e && e.message))
+        ? '伺服器沒有註冊設定的端點——它是新加的，請重新啟動伺服器後再試。'
+        : e.message);
+    });
+    seg.addEventListener('click', function (e) {
+      const b = e.target.closest('button[data-mode]');
+      if (!b || !reg) return;
+      const m = b.getAttribute('data-mode');
+      if (m === reg.registerMode) return;
+      const ask = m === 'open'
+        ? App.confirm({
+          title: '開放註冊',
+          message: '開放之後，任何連得到這個網站的人都能自己建立帳號，不需要邀請碼。\n確定要開放嗎？',
+          ok: '開放註冊', danger: true
+        })
+        : Promise.resolve(true);
+      ask.then(function (yes) { if (yes) saveReg({ registerMode: m }); });
+    });
+    inviteInput.addEventListener('input', function () {
+      inviteSave.disabled = !reg || !inviteInput.value.trim() || inviteInput.value.trim() === reg.inviteCode;
+    });
+    inviteInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !inviteSave.disabled) { e.preventDefault(); inviteSave.click(); }
+    });
+    inviteSave.addEventListener('click', function () {
+      saveReg({ inviteCode: inviteInput.value.trim() }).then(function (ok) {
+        if (ok) App.toast('邀請碼已更新，舊的邀請碼不能再用');
+      });
+    });
+    modal.querySelector('.admin-invite-new').addEventListener('click', function () {
+      App.confirm({
+        title: '產生新的邀請碼',
+        message: '舊的邀請碼會立刻失效，還沒註冊的人要用新的邀請碼才能加入。',
+        ok: '產生新的'
+      }).then(function (yes) {
+        if (!yes) return;
+        saveReg({ regenerateInvite: true }).then(function (ok) { if (ok) App.toast('已產生新的邀請碼'); });
+      });
+    });
+    modal.querySelector('.admin-invite-copy').addEventListener('click', function () {
+      const text = inviteInput.value;
+      function fallback() {
+        inviteInput.focus();
+        inviteInput.select();
+        let copied = false;
+        try { copied = document.execCommand('copy'); } catch (x) { copied = false; }
+        App.toast(copied ? '已複製邀請碼' : '複製失敗，請手動選取');
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { App.toast('已複製邀請碼'); }, fallback);
+      } else {
+        fallback();
+      }
+    });
 
     function act(label, cls, fn) {
       const b = el('button', 'admin-act ' + (cls || ''), label);
@@ -171,7 +279,14 @@
     }
 
     function close() { overlay.remove(); document.removeEventListener('keydown', onKey, true); }
-    function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+    function onKey(e) {
+      if (e.key !== 'Escape') return;
+      // 確認框（開放註冊、換邀請碼、刪帳號）疊在上面時，Esc 是它的，不要連帳號管理一起關掉
+      const layers = document.querySelectorAll('.modal-overlay');
+      if (layers[layers.length - 1] !== overlay) return;
+      e.preventDefault();
+      close();
+    }
     document.addEventListener('keydown', onKey, true);
     overlay.addEventListener('mousedown', e => { if (e.target === overlay) close(); });
     modal.querySelector('.modal-cancel').addEventListener('click', close);

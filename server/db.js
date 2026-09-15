@@ -245,6 +245,13 @@ const SCHEMA = [
     views      INT NOT NULL DEFAULT 0,
     KEY idx_book_links_owner (owner_id, folder_id),
     CONSTRAINT fk_book_links_owner FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+  // 管理員在介面上改的站台設定（server/settings.js）：註冊方式、邀請碼。一列一個鍵。
+  `CREATE TABLE IF NOT EXISTS settings (
+    k          VARCHAR(64) COLLATE utf8mb4_bin NOT NULL PRIMARY KEY,
+    v          TEXT NOT NULL,
+    updated_at BIGINT NOT NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
 ];
 
@@ -502,6 +509,11 @@ const q = {
   orderNote: stmt(
     'UPDATE notes SET folder_id = ?, position = ? WHERE id = ? AND owner_id = ? AND deleted_at IS NULL'),
   orderFolder: stmt('UPDATE folders SET parent_id = ?, position = ? WHERE id = ? AND owner_id = ?'),
+
+  // site settings (server/settings.js)
+  settingsAll: stmt('SELECT k, v FROM settings'),
+  setSetting: stmt(
+    'INSERT INTO settings (k, v, updated_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = VALUES(updated_at)'),
 
   // shares
   shareFor: stmt('SELECT * FROM shares WHERE note_id = ? AND user_id = ?'),

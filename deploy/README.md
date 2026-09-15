@@ -32,7 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/capytuntun/StrikeNote/main/deploy/i
 
 1. `sudo apt install mariadb-server && sudo mariadb-secure-installation`；放 `60-strikenote.cnf`、`systemctl restart mariadb`；改密碼後 `sudo mariadb < deploy/mariadb/init.sql`。
 2. Node 22（NodeSource arm64）；專案放 `/opt/strikenote`，`npm ci --omit=dev`。
-3. `cp deploy/env.example /etc/strikenote/env`，填 `DB_PASSWORD`、`ADMIN_PASSWORD`、`REGISTER_MODE`。
+3. `cp deploy/env.example /etc/strikenote/env`，填 `DB_PASSWORD`、`ADMIN_PASSWORD`、`REGISTER_MODE`（只是初始值，之後可以在「帳號管理」切換註冊方式、查看邀請碼）。
 4. 搬資料：在舊機器**正常關閉**舊版伺服器（讓 WAL 寫回），把 `server/data/data.db` 複製到 Pi，
    `set -a; . /etc/strikenote/env; set +a; node server/tools/migrate-sqlite-to-mariadb.js --sqlite ~/data.db --dry-run`，
    看過報告再去掉 `--dry-run` 正式跑；完成後 `shred -u ~/data.db`。

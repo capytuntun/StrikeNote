@@ -33,6 +33,8 @@
     $('#auth-toggle').textContent = m === 'login' ? '還沒有帳號？建立一個' : '已經有帳號？前往登入';
     // The invite field only matters when registering on an invite-only site.
     show($('#auth-invite-row'), m === 'register' && registerMode === 'invite');
+    // A closed site has nothing to offer behind 「建立帳號」.
+    show($('#auth-toggle'), registerMode !== 'closed' || m === 'register');
     show($('#auth-hint'), m === 'register');
   }
 

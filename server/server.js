@@ -18,6 +18,7 @@ const api = require('./api');
 const dbmod = require('./db');
 const hub = require('./hub');
 const linkpreview = require('./linkpreview');
+const settings = require('./settings');
 
 // A crash is better than limping on with unknown state; systemd (or whoever
 // supervises the process) restarts it. Log first so the reason is in the journal.
@@ -312,7 +313,7 @@ async function handleApi(req, res, url) {
         id: user.id, username: user.username, role: user.role,
         mustChangePassword: !!user.must_change_pw
       } : null,
-      registerMode: config.registerMode
+      registerMode: settings.get().registerMode
     });
   }
 
@@ -346,6 +347,12 @@ async function handleApi(req, res, url) {
 
     if (p === '/api/admin/users' && method === 'GET') return json(res, 200, await api.adminListUsers(user));
     if (p === '/api/admin/storage' && method === 'GET') return json(res, 200, await api.adminStorage());
+    // Registration mode and invite code (server/settings.js).
+    if (p === '/api/admin/settings' && method === 'GET') return json(res, 200, settings.get());
+    if (p === '/api/admin/settings' && method === 'PUT') {
+      const r = await settings.update(await readJSON(req), user);
+      return r.error ? json(res, 400, { error: r.error }) : json(res, 200, r);
+    }
 
     let am;
     if ((am = p.match(/^\/api\/admin\/users\/(\d+)\/disabled$/)) && method === 'POST') {
@@ -715,10 +722,12 @@ function start() {
     console.log('StrikeNote — http://' + config.host + ':' + config.port);
     console.log('  資料庫:   MariaDB ' + (config.db.socket ? config.db.socket : config.db.host + ':' + config.db.port) +
       '/' + config.db.name);
-    console.log('  註冊模式: ' + config.registerMode);
-    if (config.registerMode === 'invite') {
-      console.log('  邀請碼:   ' + config.inviteCode +
-        (config.inviteCodeGenerated ? '   ← 隨機產生，重啟會變。請設 INVITE_CODE 環境變數固定它' : ''));
+    const reg = settings.get();
+    console.log('  註冊模式: ' + reg.registerMode + '（管理員可在「帳號管理」切換）');
+    if (reg.registerMode === 'invite') {
+      console.log('  邀請碼:   ' + (inviteGenerated
+        ? reg.inviteCode + '   ← 新產生，已存進資料庫，重啟不會變；之後在「帳號管理」查看或更換'
+        : '在「帳號管理」查看'));
     }
     if (config.requireHttps && !config.trustProxy) {
       console.log('  ⚠ REQUIRE_HTTPS=1 但 TRUST_PROXY=0：若非本機測試，請放在 HTTPS 反向代理後並設 TRUST_PROXY=1');
@@ -733,7 +742,12 @@ function start() {
 }
 
 // Connect, create/upgrade the schema, make sure an admin exists, then listen.
+// Set when settings.load() had to create the invite code, so start() prints it once.
+let inviteGenerated = false;
 dbmod.init().then(function () {
+  return settings.load();
+}).then(function (loaded) {
+  inviteGenerated = !!(loaded && loaded.generated);
   return auth.ensureAdmin();
 }).then(function (created) {
   if (created) {

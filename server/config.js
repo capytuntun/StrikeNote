@@ -6,7 +6,6 @@
 'use strict';
 
 const path = require('node:path');
-const crypto = require('node:crypto');
 
 function bool(v, dflt) {
   if (v === undefined || v === '') return dflt;
@@ -82,13 +81,6 @@ const config = {
   // outbound requests; cards then show just the address.
   linkPreview: bool(process.env.LINK_PREVIEW, true)
 };
-
-// An invite code that only exists in memory would change on every restart, so
-// generate one and tell the operator to persist it.
-if (config.registerMode === 'invite' && !config.inviteCode) {
-  config.inviteCode = crypto.randomBytes(9).toString('base64url');
-  config.inviteCodeGenerated = true;
-}
 
 // Refuse to start against a password-less TCP account: that is never what a
 // deployment wants, and the failure would otherwise surface as a confusing

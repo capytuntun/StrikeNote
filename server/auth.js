@@ -9,6 +9,7 @@
 const crypto = require('node:crypto');
 const { q } = require('./db');
 const config = require('./config');
+const settings = require('./settings');
 
 const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64 };
 const COOKIE = 'rn_session';
@@ -82,14 +83,10 @@ async function createUser(username, password, inviteCode) {
   // deployment could never be bootstrapped.
   const isFirst = (await q.countUsers.get()).n === 0;
   if (!isFirst) {
-    if (config.registerMode === 'closed') return { error: '此站台已關閉註冊' };
-    if (config.registerMode === 'invite') {
-      const given = String(inviteCode || '');
-      const expect = config.inviteCode;
-      const okLen = given.length === expect.length;
-      const ok = okLen && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expect));
-      if (!ok) return { error: '邀請碼不正確' };
-    }
+    // The admin's current choice (server/settings.js), not the environment.
+    const mode = settings.get().registerMode;
+    if (mode === 'closed') return { error: '此站台已關閉註冊' };
+    if (mode === 'invite' && !settings.inviteMatches(inviteCode)) return { error: '邀請碼不正確' };
   }
   if (await q.userByName.get(username)) return { error: '此帳號已被使用' };
 

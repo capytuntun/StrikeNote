@@ -329,6 +329,10 @@
     },
     adminDeleteUser: function (id) { return req('DELETE', '/api/admin/users/' + id); },
     adminStorage: function () { return req('GET', '/api/admin/storage'); },
+    // Registration mode ('open' | 'invite' | 'closed') and the invite code.
+    // patch: { registerMode?, inviteCode?, regenerateInvite? }
+    adminGetSettings: function () { return req('GET', '/api/admin/settings'); },
+    adminSaveSettings: function (patch) { return req('PUT', '/api/admin/settings', patch); },
     register: function (username, password, invite) {
       return req('POST', '/api/register', { username: username, password: password, invite: invite });
     },

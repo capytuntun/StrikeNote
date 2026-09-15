@@ -2499,6 +2499,23 @@ select.sec-info-input { cursor: pointer; }
 .admin-act.danger:hover { background: var(--danger-weak); border-color: var(--danger); color: var(--danger); }
 .admin-act:disabled { opacity: .4; cursor: default; }
 .admin-count { flex: 1; font-size: var(--fs-sm); color: var(--text-dim); align-self: center; font-family: var(--mono); }
+/* 註冊方式與邀請碼（帳號管理最上方）；分段按鈕借用檔案管理的 .imglib-seg */
+.admin-reg {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 14px; margin-bottom: 12px; border: 1px solid var(--border); background: var(--bg-2);
+}
+.admin-reg-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
+.admin-reg-row[hidden] { display: none; }
+.admin-reg-label { flex: 0 0 64px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-dim); }
+.admin-reg-desc { font-size: var(--fs-sm); color: var(--text-faint); }
+.admin-invite {
+  flex: 0 1 260px; min-width: 0; padding: 6px 9px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font-family: var(--mono); font-size: var(--fs-sm);
+}
+.admin-invite:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.admin-reg .btn { flex: 0 0 auto; padding: 6px 12px; font-size: var(--fs-sm); }
+.admin-reg .btn:disabled { opacity: .45; cursor: default; }
 
 /* ---------- Change password ---------- */
 .modal.pw-modal { width: min(390px, 92vw); }
