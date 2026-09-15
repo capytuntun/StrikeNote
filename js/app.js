@@ -1335,16 +1335,23 @@
     });
   }
 
-  // ---- Preview table of contents ----------------------------------------
+  // ---- Table of contents: beside the preview, and beside the Blog page ---
+  // One builder, two rails: #preview-toc reads the preview, #blog-toc reads the
+  // Blog page (rebuilt from BlogMode's onRender). Collapsing is one setting for both.
+  const blogTocEl = $('#blog-toc');
+  const blogScrollEl = $('#blog-scroll');
   function setTocCollapsed(v) {
-    const pane = document.querySelector('.pane-preview');
-    if (pane) pane.classList.toggle('toc-hidden', !!v);
+    document.querySelectorAll('.pane-preview, .pane-blog').forEach(function (pane) {
+      pane.classList.toggle('toc-hidden', !!v);
+    });
     LS.set('tocCollapsed', v ? '1' : '0');
   }
-  function buildPreviewTOC() {
-    if (!tocEl) return;
-    const pane = document.querySelector('.pane-preview');
-    const heads = previewEl.querySelectorAll('h1, h2, h3');
+  function buildPreviewTOC() { buildTOC(tocEl, previewEl, previewScrollEl); }
+  function buildBlogTOC() { buildTOC(blogTocEl, $('#blog-doc'), blogScrollEl); }
+  function buildTOC(tocEl, contentEl, scrollEl) {
+    if (!tocEl || !contentEl) return;
+    const pane = tocEl.closest('.pane');
+    const heads = contentEl.querySelectorAll('h1, h2, h3');
     tocEl.innerHTML = '';
     if (!heads.length) { if (pane) pane.classList.add('no-toc'); return; }
     if (pane) pane.classList.remove('no-toc');
@@ -1369,9 +1376,12 @@
       a.textContent = h.textContent;
       a.href = '#';
       a._target = h;
+      // Blog：正在編輯的標題已經換成編輯框（<h*> 不在了），就改用它所在的區塊
+      a._block = h.closest('.blog-block');
       a.addEventListener('click', function (e) {
         e.preventDefault();
-        h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const t = tocTargetOf(a);
+        if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
       return a;
     }
@@ -1431,14 +1441,25 @@
       if (tocOpen.has(b.getAttribute('data-toc'))) b.closest('li').classList.add('open');
     });
   }
-  function updateTocActive() {
-    if (!tocEl || !previewScrollEl) return;
-    const links = Array.prototype.slice.call(tocEl.querySelectorAll('a'));
+  function tocTargetOf(a) {
+    if (a._target && a._target.isConnected) return a._target;
+    return a._block && a._block.isConnected ? a._block : null;
+  }
+  // 不帶參數（捲動事件、展開箭頭）就兩邊都更新；看不見的那一邊量不到位置，直接略過
+  function updateTocActive(nav, scrollEl) {
+    if (!nav || !nav.nodeType) {
+      updateTocActive(tocEl, previewScrollEl);
+      updateTocActive(blogTocEl, blogScrollEl);
+      return;
+    }
+    if (!scrollEl || !scrollEl.offsetParent) return;
+    const links = Array.prototype.slice.call(nav.querySelectorAll('a'));
     if (!links.length) return;
-    const containerTop = previewScrollEl.getBoundingClientRect().top;
+    const containerTop = scrollEl.getBoundingClientRect().top;
     let active = links[0];
     links.forEach(function (a) {
-      if (a._target && a._target.getBoundingClientRect().top - containerTop <= 40) active = a;
+      const t = tocTargetOf(a);
+      if (t && t.getBoundingClientRect().top - containerTop <= 40) active = a;
     });
     // 目前段落是收合中的 ###：改反白它所屬的 ##
     let shown = active;
@@ -3111,6 +3132,7 @@
     if (window.BlogMode) BlogMode.init($('#blog-doc'), {
       onChange: onBlogChange,
       onSave: saveNow,
+      onRender: buildBlogTOC,
       uploadFiles: uploadFiles,
       onStatus: function (msg) { if (msg) statusSave.textContent = msg; },
       onPdfPref: function (v) { LS.set('pdfDisplay', v); },
@@ -3408,11 +3430,14 @@
         ro.observe(editorEl);
       }
     }
-    // scroll-spy: highlight the current heading in the TOC
-    if (previewScrollEl) previewScrollEl.addEventListener('scroll', updateTocActive);
-    // TOC show button (re-open a collapsed TOC)
-    const tocShow = $('#toc-show');
-    if (tocShow) tocShow.addEventListener('click', function () { setTocCollapsed(false); });
+    // scroll-spy: highlight the current heading in the TOC (preview and Blog)
+    if (previewScrollEl) previewScrollEl.addEventListener('scroll', function () { updateTocActive(tocEl, previewScrollEl); });
+    if (blogScrollEl) blogScrollEl.addEventListener('scroll', function () { updateTocActive(blogTocEl, blogScrollEl); });
+    // TOC show buttons (re-open a collapsed TOC)
+    ['#toc-show', '#blog-toc-show'].forEach(function (sel) {
+      const b = $(sel);
+      if (b) b.addEventListener('click', function () { setTocCollapsed(false); });
+    });
     // Copy button on code blocks
     previewEl.addEventListener('click', function (e) {
       if (!e.target.closest) return;

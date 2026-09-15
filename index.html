@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=114">
+  <link rel="stylesheet" href="app.css?v=115">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -242,6 +242,9 @@
           </section>
           <!-- Blog mode（js/blogmode.js）：取代上面兩欄，直接在排版好的頁面上改 -->
           <section class="pane pane-blog" id="pane-blog">
+            <!-- 跟預覽同一套目錄（app.js 的 buildTOC），收合狀態兩邊共用 -->
+            <button id="blog-toc-show" class="toc-show" title="顯示目錄" data-icon="list">目錄</button>
+            <nav id="blog-toc" class="preview-toc" aria-label="目錄"></nav>
             <div class="blog-scroll" id="blog-scroll">
               <article id="blog-doc" class="markdown-body blog-doc"></article>
             </div>
@@ -350,7 +353,7 @@
   <script src="js/imagelib.js?v=3"></script>
   <script src="js/linesync.js?v=6"></script>
   <script src="js/embedswitch.js?v=1"></script>
-  <script src="js/blogmode.js?v=4"></script>
-  <script src="js/app.js?v=91"></script>
+  <script src="js/blogmode.js?v=5"></script>
+  <script src="js/app.js?v=92"></script>
 </body>
 </html>

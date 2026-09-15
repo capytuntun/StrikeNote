@@ -1231,12 +1231,15 @@ mark.search-hit {
    分割／編輯／預覽之外的第四種檢視模式。整個寬度是一張排版好的頁面，點哪一段就原地變成
    那一段的 Markdown（.blog-src），字級跟排版後一樣；左邊的細條標出滑過／正在編輯的區塊。
    跟預覽一樣照主題換色（不是 MD 編輯器那種永遠深色的程式碼面板）。 */
-.pane-blog { display: none; background: var(--bg); overflow: hidden; }
+.pane-blog { display: none; position: relative; background: var(--bg); overflow: hidden; }
 .panes.mode-blog .pane-edit,
 .panes.mode-blog .pane-preview,
 .panes.mode-blog .divider { display: none; }
 .panes.mode-blog .pane-blog { display: flex; flex: 1; }
 .blog-scroll { flex: 1; min-width: 0; overflow-y: auto; cursor: text; }
+/* 旁邊的目錄跟預覽用同一組 .preview-toc／.toc-show 樣式，收合規則也照抄一份 */
+.pane-blog.toc-hidden .preview-toc { display: none; }
+.pane-blog.toc-hidden:not(.no-toc) .toc-show { display: inline-flex; align-items: center; gap: 5px; }
 .blog-doc { max-width: 820px; margin: 0 auto; padding: 34px 40px 40vh; }
 .blog-doc > .blog-block:first-child > :first-child { margin-top: 0; }
 .blog-block { position: relative; }

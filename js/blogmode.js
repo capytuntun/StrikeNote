@@ -75,6 +75,7 @@
     root.classList.toggle('is-readonly', readOnly);
     MD.resolveImages(root);
     if (scroller) scroller.scrollTop = keep;
+    if (opts.onRender) opts.onRender();   // app.js 重建旁邊的目錄
   }
 
   // ---- 編輯框 --------------------------------------------------------------
