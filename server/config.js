@@ -75,7 +75,12 @@ const config = {
 
   // Deleting a note only moves it to the trash; it is deleted for good this many
   // days later (hourly sweep), or sooner if the owner empties the trash.
-  trashKeepDays: int(process.env.TRASH_KEEP_DAYS, 30)
+  trashKeepDays: int(process.env.TRASH_KEEP_DAYS, 30),
+
+  // Link preview cards ({%preview url %}) make the server fetch the linked page
+  // (server/linkpreview.js). Set LINK_PREVIEW=0 on a host that must not make
+  // outbound requests; cards then show just the address.
+  linkPreview: bool(process.env.LINK_PREVIEW, true)
 };
 
 // An invite code that only exists in memory would change on every restart, so

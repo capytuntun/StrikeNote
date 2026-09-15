@@ -63,17 +63,14 @@
   let lastOpts = null;             // 記住最近一次 render 的資料，供導覽時重繪
   let tagFilter = null;            // 目前的 #標籤 篩選（null = 不篩選）
 
+  // 排序跟側邊欄共用一套（js/sorting.js）：釘選的永遠在最前面，其餘看目前的排序方式
   function foldersIn(folders, parentId) {
     return folders
       .filter(function (f) { return (f.parentId || null) === parentId; })
-      .sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant', { numeric: true }); });
+      .sort(function (a, b) { return Sorting.compareFolders(a, b); });
   }
-  // 釘選的排最前面，其餘依最近更新
   function sortNotes(list) {
-    return list.sort(function (a, b) {
-      const pa = isPinned(a) ? 1 : 0, pb = isPinned(b) ? 1 : 0;
-      return (pb - pa) || ((b.updatedAt || 0) - (a.updatedAt || 0));
-    });
+    return list.sort(function (a, b) { return Sorting.compareNotes(a, b); });
   }
   function notesIn(notes, folderId) {
     return sortNotes(notes.filter(function (n) { return isMine(n) && (n.folderId || null) === folderId; }));
@@ -137,6 +134,9 @@
     const input = el('input', cls);
     input.type = 'text';
     input.value = current || '';
+    // 方框和筆記列都可以拖拉；改名時暫停，不然在框裡拖選文字會變成把整塊拖走
+    const dragHost = host.closest('[draggable="true"]');
+    if (dragHost) dragHost.draggable = false;
     host.replaceWith(input);
     input.focus();
     input.select();
@@ -144,6 +144,7 @@
     function finish(save) {
       if (done) return;
       done = true;
+      if (dragHost) dragHost.draggable = true;
       const val = input.value.trim();
       input.replaceWith(host);
       if (save && val && val !== current) { host.textContent = val; onDone(val); }
@@ -183,9 +184,9 @@
         c.title = '回到「' + (label) + '」';
         c.addEventListener('click', function () { tagFilter = null; go(folderId); });
       }
-      // Every crumb accepts a drop, so dragging onto an ancestor moves a note up
-      // the tree — the reverse of dropping it onto a folder tile.
-      makeDropTarget(c, folderId, o);
+      // Every crumb accepts a drop, so dragging onto an ancestor moves a note (or a
+      // folder tile) up the tree — the reverse of dropping it onto a folder tile.
+      makeDropTarget(c, folderId, o, true);
       return c;
     }
 
@@ -218,6 +219,15 @@
     head.appendChild(main);
 
     const right = el('div', 'dash-head-right');
+    if (o.onSortMenu) {
+      const s = el('button', 'btn dash-sort-btn', ic('arrow-up-down') + '<span>排序：</span>' +
+        '<span class="dash-sort-mode">' + esc(Sorting.info().short) + '</span>');
+      s.type = 'button';
+      s.title = '排序方式（側邊欄也用同一套）；手動排序時可以直接拖拉筆記和資料夾';
+      s.setAttribute('aria-haspopup', 'true');
+      s.addEventListener('click', function (e) { e.stopPropagation(); o.onSortMenu(s); });
+      right.appendChild(s);
+    }
     if (tagFilter) {
       const clear = el('button', 'btn', ic('x') + '<span>清除篩選</span>');
       clear.type = 'button';
@@ -289,29 +299,132 @@
     return !!(t && Array.prototype.indexOf.call(t, DND) >= 0);
   }
 
+  // ---- 拖拉排序（js/sorting.js）--------------------------------------------
+  // 筆記列拖到另一列的上半／下半 = 插在它前面／後面；資料夾方框拖到另一個方框的左右兩側
+  // = 插在前後，拖到正中間 = 放進那個資料夾。順序由 app.js 存（onReorderNotes /
+  // onPlaceFolders），不是手動排序時會自動切成手動。
+  const DND_FOLDER = 'application/x-strikenote-folder';
+  let draggingFolder = null;
+  function isFolderDrag(e) {
+    if (draggingFolder) return true;
+    const t = e.dataTransfer && e.dataTransfer.types;
+    return !!(t && Array.prototype.indexOf.call(t, DND_FOLDER) >= 0);
+  }
+  function clearDropHints() {
+    document.querySelectorAll('#dashboard .drop-target, #dashboard .drop-before, #dashboard .drop-after')
+      .forEach(function (n) { n.classList.remove('drop-target', 'drop-before', 'drop-after'); });
+  }
+  function draggedNoteIds(e) {
+    let ids = dragging;
+    try {
+      const raw = e.dataTransfer.getData(DND);
+      if (raw) ids = JSON.parse(raw);
+    } catch (err) { /* fall back to the ids captured on dragstart */ }
+    return ids || [];
+  }
+
+  // 一列筆記當排序落點：只在「目前這一層」（不是標籤篩選）才有意義
+  function makeNoteRowDrop(wrap, note, o) {
+    if (!o.onReorderNotes) return;
+    wrap.addEventListener('dragover', function (e) {
+      if (!isNoteDrag(e) || tagFilter) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      const r = wrap.getBoundingClientRect();
+      const after = e.clientY > r.top + r.height / 2;
+      wrap.classList.toggle('drop-before', !after);
+      wrap.classList.toggle('drop-after', after);
+    });
+    wrap.addEventListener('dragleave', function () { wrap.classList.remove('drop-before', 'drop-after'); });
+    wrap.addEventListener('drop', function (e) {
+      if (!isNoteDrag(e) || tagFilter) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const after = wrap.classList.contains('drop-after');
+      clearDropHints();
+      const ids = draggedNoteIds(e);
+      dragging = null;
+      if (ids.length && !(ids.length === 1 && ids[0] === note.id)) {
+        o.onReorderNotes(ids, curFolderId, note.id, after);
+      }
+    });
+  }
+
+  // 資料夾方框：可以拖；別的資料夾拖過來時左右兩側是插入點、中間是放進去
+  function makeFolderTileDnD(tile, folder, o) {
+    if (!o.onPlaceFolders) return;
+    tile.draggable = true;
+    tile.addEventListener('dragstart', function (e) {
+      draggingFolder = folder.id;
+      e.dataTransfer.effectAllowed = 'move';
+      try {
+        e.dataTransfer.setData(DND_FOLDER, folder.id);
+        e.dataTransfer.setData('text/plain', folder.name || '');
+      } catch (err) { /* the module var still works */ }
+      e.stopPropagation();
+    });
+    tile.addEventListener('dragend', function () { draggingFolder = null; clearDropHints(); });
+    tile.addEventListener('dragover', function (e) {
+      if (!isFolderDrag(e) || draggingFolder === folder.id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      const r = tile.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width;
+      tile.classList.toggle('drop-before', x < 0.3);
+      tile.classList.toggle('drop-after', x > 0.7);
+      tile.classList.toggle('drop-target', x >= 0.3 && x <= 0.7);
+    });
+    tile.addEventListener('dragleave', function () { tile.classList.remove('drop-before', 'drop-after', 'drop-target'); });
+    tile.addEventListener('drop', function (e) {
+      if (!isFolderDrag(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const before = tile.classList.contains('drop-before'), after = tile.classList.contains('drop-after');
+      clearDropHints();
+      let id = draggingFolder;
+      try { id = e.dataTransfer.getData(DND_FOLDER) || id; } catch (err) { /* keep the module var */ }
+      draggingFolder = null;
+      if (!id || id === folder.id) return;
+      if (before || after) o.onPlaceFolders([id], folder.parentId || null, folder.id, after);
+      else o.onPlaceFolders([id], folder.id, null, true);
+    });
+  }
+
   // `folderId` may be null, which means "the top level" — that is how a note gets
-  // dragged back out of a folder onto the 所有筆記 crumb.
-  function makeDropTarget(el, folderId, o) {
+  // dragged back out of a folder onto the 所有筆記 crumb. With `acceptFolders`
+  // (the crumbs) a dragged folder tile can be dropped there too.
+  function makeDropTarget(el, folderId, o, acceptFolders) {
     if (!o.onMoveNotes) return el;
+    const wantsFolder = function (e) {
+      return acceptFolders && o.onPlaceFolders && isFolderDrag(e) && draggingFolder !== folderId;
+    };
     el.addEventListener('dragover', function (e) {
-      if (!isNoteDrag(e)) return;
+      if (!isNoteDrag(e) && !wantsFolder(e)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
       el.classList.add('drop-target');
     });
     el.addEventListener('dragleave', function () { el.classList.remove('drop-target'); });
     el.addEventListener('drop', function (e) {
+      if (wantsFolder(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        clearDropHints();
+        let id = draggingFolder;
+        try { id = e.dataTransfer.getData(DND_FOLDER) || id; } catch (err) { /* keep the module var */ }
+        draggingFolder = null;
+        if (id) o.onPlaceFolders([id], folderId, null, true);
+        return;
+      }
       if (!isNoteDrag(e)) return;
       e.preventDefault();
       e.stopPropagation();
-      el.classList.remove('drop-target');
-      let ids = dragging;
-      try {
-        const raw = e.dataTransfer.getData(DND);
-        if (raw) ids = JSON.parse(raw);
-      } catch (err) { /* fall back to the ids captured on dragstart */ }
+      clearDropHints();
+      const ids = draggedNoteIds(e);
       dragging = null;
-      if (ids && ids.length) o.onMoveNotes(ids, folderId);
+      if (ids.length) o.onMoveNotes(ids, folderId);
     });
     return el;
   }
@@ -361,6 +474,7 @@
     tile.setAttribute('role', 'button');
     tile.title = '打開資料夾';
     makeDropTarget(tile, folder.id, o);
+    makeFolderTileDnD(tile, folder, o);
 
     const head = el('div', 'dash-folder-head');
     head.appendChild(el('span', 'dash-folder-ic', ic('folder')));
@@ -453,9 +567,9 @@
       wrap.addEventListener('dragstart', function (e) { beginNoteDrag(e, note, o); });
       wrap.addEventListener('dragend', function () {
         dragging = null;
-        const hints = document.querySelectorAll('.drop-target');
-        Array.prototype.forEach.call(hints, function (n) { n.classList.remove('drop-target'); });
+        clearDropHints();
       });
+      makeNoteRowDrop(wrap, note, o);
     }
 
     if (o.selection && mine) {
@@ -607,6 +721,7 @@
       onPin: o.onPin, onRename: o.onRename, onMenu: o.onMenu,
       onFolderMenu: o.onFolderMenu, onFolderRename: o.onFolderRename,
       onMoveNotes: o.onMoveNotes,
+      onReorderNotes: o.onReorderNotes, onPlaceFolders: o.onPlaceFolders, onSortMenu: o.onSortMenu,
       onNavigate: o.onNavigate,
       selection: o.selection
     };

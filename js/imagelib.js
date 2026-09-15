@@ -32,6 +32,12 @@
     { key: 'uses', label: '使用最多' }
   ];
   const STATUS_LABEL = { used: '使用中', unused: '未使用', trash: '僅在垃圾桶' };
+  const TYPES = [
+    { key: 'all', label: '全部類型' },
+    { key: 'image', label: '圖片' },
+    { key: 'pdf', label: 'PDF' },
+    { key: 'other', label: '其他檔案' }
+  ];
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -70,21 +76,28 @@
     if (b < 1073741824) return (b / 1048576).toFixed(b < 10485760 ? 1 : 0) + ' MB';
     return (b / 1073741824).toFixed(2) + ' GB';
   }
-  function kind(mime) {
-    const m = String(mime || '');
+  function isPdf(img) { return img.mime === 'application/pdf'; }
+  function isImage(img) { return String(img.mime || '').indexOf('image/') === 0; }
+  function typeOf(img) { return isPdf(img) ? 'pdf' : isImage(img) ? 'image' : 'other'; }
+  function nameExt(name) { return ((/\.([a-z0-9]{1,8})$/i.exec(String(name || '')) || [])[1] || '').toLowerCase(); }
+  // 類型標籤：圖片與 PDF 看 MIME，其他檔案看副檔名
+  function kind(img) {
+    const m = String(img.mime || '');
     if (m === 'application/pdf') return 'PDF';
-    const sub = m.split('/')[1] || '';
-    if (sub === 'jpeg') return 'JPEG';
-    if (sub === 'svg+xml') return 'SVG';
-    return sub ? sub.toUpperCase() : '檔案';
+    if (m.indexOf('image/') === 0) {
+      const sub = m.split('/')[1] || '';
+      return sub === 'jpeg' ? 'JPEG' : sub === 'svg+xml' ? 'SVG' : sub.toUpperCase();
+    }
+    const ext = nameExt(img.name);
+    return ext ? ext.toUpperCase() : '檔案';
   }
-  function extOf(mime) {
-    const m = String(mime || '');
+  function extOf(img) {
+    const m = String(img.mime || '');
     if (m === 'application/pdf') return 'pdf';
+    if (m.indexOf('image/') !== 0) return 'bin';
     const sub = m.split('/')[1] || 'bin';
     return sub === 'jpeg' ? 'jpg' : sub === 'svg+xml' ? 'svg' : sub.replace(/[^a-z0-9]/gi, '');
   }
-  function isPdf(img) { return img.mime === 'application/pdf'; }
   function srcOf(id) { return '/api/images/' + encodeURIComponent(id); }
   function useCount(img) { return img.notes.length + img.hiddenNotes; }
   function compareText(a, b) { return String(a).localeCompare(String(b), 'zh-Hant', { numeric: true }); }
@@ -96,15 +109,19 @@
     return img.notes.length ? 'trash' : 'unused';
   }
   function displayName(img) {
-    return img.name || (isPdf(img) ? '未命名 PDF' : '未命名圖片');
+    return img.name || (isPdf(img) ? '未命名 PDF' : isImage(img) ? '未命名圖片' : '未命名檔案');
   }
   function fileName(img) {
     const base = (img.name || img.id).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').trim().slice(0, 80) || img.id;
-    return /\.[a-z0-9]{2,4}$/i.test(base) ? base : base + '.' + extOf(img.mime);
+    return nameExt(base) ? base : base + '.' + extOf(img);
   }
-  // 可以直接貼回筆記的語法；替代文字裡的中括號會截斷語法，拿掉
+  // 可以直接貼回筆記的語法；名稱裡的中括號會截斷語法，拿掉。圖片與 PDF 嵌進筆記，
+  // 其他檔案是下載連結。
   function markdownOf(img) {
-    return '![' + (img.name || '').replace(/[\[\]]/g, '') + '](' + (isPdf(img) ? 'pdf:' : 'img:') + img.id + ')';
+    const name = (img.name || '').replace(/[\[\]\r\n]/g, '');
+    if (isImage(img)) return '![' + name + '](img:' + img.id + ')';
+    if (isPdf(img)) return '![' + name + '](pdf:' + img.id + ')';
+    return '[' + (name || '附件') + '](file:' + img.id + ')';
   }
   function folderPath(folders, id) {
     const names = [], seen = {};
@@ -144,7 +161,7 @@
     const folders = o.folders || [];
     let images = [];
     let loaded = false;
-    let filter = 'all', query = '', sort = 'new';
+    let filter = 'all', query = '', sort = 'new', typeFilter = 'all';
     let noteFilter = null, noteFilterTitle = '';   // 依筆記篩選：筆記 id 與標題
     let activeId = null;
     let visibleIds = [];
@@ -170,15 +187,40 @@
     const modal = el('div', 'modal imglib-modal');
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-modal', 'true');
-    modal.setAttribute('aria-label', '圖片管理');
+    modal.setAttribute('aria-label', '檔案管理');
 
     const head = el('div', 'modal-title');
-    head.innerHTML = icon('image');
-    head.appendChild(el('span', null, '圖片管理'));
+    head.innerHTML = icon('files');
+    head.appendChild(el('span', null, '檔案管理'));
     const headCount = el('span', 'imglib-count');
     headCount.hidden = true;
     head.appendChild(headCount);
     head.appendChild(el('span', 'ver-sp'));
+    // 直接上傳到這裡：之後用「複製語法」貼進任何筆記。還沒有筆記用到之前會列在「未使用」。
+    const upBtn = button('btn imglib-upload', 'upload', '上傳檔案');
+    upBtn.title = '上傳檔案到檔案管理，之後可以用「複製語法」貼進筆記';
+    upBtn.addEventListener('click', function () {
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.multiple = true;
+      inp.addEventListener('change', function () {
+        const files = Array.prototype.slice.call(inp.files || []);
+        if (!files.length) return;
+        upBtn.disabled = true;
+        toast('上傳 ' + files.length + ' 個檔案中…');
+        Promise.all(files.map(function (f) {
+          return Store.putImage(f, f.name, !f.type && /\.pdf$/i.test(f.name) ? 'application/pdf' : undefined);
+        })).then(function () {
+          toast('已上傳 ' + files.length + ' 個檔案');
+          load();
+        }, function (e) {
+          toast('上傳失敗：' + (e && e.message || e));
+          load();
+        }).then(function () { upBtn.disabled = false; });
+      });
+      inp.click();
+    });
+    head.appendChild(upBtn);
     const close = el('button', 'icon-btn ver-close');
     close.type = 'button';
     close.title = '關閉（Esc）';
@@ -250,8 +292,19 @@
     input.placeholder = '搜尋檔名、筆記標題…';
     input.autocomplete = 'off';
     input.spellcheck = false;
-    input.setAttribute('aria-label', '搜尋圖片');
+    input.setAttribute('aria-label', '搜尋檔案');
     search.appendChild(input);
+    const typeSel = el('select', 'imglib-sort');
+    typeSel.setAttribute('aria-label', '檔案類型');
+    TYPES.forEach(function (t) {
+      const op = el('option', null, t.label);
+      op.value = t.key;
+      typeSel.appendChild(op);
+    });
+    typeSel.addEventListener('change', function () {
+      typeFilter = typeSel.value;
+      renderList();
+    });
     const sortSel = el('select', 'imglib-sort');
     sortSel.setAttribute('aria-label', '排序');
     SORTS.forEach(function (s) {
@@ -262,6 +315,7 @@
     bar.appendChild(seg);
     bar.appendChild(notesel);
     bar.appendChild(search);
+    bar.appendChild(typeSel);
     bar.appendChild(sortSel);
 
     const body = el('div', 'imglib-body');
@@ -453,10 +507,10 @@
       card.tabIndex = 0;
 
       const thumb = el('div', 'imglib-thumb');
-      if (isPdf(img)) {
+      if (!isImage(img)) {
         const p = el('div', 'imglib-pdf');
-        p.innerHTML = icon('file-text');
-        p.appendChild(el('span', null, 'PDF'));
+        p.innerHTML = icon(isPdf(img) ? 'file-text' : 'paperclip');
+        p.appendChild(el('span', null, kind(img)));
         thumb.appendChild(p);
       } else {
         const im = el('img');
@@ -514,7 +568,7 @@
         title.appendChild(el('span', 't', '沒有筆記使用'));
       }
       cap.appendChild(title);
-      cap.appendChild(el('div', 'imglib-cap-meta', kind(img.mime) + ' · ' + size(img.bytes) + ' · ' + shortDate(img.createdAt)));
+      cap.appendChild(el('div', 'imglib-cap-meta', kind(img) + ' · ' + size(img.bytes) + ' · ' + shortDate(img.createdAt)));
       card.appendChild(thumb);
       card.appendChild(cap);
       card.setAttribute('aria-label', displayName(img) + '，' +
@@ -538,8 +592,9 @@
     function matches(img) {
       if (!inNote(img)) return false;
       if (filter !== 'all' && statusOf(img) !== filter) return false;
+      if (typeFilter !== 'all' && typeOf(img) !== typeFilter) return false;
       if (!query) return true;
-      const hay = [img.name, img.id, kind(img.mime)];
+      const hay = [img.name, img.id, kind(img)];
       img.notes.forEach(function (n) { hay.push(n.title, n.sharedBy, folderPath(folders, n.folderId)); });
       return hay.join('\n').toLowerCase().indexOf(query) >= 0;
     }
@@ -547,7 +602,7 @@
     function emptyState() {
       const box = el('div', 'imglib-empty');
       let ic = 'image', msg;
-      if (!images.length) msg = '還沒有上傳過任何圖片或 PDF。\n在筆記裡貼上或拖進圖片，就會出現在這裡。';
+      if (!images.length) msg = '還沒有上傳過任何檔案。\n在筆記裡貼上或拖進圖片、PDF 或其他檔案，或按右上角的「上傳檔案」，就會出現在這裡。';
       else if (query) { ic = 'search'; msg = '找不到符合「' + input.value.trim() + '」的檔案。'; }
       else if (noteFilter) {
         ic = 'file-text';
@@ -659,16 +714,16 @@
       if (!img) {
         const ph = el('div', 'imglib-d-placeholder');
         ph.innerHTML = icon('image');
-        ph.appendChild(el('div', null, images.length ? '點一張圖片，\n看它用在哪些筆記。' : '選取的檔案會在這裡顯示詳細資訊。'));
+        ph.appendChild(el('div', null, images.length ? '點一個檔案，\n看它用在哪些筆記。' : '選取的檔案會在這裡顯示詳細資訊。'));
         detail.appendChild(ph);
         return;
       }
       const st = statusOf(img);
 
-      const pv = el('div', 'imglib-d-preview' + (isPdf(img) ? ' is-pdf' : ''));
-      if (isPdf(img)) {
-        pv.innerHTML = icon('file-text');
-        pv.appendChild(el('span', null, 'PDF 文件'));
+      const pv = el('div', 'imglib-d-preview' + (isImage(img) ? '' : ' is-pdf'));
+      if (!isImage(img)) {
+        pv.innerHTML = icon(isPdf(img) ? 'file-text' : 'paperclip');
+        pv.appendChild(el('span', null, isPdf(img) ? 'PDF 文件' : kind(img) + ' 檔案'));
       } else {
         const im = el('img');
         im.alt = img.name || '';
@@ -702,9 +757,9 @@
         props.appendChild(dd);
         return dd;
       }
-      prop('類型', kind(img.mime));
+      prop('類型', kind(img));
       prop('大小', size(img.bytes) + (img.annotated ? '（含標註前的原圖）' : ''));
-      if (!isPdf(img)) dimsEl = prop('尺寸', dims[img.id] || '—');
+      if (isImage(img)) dimsEl = prop('尺寸', dims[img.id] || '—');
       prop('上傳', fullDate(img.createdAt));
       main.appendChild(props);
 

@@ -1,0 +1,328 @@
+/* linkpreview.js — the server side of link preview cards ({%preview url %}).
+ *
+ * The browser cannot read another site's <meta> tags (CSP connect-src 'self',
+ * and CORS anyway), so the server fetches the page and hands back title /
+ * description / image. That makes this the one place the server connects to an
+ * address a user typed, so every connection goes through the same guard:
+ *
+ *   - http/https on port 80/443 only, no credentials in the URL;
+ *   - the host is resolved by `safeLookup`, which refuses the whole answer if
+ *     any address is loopback, private, link-local, CGNAT, multicast or
+ *     otherwise not publicly routable (IPv4-mapped/NAT64 IPv6 unwrapped first).
+ *     The check runs inside the connection's own DNS lookup, so a name cannot
+ *     resolve public for a check and private for the connect;
+ *   - IP literals skip DNS, so they are checked before the request is made;
+ *   - every redirect hop is re-parsed and re-checked, at most MAX_REDIRECTS;
+ *   - one deadline for the whole chain, a byte cap on the (decompressed) body,
+ *     and no connection reuse (`agent: false`).
+ *
+ * Preview images are proxied (image()) rather than hot-linked: the app's CSP
+ * only allows same-origin images, and a hot-linked image would hand every
+ * viewer's IP to the other site.
+ */
+'use strict';
+
+const http = require('node:http');
+const https = require('node:https');
+const dns = require('node:dns');
+const net = require('node:net');
+const zlib = require('node:zlib');
+
+const DEADLINE_MS = 8000;
+const MAX_HTML_BYTES = 1024 * 1024;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_REDIRECTS = 4;
+const UA = 'Mozilla/5.0 (compatible; StrikeNote-LinkPreview/1.0)';
+const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon)$/;
+
+// ---------------- address guard ----------------
+const blocked = new net.BlockList();
+[
+  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16],
+  ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.88.99.0', 24], ['192.168.0.0', 16],
+  ['198.18.0.0', 15], ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]
+].forEach(function (s) { blocked.addSubnet(s[0], s[1], 'ipv4'); });
+[
+  ['::', 128], ['::1', 128], ['100::', 64], ['2001:db8::', 32], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8]
+].forEach(function (s) { blocked.addSubnet(s[0], s[1], 'ipv6'); });
+
+function hexPairToV4(hi, lo) {
+  const a = parseInt(hi, 16), b = parseInt(lo, 16);
+  return [a >> 8, a & 255, b >> 8, b & 255].join('.');
+}
+
+// The IPv4 address an IPv6 one really points at, for the forms that tunnel or
+// map one: ::ffff:a.b.c.d (mapped), ::a.b.c.d (compatible), 64:ff9b::/96 (NAT64)
+// and 2002::/16 (6to4). The input is normalised through the URL parser first,
+// which compresses zeros and writes the embedded address in hex.
+function embeddedV4(ip) {
+  let s;
+  try { s = new URL('http://[' + ip + ']/').hostname.slice(1, -1); } catch (e) { return null; }
+  let m = /^(?:::ffff:|::|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(s);
+  if (m) return hexPairToV4(m[1], m[2]);
+  m = /^2002:([0-9a-f]{1,4}):([0-9a-f]{1,4})(?::|$)/.exec(s);
+  if (m) return hexPairToV4(m[1], m[2]);
+  return null;
+}
+
+function isBlockedAddress(ip) {
+  const fam = net.isIP(ip);
+  if (fam === 4) return blocked.check(ip, 'ipv4');
+  if (fam === 6) {
+    const v4 = embeddedV4(ip);
+    if (v4 && blocked.check(v4, 'ipv4')) return true;
+    return blocked.check(ip, 'ipv6');
+  }
+  return true;
+}
+
+function blockedError() {
+  const e = new Error('這個位址不允許預覽');
+  e.code = 'EBLOCKED';
+  return e;
+}
+
+// Drop-in for dns.lookup as http.request's `lookup` option. Node may ask for a
+// single address or (autoSelectFamily) for all of them; answer in either shape.
+function safeLookup(hostname, options, callback) {
+  if (typeof options === 'function') { callback = options; options = {}; }
+  const o = typeof options === 'number' ? { family: options } : (options || {});
+  dns.lookup(hostname, { all: true, family: o.family || 0, hints: o.hints }, function (err, addrs) {
+    if (err) return callback(err);
+    if (!addrs.length || addrs.some(function (a) { return isBlockedAddress(a.address); })) {
+      return callback(blockedError());
+    }
+    if (o.all) return callback(null, addrs);
+    callback(null, addrs[0].address, addrs[0].family);
+  });
+}
+
+// A URL we are willing to connect to, or null.
+function parseTarget(raw) {
+  let u;
+  try { u = new URL(String(raw || '').trim()); } catch (e) { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  if (u.username || u.password) return null;
+  const port = u.port ? Number(u.port) : (u.protocol === 'https:' ? 443 : 80);
+  if (port !== 80 && port !== 443) return null;
+  const host = u.hostname.replace(/^\[|\]$/g, '');
+  if (!host) return null;
+  if (net.isIP(host)) { if (isBlockedAddress(host)) return null; }
+  else if (/(^|\.)(localhost|local|internal|home\.arpa)$/i.test(host.replace(/\.+$/, ''))) return null;
+  u.hash = '';
+  return u;
+}
+
+// ---------------- fetching ----------------
+function fail(message, code) {
+  const e = new Error(message);
+  e.code = code || 'EPREVIEW';
+  return e;
+}
+
+function fetchLimited(target, o, signal, hops) {
+  return new Promise(function (resolve, reject) {
+    const lib = target.protocol === 'https:' ? https : http;
+    const req = lib.request(target, {
+      method: 'GET',
+      agent: false,
+      lookup: safeLookup,
+      signal: signal,
+      headers: {
+        'User-Agent': UA,
+        'Accept': o.accept,
+        'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br'
+      }
+    }, function (res) {
+      const status = res.statusCode || 0;
+      if (status >= 300 && status < 400 && res.headers.location) {
+        res.resume();
+        if (hops >= MAX_REDIRECTS) return reject(fail('轉址次數太多'));
+        let next = null;
+        try { next = parseTarget(new URL(res.headers.location, target).toString()); } catch (e) { next = null; }
+        if (!next) return reject(blockedError());
+        return resolve(fetchLimited(next, o, signal, hops + 1));
+      }
+      if (status < 200 || status >= 300) { res.resume(); return reject(fail('對方網站回應 ' + status)); }
+      if (o.checkType && !o.checkType(String(res.headers['content-type'] || ''))) {
+        res.resume();
+        return reject(fail('不支援的內容類型'));
+      }
+
+      let stream = res;
+      const enc = String(res.headers['content-encoding'] || '').toLowerCase().trim();
+      if (enc === 'gzip' || enc === 'x-gzip') stream = res.pipe(zlib.createGunzip());
+      else if (enc === 'deflate') stream = res.pipe(zlib.createInflate());
+      else if (enc === 'br') stream = res.pipe(zlib.createBrotliDecompress());
+
+      const chunks = [];
+      let size = 0, done = false;
+      function finish(err, truncated) {
+        if (done) return;
+        done = true;
+        if (err) return reject(err);
+        resolve({ url: target, headers: res.headers, body: Buffer.concat(chunks), truncated: !!truncated });
+      }
+      stream.on('data', function (c) {
+        if (done) return;
+        if (size + c.length > o.maxBytes) {
+          if (!o.truncate) { req.destroy(); return finish(fail('檔案太大')); }
+          chunks.push(c.subarray(0, o.maxBytes - size));
+          size = o.maxBytes;
+          req.destroy();
+          return finish(null, true);
+        }
+        size += c.length;
+        chunks.push(c);
+      });
+      stream.on('end', function () { finish(null, false); });
+      stream.on('error', function (e) { finish(e); });
+      res.on('error', function (e) { finish(e); });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+// ---------------- HTML metadata ----------------
+const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+function decodeEntities(s) {
+  return String(s).replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, function (all, e) {
+    if (e[0] === '#') {
+      const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      try { return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : ''; } catch (x) { return ''; }
+    }
+    const v = NAMED[e.toLowerCase()];
+    return v != null ? v : all;
+  });
+}
+
+function parseAttrs(tag) {
+  const out = {};
+  const body = tag.replace(/^<[\w-]+/, '').replace(/\/?>$/, '');
+  const re = /([^\s"'=<>\/]+)\s*(?:=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+  let m;
+  while ((m = re.exec(body))) {
+    const k = m[1].toLowerCase();
+    if (!(k in out)) out[k] = m[2] != null ? m[2] : m[3] != null ? m[3] : (m[4] != null ? m[4] : '');
+  }
+  return out;
+}
+
+function decodeHtml(buf, contentType) {
+  let charset = (/charset\s*=\s*["']?([\w.:-]+)/i.exec(contentType || '') || [])[1];
+  if (!charset) {
+    const sniff = buf.subarray(0, 8192).toString('latin1');
+    charset = (/<meta[^>]+charset\s*=\s*["']?([\w.:-]+)/i.exec(sniff) || [])[1];
+  }
+  try { return new TextDecoder(charset || 'utf-8').decode(buf); }
+  catch (e) { return new TextDecoder('utf-8').decode(buf); }
+}
+
+function clip(s, n) { return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+function extract(html, base) {
+  const end = html.search(/<\/head\s*>/i);
+  const head = end > 0 ? html.slice(0, end) : html.slice(0, 300000);
+  const meta = {};
+  let m;
+  const metaRe = /<meta\b[^>]*>/gi;
+  while ((m = metaRe.exec(head))) {
+    const a = parseAttrs(m[0]);
+    const key = String(a.property || a.name || a.itemprop || '').toLowerCase();
+    if (key && a.content != null && !(key in meta)) meta[key] = a.content;
+  }
+  let icon = '';
+  const linkRe = /<link\b[^>]*>/gi;
+  while ((m = linkRe.exec(head))) {
+    const a = parseAttrs(m[0]);
+    const rel = String(a.rel || '').toLowerCase().split(/\s+/);
+    if (!a.href) continue;
+    if (rel.indexOf('icon') >= 0) { icon = a.href; break; }
+    if (!icon && rel.indexOf('apple-touch-icon') >= 0) icon = a.href;
+  }
+  const titleM = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(head);
+  const text = function (v) { return v == null ? '' : decodeEntities(String(v)).replace(/\s+/g, ' ').trim(); };
+  const abs = function (v) {
+    const s = text(v);
+    if (!s) return null;
+    try {
+      const u = new URL(s, base);
+      return u.protocol === 'http:' || u.protocol === 'https:' ? u.toString() : null;
+    } catch (e) { return null; }
+  };
+  return {
+    title: clip(text(meta['og:title'] || meta['twitter:title'] || (titleM && titleM[1])), 200),
+    description: clip(text(meta['og:description'] || meta['twitter:description'] || meta.description), 300),
+    siteName: clip(text(meta['og:site_name'] || meta['application-name']), 80),
+    image: abs(meta['og:image:secure_url'] || meta['og:image'] || meta['og:image:url'] ||
+               meta['twitter:image'] || meta['twitter:image:src']),
+    icon: abs(icon || '/favicon.ico')
+  };
+}
+
+// ---------------- cache ----------------
+const CACHE_MAX = 500;
+const OK_TTL = 6 * 3600 * 1000;
+const FAIL_TTL = 10 * 60 * 1000;
+const cache = new Map();   // normalised url -> { at, ttl, value }
+
+function cached(key) {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > hit.ttl) { cache.delete(key); return null; }
+  return hit.value;
+}
+function remember(key, value, ttl) {
+  cache.delete(key);
+  cache.set(key, { at: Date.now(), ttl: ttl, value: value });
+  while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+}
+
+// ---------------- public ----------------
+// Resolves to { url, title, description, siteName, image, icon } or { error }.
+// Errors are answers, not exceptions: an unreachable site is an ordinary outcome
+// for a card, which then just shows the address.
+async function preview(raw) {
+  const target = parseTarget(raw);
+  if (!target) return { error: '這個網址不能預覽' };
+  const key = target.toString();
+  const hit = cached(key);
+  if (hit) return hit;
+  let value;
+  try {
+    const r = await fetchLimited(target, {
+      accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5',
+      maxBytes: MAX_HTML_BYTES,
+      truncate: true,
+      checkType: function (t) { return !t || /html|xml/i.test(t); }
+    }, AbortSignal.timeout(DEADLINE_MS), 0);
+    const info = extract(decodeHtml(r.body, r.headers['content-type']), r.url);
+    value = Object.assign({ url: key, finalUrl: r.url.toString() }, info);
+    remember(key, value, OK_TTL);
+  } catch (e) {
+    value = { error: e && e.code === 'EBLOCKED' ? '這個網址不能預覽' : '無法取得這個網頁' };
+    remember(key, value, FAIL_TTL);
+  }
+  return value;
+}
+
+// Resolves to { type, body } or { error }.
+async function image(raw) {
+  const target = parseTarget(raw);
+  if (!target) return { error: '這個網址不能預覽' };
+  try {
+    const r = await fetchLimited(target, {
+      accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8',
+      maxBytes: MAX_IMAGE_BYTES,
+      truncate: false,
+      checkType: function (t) { return IMAGE_TYPES.test(t.split(';')[0].trim().toLowerCase()); }
+    }, AbortSignal.timeout(DEADLINE_MS), 0);
+    return { type: String(r.headers['content-type']).split(';')[0].trim().toLowerCase(), body: r.body };
+  } catch (e) {
+    return { error: e && e.code === 'EBLOCKED' ? '這個網址不能預覽' : '無法取得這張圖片' };
+  }
+}
+
+module.exports = { preview, image, parseTarget, isBlockedAddress, extract };

@@ -263,7 +263,13 @@ const MIGRATIONS = [
   ['folders', 'is_book', 'TINYINT(1) NOT NULL DEFAULT 0'],
   // Soft delete: ms epoch when the note went into the trash, NULL = live. Shares,
   // versions and images stay attached so a restore brings everything back.
-  ['notes', 'deleted_at', 'BIGINT NULL']
+  ['notes', 'deleted_at', 'BIGINT NULL'],
+  // Manual order within a folder (api.js saveOrder). NULL = never dragged; the
+  // client sorts those ahead of positioned ones by last update.
+  ['notes', 'position', 'INT NULL'],
+  ['folders', 'position', 'INT NULL'],
+  // The uploaded file's own name, for downloads and the file library.
+  ['images', 'name', 'VARCHAR(255) NULL']
 ];
 
 async function addColumnIfMissing(table, col, ddl) {
@@ -476,20 +482,26 @@ const q = {
   // images
   imageById: stmt('SELECT * FROM images WHERE id = ?'),
   insertImage: stmt(`
-    INSERT INTO images (id, owner_id, mime, data, original, shapes, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`),
+    INSERT INTO images (id, owner_id, mime, name, data, original, shapes, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
   updateImage: stmt('UPDATE images SET mime = ?, data = ?, original = ?, shapes = ? WHERE id = ?'),
   deleteImage: stmt('DELETE FROM images WHERE id = ? AND owner_id = ?'),
-  // Image library (api.js listImages): the owner's uploads without their bytes,
+  // File library (api.js listImages): the owner's uploads without their bytes,
   // and every note, any owner, trashed or not, whose text could embed an upload.
   // The INSTR filter only trims the scan; listImages does the exact matching.
   imagesOf: stmt(
-    'SELECT id, mime, created_at, LENGTH(data) AS bytes, COALESCE(LENGTH(original), 0) AS original_bytes, ' +
+    'SELECT id, mime, name, created_at, LENGTH(data) AS bytes, COALESCE(LENGTH(original), 0) AS original_bytes, ' +
     '(original IS NOT NULL) AS annotated FROM images WHERE owner_id = ? ORDER BY created_at DESC'),
   notesEmbeddingMedia: stmt(
     'SELECT n.id, n.owner_id, u.username AS owner_name, n.title, n.folder_id, n.access, n.access_perm, ' +
     'n.deleted_at, n.updated_at, n.content FROM notes n JOIN users u ON u.id = n.owner_id ' +
-    "WHERE INSTR(n.content, 'img:') > 0 OR INSTR(n.content, 'pdf:') > 0"),
+    "WHERE INSTR(n.content, 'img:') > 0 OR INSTR(n.content, 'pdf:') > 0 OR INSTR(n.content, 'file:') > 0"),
+
+  // Manual order (api.js saveOrder): a drag rewrites one folder level's whole
+  // order, and moves the dragged rows into that level in the same statement.
+  orderNote: stmt(
+    'UPDATE notes SET folder_id = ?, position = ? WHERE id = ? AND owner_id = ? AND deleted_at IS NULL'),
+  orderFolder: stmt('UPDATE folders SET parent_id = ?, position = ? WHERE id = ? AND owner_id = ?'),
 
   // shares
   shareFor: stmt('SELECT * FROM shares WHERE note_id = ? AND user_id = ?'),

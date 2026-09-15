@@ -17,6 +17,7 @@ const auth = require('./auth');
 const api = require('./api');
 const dbmod = require('./db');
 const hub = require('./hub');
+const linkpreview = require('./linkpreview');
 
 // A crash is better than limping on with unknown state; systemd (or whoever
 // supervises the process) restarts it. Log first so the reason is in the journal.
@@ -131,6 +132,52 @@ async function readJSON(req) {
     err.status = 400;
     throw err;
   }
+}
+
+// ---------------- uploads ----------------
+// An upload is stored with whatever type the browser claimed, but only types
+// that are inert when opened on this origin are ever served as themselves:
+// raster images, PDF (the in-note viewer needs it inline) and SVG under a
+// sandbox policy. Everything else — HTML, JavaScript, anything unknown — goes
+// out as an octet-stream attachment. Served as-is, an uploaded .js would satisfy
+// script-src 'self' and an uploaded page would run inside the app's origin.
+const INLINE_UPLOAD = /^(?:image\/(?:png|jpeg|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon|svg\+xml)|application\/pdf)$/;
+
+function uploadMime(header) {
+  const t = String(header || '').split(';')[0].trim().toLowerCase();
+  return /^[a-z0-9][\w!#$&^.+-]{0,62}\/[a-z0-9][\w!#$&^.+-]{0,126}$/.test(t) ? t : 'application/octet-stream';
+}
+
+// X-File-Name carries encodeURIComponent(file.name), since a raw header cannot
+// hold CJK. Path separators and control characters never survive.
+function uploadName(header) {
+  if (!header) return null;
+  let s;
+  try { s = decodeURIComponent(String(header)); } catch (e) { return null; }
+  s = s.replace(/[\u0000-\u001f\u007f\\/]+/g, '_').trim().slice(0, 200);
+  return s || null;
+}
+
+function sendUpload(res, row, buf) {
+  const mime = String(row.mime || '').toLowerCase();
+  const headers = {
+    'Content-Length': buf.length,
+    'Cache-Control': 'private, no-cache',
+    'X-Content-Type-Options': 'nosniff'
+  };
+  if (INLINE_UPLOAD.test(mime)) {
+    headers['Content-Type'] = mime;
+    if (mime === 'image/svg+xml') headers['Content-Security-Policy'] = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+  } else {
+    const name = row.name || row.id;
+    const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, '_');
+    const utf8 = encodeURIComponent(name).replace(/['()*]/g, function (c) { return '%' + c.charCodeAt(0).toString(16).toUpperCase(); });
+    headers['Content-Type'] = 'application/octet-stream';
+    headers['Content-Disposition'] = 'attachment; filename="' + ascii + '"; filename*=UTF-8\'\'' + utf8;
+    headers['Content-Security-Policy'] = "default-src 'none'; sandbox";
+  }
+  res.writeHead(200, headers);
+  return res.end(buf);
 }
 
 // ---------------- static ----------------
@@ -423,29 +470,23 @@ async function handleApi(req, res, url) {
     if (method === 'DELETE') return send(await api.deleteFolder(user, m[1]));
   }
 
-  // Image library (js/imagelib.js): the caller's uploads, metadata only, each with the notes that embed it.
+  // File library (js/imagelib.js): the caller's uploads, metadata only, each with the notes that embed it.
   if (p === '/api/images' && method === 'GET') return json(res, 200, await api.listImages(user));
   if (p === '/api/images' && method === 'POST') {
-    const mime = String(req.headers['content-type'] || 'image/png').split(';')[0];
-    // Images plus PDF attachments (embedded in notes with the pdf: scheme).
-    if (!/^image\//.test(mime) && mime !== 'application/pdf') {
-      return json(res, 400, { error: '只接受圖片或 PDF' });
-    }
+    // Any file. Images and PDFs are embedded in notes (img: / pdf:), anything
+    // else is an attachment link (file:). What a stored file is allowed to do
+    // when it is served back is sendUpload's decision, not the uploader's.
+    const mime = uploadMime(req.headers['content-type']);
+    const name = uploadName(req.headers['x-file-name']);
     const buf = await readBody(req, config.maxBodyBytes);
-    return json(res, 200, await api.createImage(user, mime, buf));
+    return json(res, 200, await api.createImage(user, mime, buf, name));
   }
   if ((m = p.match(/^\/api\/images\/([\w.-]+)$/))) {
     const id = m[1];
     if (method === 'GET') {
       const row = await api.getImage(user, id);
       if (!row) return json(res, 404, { error: 'not found' });
-      res.writeHead(200, {
-        'Content-Type': row.mime,
-        'Content-Length': row.data.length,
-        'Cache-Control': 'private, no-cache',
-        'X-Content-Type-Options': 'nosniff'
-      });
-      return res.end(row.data);
+      return sendUpload(res, row, row.data);
     }
     if (method === 'PUT') return send(await api.saveImage(user, id, await readJSON(req)));
     if (method === 'DELETE') return send(await api.deleteImage(user, id));
@@ -466,10 +507,32 @@ async function handleApi(req, res, url) {
     if (method === 'GET') {
       const row = await api.getImage(user, m[1]);
       if (!row) return json(res, 404, { error: 'not found' });
-      const buf = row.original || row.data;
-      res.writeHead(200, { 'Content-Type': row.mime, 'Content-Length': buf.length, 'Cache-Control': 'private, no-cache' });
-      return res.end(buf);
+      return sendUpload(res, row, row.original || row.data);
     }
+  }
+
+  // Manual order (js/sorting.js): one folder level's complete order after a drag.
+  if (p === '/api/order' && method === 'PUT') return send(await api.saveOrder(user, await readJSON(req)));
+
+  // Link preview cards. Errors are 200 { error } — an unreachable site is an
+  // ordinary answer for a card, which then just shows the address.
+  if (p === '/api/link-preview' && method === 'GET') {
+    if (!config.linkPreview) return json(res, 200, { error: '連結預覽已停用' });
+    const info = await linkpreview.preview(url.searchParams.get('url'));
+    return json(res, 200, info, info.error ? {} : { 'Cache-Control': 'private, max-age=3600' });
+  }
+  if (p === '/api/link-preview/image' && method === 'GET') {
+    if (!config.linkPreview) return json(res, 404, { error: 'not found' });
+    const img = await linkpreview.image(url.searchParams.get('url'));
+    if (img.error) return json(res, 404, { error: img.error });
+    res.writeHead(200, {
+      'Content-Type': img.type,
+      'Content-Length': img.body.length,
+      'Cache-Control': 'private, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox"
+    });
+    return res.end(img.body);
   }
 
   return json(res, 404, { error: 'not found' });

@@ -283,26 +283,142 @@
     }
   }
 
+  // ---- 上傳：貼上、拖進頁面、/file ------------------------------------------
+  // opts.uploadFiles(files, how) 由 app.js 提供：上傳每個檔案，回傳各自的 Markdown
+  // （圖片 ![…](img:)、PDF、其他附件 […](file:)）。
+  function hasFiles(e) {
+    const t = e.dataTransfer && e.dataTransfer.types;
+    return !!t && Array.prototype.indexOf.call(t, 'Files') >= 0;
+  }
+  function note(msg) { if (opts.toast) opts.toast(msg); }
+
   function onPaste(e) {
     const items = (e.clipboardData || {}).items;
-    if (!items || !opts.uploadImage || !ed) return;
+    if (!items || !opts.uploadFiles || !ed) return;
+    const files = [];
     for (let k = 0; k < items.length; k++) {
-      const it = items[k];
-      if (it.kind !== 'file' || it.type.indexOf('image/') !== 0) continue;
-      e.preventDefault();
-      // 上傳要走一趟網路，插入位置在貼上的當下就記住
-      const session = ed, s = ta.selectionStart, en = ta.selectionEnd;
-      opts.uploadImage(it.getAsFile()).then(function (id) {
-        if (ed !== session) { if (opts.toast) opts.toast('圖片已上傳，但已經離開那個區塊，沒有插入'); return; }
-        const v = ta.value, ins = '![貼上的圖片](img:' + id + ')';
-        ta.value = v.slice(0, s) + ins + v.slice(en);
-        ta.setSelectionRange(s + ins.length, s + ins.length);
-        onInput();
-      }).catch(function (err) {
-        if (opts.toast) opts.toast('圖片上傳失敗：' + (err && err.message || err));
-      });
+      if (items[k].kind !== 'file') continue;
+      const f = items[k].getAsFile();
+      if (f) files.push(f);
+    }
+    if (!files.length) return;
+    e.preventDefault();
+    uploadAtCaret(files, { pasted: true });
+  }
+
+  function upload(files, how) {
+    if (opts.onStatus) opts.onStatus('上傳中…');
+    return opts.uploadFiles(files, how || {}).then(function (mds) {
+      if (opts.onStatus) opts.onStatus('');
+      return mds;
+    }, function (err) {
+      if (opts.onStatus) opts.onStatus('');
+      note('上傳失敗：' + (err && err.message || err));
+      return null;
+    });
+  }
+
+  // 上傳要走一趟網路，插入位置（哪個區塊、游標在哪）在動作的當下就記住
+  function uploadAtCaret(files, how) {
+    const session = ed, s = ta.selectionStart, en = ta.selectionEnd;
+    upload(files, how).then(function (mds) {
+      if (!mds) return;
+      if (ed !== session) { note('檔案已上傳，但已經離開那個區塊，沒有插入'); return; }
+      placeAtCaret(mds, s, en);
+    });
+  }
+
+  // 貼上一張圖不該看到一行 ![…](img:…)：圖片、PDF、附件各自成一個區塊，放好就排版出來，
+  // 游標接到它下面繼續寫。游標在清單、引言、表格那一行時，拆開會弄壞結構，就原地插入後結束
+  // 編輯（一樣馬上看得到圖）；在還沒關起來的程式碼區塊裡則照原樣插入文字、繼續編輯。
+  function placeAtCaret(mds, s, en) {
+    const v = ta.value;
+    const before = v.slice(0, s), after = v.slice(en);
+    if (unclosed(before)) {
+      const ins = mds.join('\n');
+      ta.value = before + ins + after;
+      ta.setSelectionRange(s + ins.length, s + ins.length);
+      onInput();
       return;
     }
+    const nl = after.indexOf('\n');
+    const line = before.slice(before.lastIndexOf('\n') + 1) + (nl < 0 ? after : after.slice(0, nl));
+    if (/^\s*(?:[-*+]|\d+[.)])\s|^\s*>|^\s*\|/.test(line)) {
+      ta.value = before + mds.join(' ') + after;
+      onInput();
+      finish();
+      return;
+    }
+    const head = before.replace(/\s+$/, ''), tail = after.replace(/^\s+/, '');
+    const parts = head ? [head, ''] : [];
+    mds.forEach(function (m, i) { if (i) parts.push(''); parts.push(m); });
+    const lastMd = parts.length - 1;
+    if (tail) parts.push('', tail);
+    ta.value = parts.join('\n');
+    onInput();
+    const at = ed.line0 + ed.prefix.length + lastMd;   // 最後一個檔案那一行在原始碼裡的行號
+    finish();
+    let k = -1;
+    for (let i = 0; i < blocks.length; i++) if (blocks[i].start <= at) k = i;
+    if (tail && blocks[k + 1]) startEdit(k + 1, 'start');
+    else startNew(k);
+  }
+
+  // 插在原始碼第 line 行之後（0 = 最前面），前後補空行讓它自成區塊。
+  function insertAfterLine(line, mds) {
+    const ls = splitLines(src);
+    const n = Math.max(0, Math.min(line, ls.length));
+    const ins = [];
+    if (n > 0 && ls[n - 1].trim() !== '') ins.push('');
+    mds.forEach(function (m, i) { if (i) ins.push(''); ins.push(m); });
+    if (n < ls.length && ls[n].trim() !== '') ins.push('');
+    Array.prototype.splice.apply(ls, [n, 0].concat(ins));
+    src = ls.join('\n');
+    if (opts.onChange) opts.onChange(src);
+    render();
+  }
+
+  function onDragOver(e) {
+    if (readOnly || !opts.uploadFiles || !hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    scroller.classList.add('drag-over');
+  }
+  function onDragLeave(e) {
+    if (!e.relatedTarget || !scroller.contains(e.relatedTarget)) scroller.classList.remove('drag-over');
+  }
+  function onDrop(e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    scroller.classList.remove('drag-over');
+    if (readOnly || !opts.uploadFiles) return;
+    const files = Array.prototype.slice.call(e.dataTransfer.files || []);
+    if (!files.length) return;
+    if (ed && e.target === ta) { uploadAtCaret(files); return; }
+    // 放在滑鼠底下那個區塊後面，落在頁面空白處就接在最後。上傳回來時內容可能已經變了
+    // （協作者、還在打字），所以記下那個區塊的文字，回來再找一次位置，不信任舊行號。
+    const el = e.target.closest && e.target.closest('.blog-block[data-i]');
+    const b = el ? blocks[Number(el.getAttribute('data-i'))] : null;
+    const anchor = b ? blockText(b).split('\n') : null;
+    upload(files).then(function (mds) {
+      if (!mds) return;
+      if (ed) finish();
+      const ls = splitLines(src);
+      let line = ls.length;
+      if (anchor) {
+        const hit = findLines(ls, anchor, b.start - 1);
+        if (hit >= 0) line = hit + anchor.length;
+      }
+      insertAfterLine(line, mds);
+    });
+  }
+
+  // 從外面來的上傳（/file 指令）：正在編輯就放在游標處，否則接在文章最後。
+  function insertFiles(files) {
+    if (readOnly || !opts.uploadFiles || !files || !files.length) return;
+    if (ed) { uploadAtCaret(files); return; }
+    upload(files).then(function (mds) { if (mds) insertAfterLine(splitLines(src).length, mds); });
   }
 
   // 點在排版後的哪個字上 → 原始碼裡的位置：依序比對非空白字元，原始碼裡多出來的語法符號
@@ -510,7 +626,24 @@
     ta.addEventListener('compositionend', function () { composing = false; });
     root.addEventListener('click', onClick);
     scroller.addEventListener('click', onScrollerClick);
+    scroller.addEventListener('dragover', onDragOver);
+    scroller.addEventListener('dragleave', onDragLeave);
+    scroller.addEventListener('drop', onDrop);
     document.addEventListener('mousedown', onDocDown, true);
+    // PDF「檔案｜預覽」、連結「連結｜預覽卡片」的切換鈕（js/embedswitch.js）。正在編輯的區塊是
+    // textarea，不會出現；改寫走 update()，開在別的區塊的編輯框原地保留。
+    if (global.EmbedSwitch) EmbedSwitch.attach(root, {
+      rangeOf: function (el) {
+        const b = el.closest('.blog-block[data-i]');
+        if (!b || b.classList.contains('editing')) return null;
+        const blk = blocks[Number(b.getAttribute('data-i'))];
+        return blk ? { start: blk.start, end: blk.end } : null;
+      },
+      getText: function () { return src; },
+      setText: function (t) { update(t); if (opts.onChange) opts.onChange(src); },
+      canEdit: function () { return !readOnly; },
+      onPdfPref: function (v) { if (opts.onPdfPref) opts.onPdfPref(v); }
+    });
     global.addEventListener('resize', function () { if (ed) autosize(); });
   }
 
@@ -553,6 +686,7 @@
     hide: hide,
     reset: detach,
     update: update,
+    insertFiles: insertFiles,
     isEditing: function () { return !!ed; }
   };
 })(window);

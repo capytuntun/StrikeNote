@@ -408,6 +408,100 @@
     return '<nav class="md-toc">' + renderList(roots, 'md-toc-top') + '</nav>';
   }
 
+  // ---- Link preview card: {%preview https://… %} -------------------------
+  // HackMD-style embed syntax, alone on its own line. The markup is only the
+  // frame showing the address; resolveLinkCards() asks the server for the page's
+  // title / description / image afterwards and fills it in, and a site that
+  // cannot be read simply leaves the address showing.
+  const linkCardExtension = {
+    name: 'linkcard',
+    level: 'block',
+    start: function (src) {
+      const m = src.match(/^ {0,3}\{%\s*preview\s/im);
+      return m ? m.index : undefined;
+    },
+    tokenizer: function (src) {
+      const m = /^ {0,3}\{%\s*preview\s+(https?:\/\/\S+?)\s*%\}[ \t]*(?:\n+|$)/i.exec(src);
+      if (m) return { type: 'linkcard', raw: m[0], url: m[1] };
+    },
+    renderer: function (token) {
+      const url = escapeHtml(token.url);
+      let host = token.url;
+      try { host = new URL(token.url).hostname; } catch (e) { /* keep the raw text */ }
+      return '<div class="link-card" data-link-url="' + url + '">' +
+        '<a class="link-card-a" href="' + url + '" target="_blank" rel="noopener noreferrer">' +
+        '<span class="link-card-body">' +
+        '<span class="link-card-title">' + escapeHtml(host) + '</span>' +
+        '<span class="link-card-desc"></span>' +
+        '<span class="link-card-url"><span class="link-card-icon"></span>' +
+        '<span class="link-card-href">' + url + '</span></span>' +
+        '</span><span class="link-card-thumb"></span></a></div>\n';
+    }
+  };
+
+  // Attachment link: [名稱](file:<id>) for any upload, [名稱](pdf:<id>) for a PDF
+  // shown as a file rather than embedded. resolveImages() points the href at the
+  // file; the server decides whether it opens (PDF) or downloads (anything else).
+  function fileChipHTML(kind, id, labelHtml) {
+    const plain = String(labelHtml || '').replace(/<[^>]*>/g, '').trim();
+    const ext = kind === 'pdf' ? 'PDF' : ((/\.([a-z0-9]{1,8})$/i.exec(plain) || [])[1] || '').toUpperCase();
+    return '<a class="file-chip" href="#" data-file-id="' + escapeHtml(id) + '" data-file-kind="' + kind + '"' +
+      (kind === 'pdf' ? ' target="_blank" rel="noopener"' : '') +
+      ' title="' + (kind === 'pdf' ? '在新分頁開啟' : '下載這個檔案') + '">' +
+      (global.Icons ? Icons.svg(kind === 'pdf' ? 'file-text' : 'paperclip') : '') +
+      '<span class="file-chip-name">' + (labelHtml || escapeHtml(id)) + '</span>' +
+      (ext ? '<span class="file-chip-type">' + escapeHtml(ext) + '</span>' : '') + '</a>';
+  }
+
+  // ---- Switching how an embed is shown (js/embedswitch.js) ----------------
+  // Rewrites the first matching construct within source lines start..end
+  // (1-based, fenced code skipped) and returns the new text, or the same text
+  // when nothing there matches:
+  //   { type:'pdf', id, to:'file'|'preview' }  ![名稱](pdf:id) <-> [名稱](pdf:id)
+  //   { type:'link' }                          a line that is just a link -> {%preview url %}
+  //   { type:'card', title }                   {%preview url %} -> [title](url), or <url>
+  const FENCE_LINE = /^\s{0,3}(?:```|~~~)/;
+  function standaloneLinkUrl(line) {
+    const s = line.trim();
+    let m = /^\[[^\]\n]*\]\((https?:\/\/\S+?)(?:\s+"[^"\n]*")?\)$/.exec(s);
+    if (m) return m[1];
+    m = /^<(https?:\/\/[^\s>]+)>$/.exec(s);
+    if (m) return m[1];
+    m = /^(https?:\/\/\S+)$/.exec(s);
+    return m ? m[1] : null;
+  }
+  function switchEmbed(text, start, end, spec) {
+    const lines = String(text).split('\n');
+    let fence = false;
+    for (let i = 0; i < start - 1 && i < lines.length; i++) if (FENCE_LINE.test(lines[i])) fence = !fence;
+    for (let i = Math.max(0, start - 1); i < end && i < lines.length; i++) {
+      if (FENCE_LINE.test(lines[i])) { fence = !fence; continue; }
+      if (fence) continue;
+      const line = lines[i];
+      const indent = line.match(/^\s*/)[0];
+      let next = null, m;
+      if (spec.type === 'pdf') {
+        const id = String(spec.id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        m = new RegExp('(!?)\\[([^\\]\\n]*)\\]\\(pdf:' + id + '\\)').exec(line);
+        if (m && (m[1] === '!') === (spec.to === 'file')) {
+          next = line.slice(0, m.index) + (spec.to === 'file' ? '' : '!') + '[' + m[2] + '](pdf:' + spec.id + ')' +
+            line.slice(m.index + m[0].length);
+        }
+      } else if (spec.type === 'card') {
+        m = /^\s*\{%\s*preview\s+(\S+?)\s*%\}\s*$/i.exec(line);
+        if (m) {
+          const title = String(spec.title || '').replace(/[\[\]\n]/g, '').trim();
+          next = indent + (title ? '[' + title + '](' + m[1] + ')' : '<' + m[1] + '>');
+        }
+      } else if (spec.type === 'link') {
+        const url = standaloneLinkUrl(line);
+        if (url) next = indent + '{%preview ' + url + ' %}';
+      }
+      if (next != null) { lines[i] = next; return lines.join('\n'); }
+    }
+    return String(text);
+  }
+
   // ---- Custom renderer overrides -----------------------------------------
   const usedSlugs = {};
   const renderer = {
@@ -514,7 +608,15 @@
       return '<div class="code-block' + kaliCls + '">' + tools +
         '<pre><code class="hljs language-' + escapeHtml(lang || 'plaintext') + '">' + out + '</code></pre></div>\n';
     },
+    // [名稱](file:<id>) / [名稱](pdf:<id>) are attachment links. Returning false
+    // hands every other link back to marked's own renderer.
+    link: function (href, title, text) {
+      const m = /^(pdf|file):([\w.-]+)$/.exec(href || '');
+      return m ? fileChipHTML(m[1], m[2], text) : false;
+    },
     image: function (href, title, text) {
+      // ![名稱](file:<id>): a non-image file has nothing to embed, so it is the same link.
+      if (href && href.indexOf('file:') === 0) return fileChipHTML('file', href.slice(5), escapeHtml(text || ''));
       // Embedded PDF attachment: ![檔名](pdf:<id>) → same-origin <iframe> viewer.
       if (href && href.indexOf('pdf:') === 0) {
         const id = href.slice(4);
@@ -552,7 +654,7 @@
   // report as "the preview merged my lines".
   marked.use({
     gfm: true, breaks: true,
-    extensions: [tocExtension, riskExtension, calloutExtension, containerExtension, wikiLinkExtension, hashtagExtension],
+    extensions: [tocExtension, riskExtension, calloutExtension, containerExtension, linkCardExtension, wikiLinkExtension, hashtagExtension],
     renderer: renderer
   });
 
@@ -609,7 +711,8 @@
         'data-risk', 'data-finding', 'type', 'target', 'data-pdf-id', 'loading', 'data-tag',
         'data-toc',    // [toc] 的展開鈕
         'data-task',   // 待辦清單：勾選框在文件中的序號，用來回寫原始 markdown
-        'data-mindmap', 'data-i'],   // 心智圖：原始大綱文字，以及節點索引
+        'data-mindmap', 'data-i',    // 心智圖：原始大綱文字，以及節點索引
+        'data-link-url', 'data-file-id', 'data-file-kind', 'rel'],   // 網址預覽卡片、附件連結
       ADD_TAGS: ['input', 'button', 'iframe'] // checkboxes, annotate button, PDF embed
     });
   }
@@ -654,6 +757,55 @@
       const id = a.getAttribute('data-pdf-id');
       if (id) a.href = '/api/images/' + encodeURIComponent(id);
     });
+    // Attachment links go straight to the file too: a PDF opens in a new tab, and
+    // the server sends anything else as a download under its uploaded name.
+    container.querySelectorAll('a.file-chip[data-file-id]').forEach(function (a) {
+      const id = a.getAttribute('data-file-id');
+      if (id) a.href = '/api/images/' + encodeURIComponent(id);
+    });
+    resolveLinkCards(container);
+  }
+
+  // Fill {%preview url %} cards from /api/link-preview. Resolves once every card
+  // in `container` has its answer (the PDF export waits for that); a card whose
+  // site cannot be read keeps showing its address. Every value is set with
+  // textContent — it is another site's text.
+  function previewImageUrl(u) { return '/api/link-preview/image?url=' + encodeURIComponent(u); }
+  function resolveLinkCards(container) {
+    const cards = Array.prototype.slice.call(container.querySelectorAll('.link-card[data-link-url]'));
+    if (!cards.length || !global.Store || !Store.getLinkPreview) return Promise.resolve();
+    return Promise.all(cards.map(function (card) {
+      if (card.classList.contains('is-loaded') || card.classList.contains('is-failed')) return null;
+      return Store.getLinkPreview(card.getAttribute('data-link-url')).then(function (info) {
+        if (!info || info.error) { card.classList.add('is-failed'); return; }
+        card.classList.add('is-loaded');
+        const put = function (sel, v) { const n = card.querySelector(sel); if (n && v) n.textContent = v; };
+        put('.link-card-title', info.title);
+        put('.link-card-desc', info.description);
+        let host = '';
+        try { host = new URL(info.finalUrl || info.url).hostname; } catch (e) { host = ''; }
+        put('.link-card-href', info.siteName && host ? info.siteName + ' · ' + host : (info.siteName || host));
+        const thumb = card.querySelector('.link-card-thumb');
+        if (thumb && info.image && !thumb.firstChild) {
+          const img = document.createElement('img');
+          img.alt = '';
+          img.loading = 'lazy';
+          img.setAttribute('data-link-img', '1');
+          img.addEventListener('error', function () { img.remove(); });
+          img.src = previewImageUrl(info.image);
+          thumb.appendChild(img);
+        }
+        const icon = card.querySelector('.link-card-icon');
+        if (icon && info.icon && !icon.firstChild) {
+          const ic = document.createElement('img');
+          ic.alt = '';
+          ic.setAttribute('data-link-img', '1');
+          ic.addEventListener('error', function () { ic.remove(); });
+          ic.src = previewImageUrl(info.icon);
+          icon.appendChild(ic);
+        }
+      });
+    }));
   }
 
   // Build TOC entries from rendered container: [{level, text, id}]
@@ -669,7 +821,7 @@
   // Convert data-img-id images inside a cloned node to data: URLs (for PDF export)
   function inlineImagesAsDataURL(container) {
     const imgs = Array.prototype.slice.call(container.querySelectorAll('img[data-img-id]'));
-    return Promise.all(imgs.map(function (img) {
+    const stored = Promise.all(imgs.map(function (img) {
       const id = img.getAttribute('data-img-id');
       return Store.getImageBlob(id).then(function (blob) {
         if (!blob) return;
@@ -679,6 +831,25 @@
         });
       });
     }));
+    // Link cards: wait for their text, then inline the proxied thumbnail and icon —
+    // the print document and the published book (CSP default-src 'none') cannot
+    // fetch them later.
+    const cards = resolveLinkCards(container).then(function () {
+      const pics = Array.prototype.slice.call(container.querySelectorAll('img[data-link-img]'));
+      return Promise.all(pics.map(function (img) {
+        return fetch(img.getAttribute('src'), { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.blob() : null; })
+          .then(function (blob) {
+            if (!blob) { img.remove(); return; }
+            return blobToDataURL(blob).then(function (durl) {
+              img.setAttribute('src', durl);
+              img.removeAttribute('data-link-img');
+            });
+          })
+          .catch(function () { img.remove(); });
+      }));
+    });
+    return Promise.all([stored, cards]);
   }
 
   function blobToDataURL(blob) {
@@ -701,6 +872,8 @@
     extractLinks: extractLinks,
     extractTags: extractTags,
     invalidateImage: invalidateImage,
+    resolveLinkCards: resolveLinkCards,
+    switchEmbed: switchEmbed,
     extractFindings: extractFindings,
     riskLevels: RISK_LEVELS
   };

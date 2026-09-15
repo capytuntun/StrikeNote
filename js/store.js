@@ -21,6 +21,8 @@
 
   // Image bytes fetched this session, keyed by id (see getImageBlob).
   const imgBlobCache = {};
+  // Link preview answers, keyed by URL (see getLinkPreview).
+  const linkPreviewCache = {};
 
   function delay(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
@@ -105,6 +107,13 @@
       return req('PUT', '/api/folders/' + folder.id, body).then(r => r.folder);
     },
     deleteFolder: function (id) { return req('DELETE', '/api/folders/' + id); },
+    // Manual order (js/sorting.js). `ids` is one whole level — the children of
+    // `parentId` — in its new order; a listed row from elsewhere moves in.
+    saveOrder: function (kind, parentId, ids) {
+      const body = { parentId: parentId || null };
+      body[kind === 'folder' ? 'folders' : 'notes'] = ids;
+      return req('PUT', '/api/order', body);
+    },
 
     // Notes
     getNotes: function () { return req('GET', '/api/notes').then(r => r.notes); },
@@ -225,10 +234,24 @@
       return req('POST', '/api/notes/' + noteId + '/cursor', { pos: pos, end: end });
     },
 
-    // Images
-    putImage: function (blob) {
-      return req('POST', '/api/images', blob, { raw: true, headers: { 'Content-Type': blob.type || 'image/png' } })
-        .then(r => r.id);
+    // Uploads — images, PDFs and any other file. `name` travels percent-encoded
+    // in X-File-Name (a header cannot hold CJK); `type` overrides a missing or
+    // wrong blob.type (a .pdf the OS did not label).
+    putImage: function (blob, name, type) {
+      const h = { 'Content-Type': type || blob.type || 'application/octet-stream' };
+      const n = name != null ? name : blob.name;
+      if (n) h['X-File-Name'] = encodeURIComponent(String(n));
+      return req('POST', '/api/images', blob, { raw: true, headers: h }).then(r => r.id);
+    },
+    // Title / description / image for a {%preview url %} card, fetched once per
+    // URL for the session. Never rejects: a site that cannot be read resolves to
+    // { error }, and the card just keeps showing the address.
+    getLinkPreview: function (url) {
+      if (!linkPreviewCache[url]) {
+        linkPreviewCache[url] = req('GET', '/api/link-preview?url=' + encodeURIComponent(url))
+          .catch(function (e) { delete linkPreviewCache[url]; return { error: e && e.message || 'error' }; });
+      }
+      return linkPreviewCache[url];
     },
     // Image bytes, cached by id for this session. The on-screen preview
     // (MD.resolveImages) and the PDF export (MD.inlineImagesAsDataURL) both go

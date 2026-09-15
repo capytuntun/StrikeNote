@@ -55,7 +55,7 @@
   const KIND_OF = {
     heading: 'heading', hr: 'hr', table: 'table', code: 'code', list: 'list',
     paragraph: 'para', blockquote: 'quote', callout: 'quote', container: 'quote',
-    risk: 'quote', toc: 'toc', html: 'html'
+    risk: 'quote', linkcard: 'quote', toc: 'toc', html: 'html'
   };
 
   function countNewlines(s, from, to) {
@@ -190,7 +190,7 @@
     hr: 'hr',
     table: 'table',
     code: '.code-block, .mindmap-block',
-    quote: 'blockquote, .callout, .finding',
+    quote: 'blockquote, .callout, .finding, .link-card',
     list: 'ul, ol',
     para: 'p, a.page-card',
     toc: '.md-toc'

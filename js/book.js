@@ -341,6 +341,14 @@
           note.textContent = '（附件「' + name + '」未包含在出版檔中）';
           n.replaceWith(note);
         });
+        // 附件連結（[名稱](file:…)、[名稱](pdf:…)）在出版檔裡也點不開：只留名稱
+        work.querySelectorAll('.file-chip').forEach(function (n) {
+          const name = (n.querySelector('.file-chip-name') || {}).textContent || '附件';
+          const span = document.createElement('span');
+          span.className = 'book-attachment-inline';
+          span.textContent = '（附件「' + name + '」未包含在出版檔中）';
+          n.replaceWith(span);
+        });
         work.querySelectorAll('.img-annotate, .code-copy, .mm-edit-btn, .mm-hint').forEach(function (n) { n.remove(); });
         // 出版檔沒有編輯器可以回寫，勾選框只是一份紀錄——留著勾選狀態，但不讓讀者
         // 以為自己改得動它。

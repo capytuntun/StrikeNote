@@ -50,6 +50,7 @@ function shapeNote(row, perm, ownerName, viaSite) {
     meta: row.meta ? JSON.parse(row.meta) : undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    position: row.position == null ? null : Number(row.position),   // manual order in its folder
     rev: row.rev || 0,                // revision counter for live collaboration
     perm: perm,                       // so the UI can go read-only
     sharedBy: ownerName || undefined,
@@ -628,7 +629,10 @@ async function purgeExpiredTrash() {
 // ---------------- folders ----------------
 // Folders are private structure; they are never shared.
 function shapeFolder(r) {
-  return { id: r.id, name: r.name, parentId: r.parent_id, createdAt: r.created_at, isBook: !!r.is_book };
+  return {
+    id: r.id, name: r.name, parentId: r.parent_id, createdAt: r.created_at, isBook: !!r.is_book,
+    position: r.position == null ? null : Number(r.position)
+  };
 }
 async function listFolders(user) {
   return (await q.foldersOf.all(user.id)).map(shapeFolder);
@@ -655,10 +659,48 @@ async function deleteFolder(user, id) {
   return { ok: true };
 }
 
+// ---------------- manual order ----------------
+// One whole level — the children of `parentId` — in its new order:
+// { parentId, notes: [ids] } or { parentId, folders: [ids] }. Every listed row
+// gets its position and is moved into that level, so a drag from one folder into
+// another is a single request. Like a folder move in updateNote this is
+// bookkeeping: no rev, no broadcast, no updated_at. Rows that are not the
+// caller's, or are in the trash, are skipped by the statements themselves.
+const ORDER_MAX = 5000;
+async function saveOrder(user, body) {
+  const b = body || {};
+  const parentId = b.parentId ? String(b.parentId) : null;
+  const notes = Array.isArray(b.notes) ? b.notes.map(String) : [];
+  const folders = Array.isArray(b.folders) ? b.folders.map(String) : [];
+  if (notes.length + folders.length > ORDER_MAX) return { status: 400, error: '一次排序的項目太多' };
+  if (parentId) {
+    const parent = await q.folderById.get(parentId);
+    if (!parent || parent.owner_id !== user.id) return { status: 404 };
+  }
+  if (folders.length && parentId) {
+    // Neither the notes nor the folders table has a foreign key on its parent,
+    // so nothing else stops a folder being filed inside its own subtree, where it
+    // and everything in it would vanish from every view.
+    const all = new Map((await q.foldersOf.all(user.id)).map(f => [f.id, f]));
+    const moving = new Set(folders);
+    for (let cur = parentId, hops = 0; cur && hops < 10000; hops++) {
+      if (moving.has(cur)) return { status: 400, error: '資料夾不能移到自己的子資料夾裡' };
+      const f = all.get(cur);
+      cur = f ? f.parent_id : null;
+    }
+  }
+  await tx(async function () {
+    for (let i = 0; i < notes.length; i++) await q.orderNote.run(parentId, i + 1, notes[i], user.id);
+    for (let i = 0; i < folders.length; i++) await q.orderFolder.run(parentId, i + 1, folders[i], user.id);
+  }, 'saveOrder');
+  return { ok: true };
+}
+
 // ---------------- images ----------------
-async function createImage(user, mime, buf) {
+async function createImage(user, mime, buf, name) {
   const id = uid('img');
-  await q.insertImage.run(id, user.id, String(mime || 'image/png'), buf, null, null, Date.now());
+  await q.insertImage.run(id, user.id, String(mime || 'application/octet-stream'), name || null,
+    buf, null, null, Date.now());
   return { id: id };
 }
 
@@ -666,11 +708,12 @@ async function getImage(user, id) {
   const row = await q.imageById.get(id);
   if (!row) return null;
   if (row.owner_id === user.id) return row;
-  // Not the owner: only serve it if some note the caller can read embeds it,
-  // either as an image (img:) or as a PDF attachment (pdf:).
-  const visible = (await q.imageVisibleTo.get('img:' + id, user.id, user.id))
-              || (await q.imageVisibleTo.get('pdf:' + id, user.id, user.id));
-  return visible ? row : null;
+  // Not the owner: only serve it if some note the caller can read references it,
+  // as an image (img:), a PDF (pdf:) or any other attachment (file:).
+  for (const scheme of ['img:', 'pdf:', 'file:']) {
+    if (await q.imageVisibleTo.get(scheme + id, user.id, user.id)) return row;
+  }
+  return null;
 }
 
 async function saveImage(user, id, body) {
@@ -701,13 +744,15 @@ async function deleteImage(user, id) {
 // hiddenNotes but never named, and its alt text is never used as the name.
 // The caller's own trashed notes are listed (flagged) since the owner can
 // restore them; anyone else's trash is invisible, so it counts as hidden.
-const MEDIA_REF = /(?:!\[([^\]\n]*)\]\()?(?:img|pdf):([\w.-]+)/g;
+// `!?` because a PDF shown as a file link and every other attachment are written
+// without the image bang: [名稱](pdf:…) / [名稱](file:…).
+const MEDIA_REF = /(?:!?\[([^\]\n]*)\]\()?(?:img|pdf|file):([\w.-]+)/g;
 
 async function listImages(user) {
   const images = (await q.imagesOf.all(user.id)).map(r => ({
     id: r.id, mime: r.mime, createdAt: Number(r.created_at),
     bytes: Number(r.bytes) + Number(r.original_bytes), annotated: !!r.annotated,
-    name: '', notes: [], hiddenNotes: 0
+    name: '', fileName: r.name || '', notes: [], hiddenNotes: 0
   }));
   if (!images.length) return { images: images };
   const byId = new Map(images.map(i => [i.id, i]));
@@ -738,8 +783,14 @@ async function listImages(user) {
       });
     }
   }
-  // Live notes first, then the most recently edited.
-  for (const img of images) img.notes.sort((a, b) => (a.trashed - b.trashed) || (b.updatedAt - a.updatedAt));
+  for (const img of images) {
+    // Live notes first, then the most recently edited.
+    img.notes.sort((a, b) => (a.trashed - b.trashed) || (b.updatedAt - a.updatedAt));
+    // An image keeps the alt text someone gave it in a note ("螢幕截圖" says more
+    // than "image.png"); any other file is known by the name it was uploaded with.
+    const media = /^image\//.test(img.mime) || img.mime === 'application/pdf';
+    if (img.fileName && (!img.name || !media)) img.name = img.fileName;
+  }
   return { images: images };
 }
 
@@ -905,6 +956,6 @@ module.exports = {
   restoreBookVersion, deleteBookVersion,
   listBookLinks, createBookLink, updateBookLink, deleteBookLink, publicBook,
   listFolders, createFolder, updateFolder, deleteFolder,
-  createImage, getImage, saveImage, deleteImage, listImages,
+  createImage, getImage, saveImage, deleteImage, listImages, saveOrder,
   listShares, addShare, removeShare
 };

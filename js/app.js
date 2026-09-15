@@ -117,16 +117,17 @@
   }
 
   // ---- Tree rendering ----------------------------------------------------
-  function childFolders(parentId) {
+  // 排序方式與手動順序跟首頁共用（js/sorting.js）
+  function childFolders(parentId, mode) {
     return state.folders
       .filter(function (f) { return (f.parentId || null) === parentId; })
-      .sort(function (a, b) { return a.name.localeCompare(b.name, 'zh-Hant'); });
+      .sort(function (a, b) { return Sorting.compareFolders(a, b, mode); });
   }
   const isMine = n => !n.perm || n.perm === 'owner';
-  function childNotes(folderId) {
+  function childNotes(folderId, mode) {
     return state.notes
       .filter(function (n) { return isMine(n) && (n.folderId || null) === folderId; })
-      .sort(function (a, b) { return b.updatedAt - a.updatedAt; });
+      .sort(function (a, b) { return Sorting.compareNotes(a, b, mode); });
   }
   // Notes shared with me live in their owner's folder tree, not mine, so they get
   // their own section instead of being filed under a folder id I do not have.
@@ -213,7 +214,7 @@
     row.addEventListener('dblclick', function (e) { e.stopPropagation(); startRename('folder', folder.id); });
     row.addEventListener('contextmenu', function (e) { showCtx(e, 'folder', folder); });
     attachDrag(row, 'folder', folder.id);
-    attachDrop(row, folder.id);
+    attachDrop(row, 'folder', folder);
     wrap.appendChild(row);
 
     if (open) {
@@ -256,6 +257,7 @@
     row.addEventListener('click', function () { openNote(note.id); });
     row.addEventListener('contextmenu', function (e) { showCtx(e, 'note', note); });
     attachDrag(row, 'note', note.id);
+    if (mine) attachDrop(row, 'note', note);
     return row;
   }
 
@@ -265,33 +267,62 @@
     renderTree();
   }
 
-  // ---- Drag & drop (move items between folders) --------------------------
-  let dragData = null;
+  // ---- Drag & drop: move into a folder, or reorder -----------------------
+  // A folder row answers in thirds: the top and bottom thirds put a dragged
+  // folder before / after it among its siblings, the middle moves it inside
+  // (a dragged note always goes inside). A note row answers in halves, for notes
+  // only. The empty tree area below the rows is the top level (see below).
+  let dragData = null;   // { type: 'note' | 'folder', ids: [...] }
   function attachDrag(el, type, id) {
     el.addEventListener('dragstart', function (e) {
-      dragData = { type: type, id: id };
+      // Dragging one of several ticked notes takes them all, as on the dashboard.
+      const ids = type === 'note' && selected.has(id) && selected.size > 1 ? Array.from(selected) : [id];
+      dragData = { type: type, ids: ids };
       e.dataTransfer.effectAllowed = 'move';
       e.stopPropagation();
     });
     el.addEventListener('dragend', function () { dragData = null; clearDropHints(); });
   }
-  function attachDrop(el, folderId) {
+  function dropZone(e, row, rowType) {
+    if (!dragData) return null;
+    const r = row.getBoundingClientRect();
+    const y = (e.clientY - r.top) / r.height;
+    if (rowType === 'folder') {
+      if (dragData.type === 'note') return 'into';
+      return y < 0.3 ? 'before' : y > 0.7 ? 'after' : 'into';
+    }
+    if (dragData.type !== 'note') return null;
+    return y < 0.5 ? 'before' : 'after';
+  }
+  function attachDrop(el, rowType, item) {
     el.addEventListener('dragover', function (e) {
-      if (!dragData) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      el.classList.add('drop-target');
-    });
-    el.addEventListener('dragleave', function () { el.classList.remove('drop-target'); });
-    el.addEventListener('drop', function (e) {
+      const zone = dropZone(e, el, rowType);
+      if (!zone) return;
       e.preventDefault();
       e.stopPropagation();
-      el.classList.remove('drop-target');
-      moveItem(dragData, folderId);
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.toggle('drop-target', zone === 'into');
+      el.classList.toggle('drop-before', zone === 'before');
+      el.classList.toggle('drop-after', zone === 'after');
+    });
+    el.addEventListener('dragleave', function () { el.classList.remove('drop-target', 'drop-before', 'drop-after'); });
+    el.addEventListener('drop', function (e) {
+      const zone = dropZone(e, el, rowType);
+      if (!zone) return;
+      e.preventDefault();
+      e.stopPropagation();
+      clearDropHints();
+      const data = dragData;
+      dragData = null;
+      if (zone === 'into') moveItem(data, item.id);
+      else if (rowType === 'folder') placeItems('folder', data.ids, item.parentId || null, item.id, zone === 'after');
+      else placeItems('note', data.ids, item.folderId || null, item.id, zone === 'after');
     });
   }
   function clearDropHints() {
-    document.querySelectorAll('.drop-target').forEach(function (n) { n.classList.remove('drop-target'); });
+    document.querySelectorAll('.drop-target, .drop-before, .drop-after').forEach(function (n) {
+      n.classList.remove('drop-target', 'drop-before', 'drop-after');
+    });
   }
 
   function isDescendant(folderId, maybeAncestorId) {
@@ -307,20 +338,74 @@
 
   function moveItem(data, targetFolderId) {
     if (!data) return;
+    const target = targetFolderId || null;
     if (data.type === 'note') {
-      const n = state.notes.find(function (x) { return x.id === data.id; });
-      if (n && (n.folderId || null) !== (targetFolderId || null)) {
-        n.folderId = targetFolderId || null;
-        Store.updateNote(n).then(refreshViews);
-      }
+      const ids = data.ids.filter(function (id) {
+        const n = state.notes.find(function (x) { return x.id === id; });
+        return n && isMine(n) && (n.folderId || null) !== target;
+      });
+      if (ids.length) placeItems('note', ids, target, null, true);
     } else if (data.type === 'folder') {
-      if (data.id === targetFolderId || isDescendant(targetFolderId, data.id)) return; // no cycles
-      const f = state.folders.find(function (x) { return x.id === data.id; });
-      if (f && (f.parentId || null) !== (targetFolderId || null)) {
-        f.parentId = targetFolderId || null;
-        Store.updateFolder(f).then(refreshViews);
-      }
+      const id = data.ids[0];
+      const f = state.folders.find(function (x) { return x.id === id; });
+      if (f && (f.parentId || null) !== target) placeItems('folder', [id], target, null, true);
     }
+  }
+
+  // Put `ids` into level `parentId`, before / after `targetId`, or at the end when
+  // targetId is null (a plain move into a folder). The level's whole new order is
+  // applied locally at once and saved in one request (PUT /api/order), which also
+  // moves anything that came from another folder.
+  //
+  // Dropping between two rows only means something in manual order, so doing it
+  // in another mode switches to manual, starting from the order that was on
+  // screen. A plain move keeps the mode and appends to the folder's *manual*
+  // order, so an arrangement made earlier is not replaced by whatever order
+  // happens to be showing.
+  function placeItems(kind, ids, parentId, targetId, after) {
+    const target = parentId || null;
+    const mine = ids.filter(function (id) {
+      if (kind === 'folder') return state.folders.some(function (f) { return f.id === id; });
+      const n = state.notes.find(function (x) { return x.id === id; });
+      return n && isMine(n);
+    });
+    if (!mine.length) return;
+    if (kind === 'folder' && mine.some(function (id) { return id === target || isDescendant(target, id); })) {
+      toast('資料夾不能移到自己或自己的子資料夾裡');
+      return;
+    }
+    const reordering = targetId != null;
+    const toManual = reordering && Sorting.mode() !== 'manual';
+    const base = reordering ? Sorting.mode() : 'manual';
+    const level = (kind === 'note' ? childNotes(target, base) : childFolders(target, base))
+      .map(function (x) { return x.id; });
+    const order = Sorting.reorder(level, mine, targetId, after);
+    const items = kind === 'note' ? state.notes : state.folders;
+    order.forEach(function (id, i) {
+      const item = items.find(function (x) { return x.id === id; });
+      if (!item) return;
+      item.position = i + 1;
+      if (kind === 'folder') { item.parentId = target; return; }
+      item.folderId = target;
+      // The open note is its own object until its first save swaps it into
+      // state.notes, and its autosave sends folderId: without this the next save
+      // would move the note straight back.
+      if (state.current && state.current.id === id && state.current !== item) {
+        state.current.folderId = target;
+        state.current.position = item.position;
+      }
+    });
+    if (kind === 'note' && mine.length > 1) { selected.clear(); updateBatchBar(); }
+    if (kind === 'note' && state.current && mine.indexOf(state.current.id) >= 0) updateNotePath(state.current);
+    if (toManual) {
+      Sorting.set('manual');   // its onChange listener refreshes the views
+      toast('已切換為手動排序');
+    } else {
+      refreshViews();
+    }
+    return Store.saveOrder(kind, target, order).catch(function (e) {
+      toast('順序沒有存到伺服器：' + (e && e.message || e));
+    });
   }
 
   // ---- 批次選取：勾選筆記後整批移動到資料夾或刪除 -----------------------
@@ -397,35 +482,33 @@
       onPin: pinNote, onRename: renameNoteTo, onMenu: showNoteMenu,
       onFolderMenu: showFolderMenu, onFolderRename: renameFolderTo,
       onMoveNotes: moveNotesToFolder,
+      // 拖拉排序（js/sorting.js）：筆記列之間、資料夾方框之間，順序跟側邊欄共用
+      onReorderNotes: function (ids, folderId, targetId, after) { placeItems('note', ids, folderId, targetId, after); },
+      onPlaceFolders: function (ids, parentId, targetId, after) { placeItems('folder', ids, parentId, targetId, after); },
+      onSortMenu: showSortMenu,
       // 使用者點進／點出資料夾：留一筆 #folder/<id>（回到所有筆記則是空的 hash）
       onNavigate: function (folderId) { setHash(folderId ? 'folder/' + encodeURIComponent(folderId) : ''); },
       selection: selectionApi
     };
   }
 
-  // Drag-and-drop filing from the dashboard. `folderId` may be null, meaning the
-  // top level. Notes already in the target are skipped so dropping a mixed
-  // selection does not generate pointless saves.
+  // Drag-and-drop filing from the dashboard (onto a folder tile or a crumb).
+  // `folderId` may be null, meaning the top level. Notes already there are
+  // skipped; the rest are appended to that folder's order in one request.
   function moveNotesToFolder(ids, folderId) {
     const target = folderId || null;
-    const moving = ids
-      .map(function (id) { return state.notes.find(function (n) { return n.id === id; }); })
-      .filter(function (n) { return n && isMine(n) && (n.folderId || null) !== target; });
-    if (!moving.length) return;
-    moving.forEach(function (n) { n.folderId = target; });
-    Promise.all(moving.map(function (n) {
-      return Store.updateNote(n).catch(function (e) {
-        toast('搬移「' + (n.title || '未命名筆記') + '」失敗：' + e.message);
-      });
-    })).then(function () {
-      selected.clear();
-      updateBatchBar();
-      refreshViews();
-      const where = target
-        ? '「' + ((state.folders.find(function (f) { return f.id === target; }) || {}).name || '資料夾') + '」'
-        : '最上層';
-      toast('已搬移 ' + moving.length + ' 篇筆記到' + where);
+    const moving = ids.filter(function (id) {
+      const n = state.notes.find(function (x) { return x.id === id; });
+      return n && isMine(n) && (n.folderId || null) !== target;
     });
+    if (!moving.length) return;
+    selected.clear();
+    updateBatchBar();
+    placeItems('note', moving, target, null, true);
+    const where = target
+      ? '「' + ((state.folders.find(function (f) { return f.id === target; }) || {}).name || '資料夾') + '」'
+      : '最上層';
+    toast('已搬移 ' + moving.length + ' 篇筆記到' + where);
   }
 
   // 往上找：這個資料夾本身或它的某個上層是否也被勾了
@@ -1779,37 +1862,21 @@
     danceCapybara();
   }
 
-  // ---- Paste image -------------------------------------------------------
-  // Store.putImage() is a network round-trip, so the caret must be captured
-  // synchronously at paste time — reading editorEl.selectionStart only once the
-  // upload resolves inserts wherever the user's cursor has drifted to *by then*
-  // (they kept typing elsewhere, or switched notes entirely), not where they pasted.
+  // ---- Paste files -------------------------------------------------------
+  // Any file on the clipboard — a screenshot, a copied PDF or other file — is
+  // uploaded and inserted where the caret was at paste time (see insertFiles).
   function handlePaste(e) {
     const items = (e.clipboardData || {}).items;
     if (!items) return;
+    const files = [];
     for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      if (it.kind === 'file' && it.type.indexOf('image/') === 0) {
-        e.preventDefault();
-        const blob = it.getAsFile();
-        const at = { s: editorEl.selectionStart, e: editorEl.selectionEnd, noteId: state.currentId };
-        // 貼上完全沒有任何提示，畫面在上傳完成前跟卡住看起來一樣——一張未壓縮的全螢幕
-        // 截圖可能好幾 MB，家用網路上傳頻寬通常遠低於下載，傳個十幾二十秒很正常。
-        // 拖曳圖片、插入 PDF（下面的 insertImageFiles／insertPdfFile）都已經有這行狀態列
-        // 訊息，只有貼上這條路漏掉，加上失敗時也沒有任何錯誤訊息。
-        statusSave.textContent = '上傳圖片中…';
-        Store.putImage(blob).then(function (id) {
-          if (!insertAtCursor('\n![貼上的圖片](img:' + id + ')\n', at)) return;
-          if (editorEl._hlRefresh) editorEl._hlRefresh();
-          scheduleSave();
-          renderPreviewNow();
-        }).catch(function (err) {
-          if (at.noteId === state.currentId) statusSave.textContent = '⚠ 圖片上傳失敗：' + (err && err.message || err);
-          toast('圖片上傳失敗：' + (err && err.message || err));
-        });
-        return;
-      }
+      if (items[i].kind !== 'file') continue;
+      const f = items[i].getAsFile();
+      if (f) files.push(f);
     }
+    if (!files.length) return;
+    e.preventDefault();
+    insertFiles(files, { pasted: true });
   }
 
   // `at` (optional): { s, e, noteId } captured before an async upload, so the
@@ -1819,7 +1886,7 @@
   // into whatever note now happens to be open.
   function insertAtCursor(text, at) {
     if (at && at.noteId !== state.currentId) {
-      toast('圖片已上傳，但筆記已切換，未插入內容');
+      toast('檔案已上傳，但筆記已切換，未插入內容');
       return false;
     }
     const start = at ? at.s : editorEl.selectionStart, end = at ? at.e : editorEl.selectionEnd;
@@ -1901,7 +1968,7 @@
         return insertBlockAround('| 欄位 A | 欄位 B |\n| --- | --- |\n| 內容 | 內容 |', '', '');
       case 'hr': return insertBlockAround('---', '', '');
       case 'template': return showTemplatePicker($('#edit-toolbar button[data-fmt="template"]'));
-      case 'pdf': return pickPdf();
+      case 'file': return pickFiles(editorEl);
     }
   }
 
@@ -2033,28 +2100,67 @@
     setRange(nv, cur, cur);
   }
 
-  // ---- Embed PDF ---------------------------------------------------------
-  function insertPdfFile(file) {
-    if (!file || file.type !== 'application/pdf') return false;
-    statusSave.textContent = '上傳 PDF…';
+  // ---- Upload files ------------------------------------------------------
+  // Every way a file gets into a note — paste, drop, the toolbar's 檔案 button,
+  // /file, and the same three in Blog — ends up here. Each file is uploaded and
+  // turned into the Markdown that shows it: an image is embedded, a PDF is either
+  // embedded or a file link (the last choice made with the 檔案｜預覽 switch),
+  // and anything else is a download link.
+  function cleanName(name, fallback) {
+    return String(name || '').replace(/[\[\]\r\n]/g, '').trim() || fallback;
+  }
+  function uploadFiles(files, how) {
+    const list = Array.prototype.slice.call(files || []);
+    const pasted = !!(how && how.pasted);
+    return Promise.all(list.map(function (f) {
+      const isPdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name || '');
+      const isImg = !isPdf && (f.type || '').indexOf('image/') === 0;
+      return Store.putImage(f, f.name, isPdf ? 'application/pdf' : undefined).then(function (id) {
+        if (isImg) {
+          // A clipboard screenshot is always called image.png — that says nothing.
+          const alt = pasted ? '貼上的圖片' : cleanName(f.name, '圖片').replace(/\.[^.]+$/, '');
+          return '![' + alt + '](img:' + id + ')';
+        }
+        const name = cleanName(f.name, isPdf ? 'PDF' : '附件');
+        if (isPdf) {
+          return LS.get('pdfDisplay', 'preview') === 'file'
+            ? '[' + name + '](pdf:' + id + ')'
+            : '![' + name.replace(/\.pdf$/i, '') + '](pdf:' + id + ')';
+        }
+        return '[' + name + '](file:' + id + ')';
+      });
+    }));
+  }
+  // The caret is captured when the files arrive, not when the upload finishes:
+  // by then the user may have typed elsewhere or opened another note.
+  function insertFiles(files, how) {
+    const list = Array.prototype.slice.call(files || []);
+    if (!list.length) return false;
     const at = { s: editorEl.selectionStart, e: editorEl.selectionEnd, noteId: state.currentId };
-    Store.putImage(file).then(function (id) {
-      const name = (file.name || 'PDF').replace(/\.pdf$/i, '');
+    // 大檔案或慢速上傳時畫面看起來跟卡住一樣，狀態列一定要有字
+    statusSave.textContent = list.length > 1 ? '上傳 ' + list.length + ' 個檔案中…' : '上傳檔案中…';
+    uploadFiles(list, how).then(function (mds) {
       if (at.noteId === state.currentId) editorEl.focus();
-      if (!insertAtCursor('\n![' + name + '](pdf:' + id + ')\n', at)) return;
+      if (!insertAtCursor('\n' + mds.join('\n') + '\n', at)) return;
       if (editorEl._hlRefresh) editorEl._hlRefresh();
       scheduleSave();
       renderPreviewNow();
-    }).catch(function (e) { statusSave.textContent = '⚠ PDF 上傳失敗：' + (e && e.message || e); });
+    }).catch(function (err) {
+      if (at.noteId === state.currentId) statusSave.textContent = '⚠ 上傳失敗：' + (err && err.message || err);
+      toast('上傳失敗：' + (err && err.message || err));
+    });
     return true;
   }
-  function pickPdf() {
+  // 檔案挑選器。target 是觸發它的編輯框：#editor，或 Blog 裡正在編輯的那一格。
+  function pickFiles(target) {
     const inp = document.createElement('input');
     inp.type = 'file';
-    inp.accept = 'application/pdf';
+    inp.multiple = true;
     inp.addEventListener('change', function () {
-      const f = inp.files && inp.files[0];
-      if (f) insertPdfFile(f);
+      const files = Array.prototype.slice.call(inp.files || []);
+      if (!files.length) return;
+      if (state.mode === 'blog' && target !== editorEl && window.BlogMode) BlogMode.insertFiles(files);
+      else insertFiles(files);
     });
     inp.click();
   }
@@ -2155,43 +2261,13 @@
     return t && Array.prototype.indexOf.call(t, 'Files') >= 0;
   }
 
-  function insertImageFiles(files) {
-    const images = Array.prototype.filter.call(files, function (f) {
-      return f.type && f.type.indexOf('image/') === 0;
-    });
-    if (!images.length) return false;
-    statusSave.textContent = '插入圖片…';
-    const at = { s: editorEl.selectionStart, e: editorEl.selectionEnd, noteId: state.currentId };
-    Promise.all(images.map(function (f) {
-      return Store.putImage(f).then(function (id) {
-        const name = (f.name || '圖片').replace(/\.[^.]+$/, '');
-        return '![' + name + '](img:' + id + ')';
-      });
-    })).then(function (mds) {
-      if (at.noteId === state.currentId) editorEl.focus();
-      if (!insertAtCursor('\n' + mds.join('\n') + '\n', at)) return;
-      if (editorEl._hlRefresh) editorEl._hlRefresh();
-      scheduleSave();
-      renderPreviewNow();
-    }).catch(function (err) {
-      if (at.noteId === state.currentId) statusSave.textContent = '⚠ 圖片上傳失敗：' + (err && err.message || err);
-    });
-    return true;
-  }
-
   function handleEditorDrop(e) {
     if (!hasFiles(e)) return;      // let internal tree drags fall through
     e.preventDefault();
     e.stopPropagation();
     editorEl.classList.remove('drag-over');
     const files = e.dataTransfer.files;
-    if (files && files.length) {
-      insertImageFiles(files);     // handles the image/* ones
-      // …and any PDFs dropped alongside them
-      Array.prototype.forEach.call(files, function (f) {
-        if (f.type === 'application/pdf') insertPdfFile(f);
-      });
-    }
+    if (files && files.length) insertFiles(files);
   }
 
   // ---- 筆記列動作（儀表板）／連結／提示 -----------------------------------
@@ -2349,8 +2425,10 @@
     ctxMenu.innerHTML = '';
     actions.forEach(function (a) {
       const b = document.createElement('button');
-      b.className = 'ctx-item' + (a.danger ? ' danger' : '');
-      b.innerHTML = (a.icon ? Icons.svg(a.icon) : '') + '<span>' + MD.escapeHtml(a.label) + '</span>';
+      b.className = 'ctx-item' + (a.danger ? ' danger' : '') + (a.current ? ' is-current' : '');
+      // icon: '' keeps the label aligned with siblings that do have an icon (a check mark)
+      const lead = a.icon ? Icons.svg(a.icon) : (a.icon === '' ? '<span class="ctx-spacer"></span>' : '');
+      b.innerHTML = lead + '<span>' + MD.escapeHtml(a.label) + '</span>';
       b.addEventListener('click', function () { hideCtx(); a.fn(); });
       ctxMenu.appendChild(b);
     });
@@ -2362,6 +2440,24 @@
     ctxMenu.style.top = top + 'px';
   }
   function hideCtx() { ctxMenu.hidden = true; }
+
+  // 排序方式選單（側邊欄的排序鈕、首頁清單右上角共用）
+  function showSortMenu(anchor) {
+    const r = anchor.getBoundingClientRect();
+    const now = Sorting.mode();
+    openMenuAt(r.right, r.bottom + 4, Sorting.MODES.map(function (m) {
+      return {
+        icon: m.key === now ? 'check' : '', current: m.key === now, label: m.label,
+        fn: function () { Sorting.set(m.key); }
+      };
+    }), { alignRight: true });
+  }
+  function updateSortBtn() {
+    const b = $('#sort-btn');
+    if (!b) return;
+    b.classList.toggle('is-auto', Sorting.mode() !== 'manual');
+    b.title = '排序方式：' + Sorting.info().label + (Sorting.mode() === 'manual' ? '（可直接拖拉調整）' : '');
+  }
   document.addEventListener('click', hideCtx);
   document.addEventListener('scroll', hideCtx, true);
 
@@ -3015,13 +3111,42 @@
     if (window.BlogMode) BlogMode.init($('#blog-doc'), {
       onChange: onBlogChange,
       onSave: saveNow,
-      uploadImage: function (blob) { return Store.putImage(blob); },
+      uploadFiles: uploadFiles,
+      onStatus: function (msg) { if (msg) statusSave.textContent = msg; },
+      onPdfPref: function (v) { LS.set('pdfDisplay', v); },
       onNoteLink: handleNoteLink,
       onTag: browseTag,
       onAnnotate: openAnnotator,
       copyText: copyText,
       toast: toast
     });
+    // 預覽裡 PDF 的「檔案｜預覽」、獨佔一行的網址的「連結｜預覽卡片」（js/embedswitch.js）。
+    // 改寫範圍是 LineSync 標在預覽元素上的原始碼行號。
+    if (window.EmbedSwitch) EmbedSwitch.attach(previewEl, {
+      rangeOf: function (el) {
+        const hit = el.closest('[data-line0]');
+        if (!hit || !previewEl.contains(hit)) return null;
+        const start = parseInt(hit.getAttribute('data-line0'), 10);
+        return { start: start, end: parseInt(hit.getAttribute('data-line1'), 10) || start };
+      },
+      getText: function () { return editorEl.value; },
+      setText: applyEditorText,
+      canEdit: function () { return !!state.current && state.current.perm !== 'read'; },
+      onPdfPref: function (v) { LS.set('pdfDisplay', v); }
+    });
+    // /file、/upload：打開檔案挑選器（MD 編輯器與 Blog 的編輯框都掛著 Editor）
+    if (window.Editor && Editor.setActionSnippets) Editor.setActionSnippets([
+      { cmd: 'file', hint: '上傳檔案（圖片、PDF、任何附件）', action: pickFiles },
+      { cmd: 'upload', hint: '上傳檔案（圖片、PDF、任何附件）', action: pickFiles }
+    ]);
+    // 排序方式：側邊欄搜尋框旁的鈕；換了就重畫側邊欄與首頁
+    const sortBtn = $('#sort-btn');
+    if (sortBtn) sortBtn.addEventListener('click', function (e) {
+      e.stopPropagation();   // 不然這次點擊冒泡到 document 的 hideCtx，選單開了馬上又關掉
+      showSortMenu(sortBtn);
+    });
+    Sorting.onChange(function () { updateSortBtn(); refreshViews(); });
+    updateSortBtn();
     $('#new-folder').addEventListener('click', function () { newFolder(null); });
     // 「新增」選單：筆記／證照範本／資安院報告／成效報告合併成一顆鈕，點開再選。
     // 選項按鈕保留原本的 id，各自的 click 處理（下面）完全不用改；選項自己的
@@ -3175,7 +3300,7 @@
     const trashBtn = $('#trash-open-btn');
     if (trashBtn) trashBtn.addEventListener('click', function () { openTrash(); });
 
-    // 圖片管理：上傳過的圖片／PDF，每個用在哪些筆記、哪些沒有筆記在用
+    // 檔案管理：上傳過的圖片／PDF／其他檔案，每個用在哪些筆記、哪些沒有筆記在用
     const imagesBtn = $('#images-open-btn');
     if (imagesBtn) imagesBtn.addEventListener('click', function () {
       if (!window.ImageLib) return;

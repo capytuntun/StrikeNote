@@ -233,8 +233,25 @@ async function main() {
   ok(r.status === 200 && sha(r.data) === sha(pdf) && r.headers.get('content-type') === 'application/pdf', '20 MB pdf round-trips');
   cur = (await call(admin, 'GET', '/api/notes/' + noteIds[2])).data.note;
   await call(admin, 'PUT', '/api/notes/' + noteIds[2], { title: cur.title, content: cur.content + '\n\n![report](pdf:' + pdfId + ')', baseContent: cur.content, folderId: fid });
-  r = await call(admin, 'POST', '/api/images', Buffer.from('nope'), { raw: true, contentType: 'text/plain' });
-  ok(r.status === 400, 'text/plain upload rejected', r.status);
+  // Any file type is accepted, but only inert types are served back as themselves:
+  // an uploaded page or script must never run as HTML or JavaScript on this origin.
+  r = await call(admin, 'POST', '/api/images', Buffer.from('<script>alert(1)</script>'),
+    { raw: true, contentType: 'text/html', headers: { 'X-File-Name': encodeURIComponent('報告 附件.html') } });
+  ok(r.status === 200 && r.data.id, 'any file type uploads (text/html)', r.data);
+  const fileId = r.data.id;
+  r = await call(admin, 'GET', '/api/images/' + fileId, undefined, { buffer: true });
+  const disp = r.headers.get('content-disposition') || '';
+  ok(r.status === 200 && r.headers.get('content-type') === 'application/octet-stream' && /^attachment;/.test(disp) &&
+     disp.includes(encodeURIComponent('報告 附件.html')) && (r.headers.get('content-security-policy') || '').includes('sandbox'),
+    'a non-media upload comes back as a sandboxed attachment under its own name', { type: r.headers.get('content-type'), disp });
+  r = await call(admin, 'GET', '/api/images/' + fileId + '/original', undefined, { buffer: true });
+  ok(r.status === 200 && r.headers.get('content-type') === 'application/octet-stream', '/original is an attachment too', r.headers.get('content-type'));
+  r = await call(bob, 'GET', '/api/images/' + fileId, undefined, { buffer: true });
+  ok(r.status === 404, 'attachment hidden until a readable note links it', r.status);
+  cur = (await call(admin, 'GET', '/api/notes/' + noteIds[0])).data.note;
+  await call(admin, 'PUT', '/api/notes/' + noteIds[0], { title: cur.title, content: cur.content + '\n\n[報告 附件.html](file:' + fileId + ')', baseContent: cur.content, folderId: fid });
+  r = await call(bob, 'GET', '/api/images/' + fileId, undefined, { buffer: true });
+  ok(r.status === 200, 'attachment visible once a shared note links it with file:', r.status);
 
   section('book versions');
   r = await call(admin, 'POST', '/api/books/' + fid + '/versions', { title: '專案 A', label: '初版', chapters: noteIds });
@@ -377,6 +394,8 @@ async function main() {
       'a note the owner cannot read is counted, not named, and its alt text is not used', foreign);
     ok(entry(imgId).notes.some(n => n.id === noteIds[0]) && entry(pdfId).name === 'report' && entry(pdfId).mime === 'application/pdf',
       'earlier image and PDF resolve to their notes', { img: entry(imgId), pdf: entry(pdfId) });
+    ok(entry(fileId).name === '報告 附件.html' && entry(fileId).notes.some(n => n.id === noteIds[0]),
+      'an attachment is listed under its uploaded name, used by the note that links it', entry(fileId));
     r = await call(bob, 'GET', '/api/images');
     ok(r.status === 200 && !r.data.images.some(i => i.id === usedId || i.id === foreignRefId), "bob's library does not list admin's uploads", r.data);
     await call(bob, 'DELETE', '/api/images/' + unusedId);
@@ -386,6 +405,61 @@ async function main() {
     ok(r.status === 200, 'owner deletes an unused image');
     r = await call(admin, 'GET', '/api/images');
     ok(!r.data.images.some(i => i.id === unusedId), 'deleted image left the library');
+  }
+
+  if (!OLD) {
+    section('manual order');
+    r = await call(admin, 'POST', '/api/folders', { name: '排序測試' });
+    const ordFolder = r.data.folder.id;
+    const ord = [];
+    for (const t of ['甲', '乙', '丙']) {
+      r = await call(admin, 'POST', '/api/notes', { title: t, content: t, folderId: ordFolder });
+      ord.push(r.data.note);
+    }
+    r = await call(admin, 'POST', '/api/notes', { title: '頂層', content: 'top' });
+    const topNote = r.data.note;
+    ok(topNote.position === null, 'a new note has no manual position', topNote.position);
+    r = await call(admin, 'PUT', '/api/order', { parentId: ordFolder, notes: [ord[2].id, ord[0].id, topNote.id, ord[1].id] });
+    ok(r.status === 200, "save one level's order", r.data);
+    r = await call(admin, 'GET', '/api/notes');
+    const noteRow = id => r.data.notes.find(n => n.id === id) || {};
+    ok(noteRow(ord[2].id).position === 1 && noteRow(ord[0].id).position === 2 && noteRow(ord[1].id).position === 4,
+      'positions follow the saved order', [ord[2], ord[0], ord[1]].map(n => noteRow(n.id).position));
+    ok(noteRow(topNote.id).folderId === ordFolder && noteRow(topNote.id).position === 3,
+      'a row listed from another level moves in', noteRow(topNote.id));
+    ok(noteRow(ord[0].id).rev === ord[0].rev && noteRow(ord[0].id).updatedAt === ord[0].updatedAt,
+      'ordering is bookkeeping: no rev bump, no updatedAt change', noteRow(ord[0].id));
+    r = await call(bob, 'PUT', '/api/order', { parentId: null, notes: [ord[0].id] });
+    const strangerStatus = r.status;
+    r = await call(admin, 'GET', '/api/notes');
+    ok(strangerStatus === 200 && noteRow(ord[0].id).folderId === ordFolder && noteRow(ord[0].id).position === 2,
+      "a stranger's order request leaves someone else's notes alone", noteRow(ord[0].id));
+    r = await call(bob, 'PUT', '/api/order', { parentId: ordFolder, notes: [] });
+    ok(r.status === 404, "cannot order into someone else's folder", r.status);
+    r = await call(admin, 'POST', '/api/folders', { name: '子', parentId: ordFolder });
+    const ordKid = r.data.folder.id;
+    r = await call(admin, 'PUT', '/api/order', { parentId: ordKid, folders: [ordFolder] });
+    ok(r.status === 400, 'a folder cannot be moved into its own subfolder', r.status);
+    r = await call(admin, 'PUT', '/api/order', { parentId: null, folders: [ordFolder, fid] });
+    ok(r.status === 200, 'folder order at the top level', r.data);
+    r = await call(admin, 'GET', '/api/folders');
+    const folderPos = id => (r.data.folders.find(f => f.id === id) || {}).position;
+    ok(folderPos(ordFolder) === 1 && folderPos(fid) === 2 && folderPos(ordKid) === null, 'folder positions stored',
+      [folderPos(ordFolder), folderPos(fid), folderPos(ordKid)]);
+
+    section('link preview guard');
+    const refused = ['http://127.0.0.1:8090/', 'http://localhost/', 'http://localhost./', 'http://[::1]/',
+      'http://[::ffff:127.0.0.1]/', 'http://[::ffff:7f00:1]/', 'http://169.254.169.254/latest/meta-data/',
+      'http://10.1.2.3/', 'http://192.168.1.1/', 'http://0x7f000001/', 'http://2130706433/',
+      'http://example.com:8080/', 'https://user:pw@example.com/', 'file:///etc/passwd', 'javascript:alert(1)'];
+    for (const u of refused) {
+      r = await call(admin, 'GET', '/api/link-preview?url=' + encodeURIComponent(u));
+      ok(r.status === 200 && r.data && r.data.error && !r.data.title, 'link preview refuses ' + u, r.data);
+    }
+    r = await call(admin, 'GET', '/api/link-preview/image?url=' + encodeURIComponent('http://127.0.0.1:8090/logo.png'), undefined, { buffer: true });
+    ok(r.status === 404, 'preview image proxy refuses loopback', r.status);
+    r = await call(anon, 'GET', '/api/link-preview?url=' + encodeURIComponent('https://example.com/'));
+    ok(r.status === 401, 'link preview needs a session', r.status);
   }
 
   section('SSE');

@@ -2541,13 +2541,18 @@ select.sec-info-input { cursor: pointer; }
 
 /* ---------- 待辦清單（Notion 式，可直接在預覽裡勾選）---------- */
 /* 待辦不是項目符號清單，所以拿掉圓點；縮排靠 flex 對齊，勾選框才跟文字對得起來。 */
+/* 勾選框絕對定位在左邊、文字用 padding 內縮，不用 flex：預覽裡 linesync.js 會把項目文字連同
+   勾選框包進 <span class="sync-ln">，flex 只剩一個子元素，長項目折行的第二行就跑到勾選框
+   底下。現在不管勾選框包在第幾層，折行都對齊文字。 */
 .markdown-body li.task-item {
   list-style: none;
+  position: relative;
   margin-left: -1.4em;
-  display: flex; align-items: flex-start; gap: 8px;
+  padding-left: 23px;
 }
-.markdown-body li.task-item > .task-check {
-  margin: .28em 0 0; flex: 0 0 auto;
+.markdown-body li.task-item .task-check {
+  position: absolute; left: 0; top: .42em;
+  margin: 0;
   width: 15px; height: 15px;
   accent-color: var(--accent);
   cursor: pointer;
@@ -3279,3 +3284,78 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
   background: var(--bg); color: var(--text); font-family: inherit; font-size: var(--fs-sm);
 }
 .share-expiry:focus { border-color: var(--accent); outline: none; }
+
+/* ---------- 網址預覽卡片（{%preview url %}；標題／摘要／縮圖由 server/linkpreview.js 抓）---------- */
+.markdown-body .link-card { margin: 0 0 14px; }
+.markdown-body a.link-card-a {
+  display: flex; align-items: stretch; min-height: 86px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); text-decoration: none;
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+.markdown-body a.link-card-a:hover { background: var(--row-hover); border-color: var(--border-strong); text-decoration: none; }
+.link-card-body {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px;
+  padding: 11px 14px; line-height: 1.5;
+}
+.link-card-title { font-size: var(--fs-base); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-card:not(.is-loaded) .link-card-title { color: var(--text-dim); }
+.link-card-desc {
+  font-size: var(--fs-sm); color: var(--text-dim);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.link-card-desc:empty { display: none; }
+.link-card-url { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-xs); color: var(--text-faint); }
+.link-card-href { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-card-icon { display: inline-flex; flex: 0 0 auto; }
+.link-card-icon:empty { display: none; }
+.link-card-icon img { width: 14px; height: 14px; object-fit: contain; }
+.link-card-thumb { flex: 0 0 180px; max-width: 34%; overflow: hidden; border-left: 1px solid var(--border); background: var(--bg-2); line-height: 0; }
+.link-card-thumb:empty { display: none; }
+.markdown-body .link-card-thumb img { width: 100%; height: 100%; max-width: none; object-fit: cover; }
+
+/* ---------- 附件連結（[名稱](file:…)、只顯示成檔案的 [名稱](pdf:…)）---------- */
+.markdown-body a.file-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; vertical-align: middle;
+  padding: 2px 9px; margin: 2px 0; border: 1px solid var(--border); background: var(--bg-2);
+  color: var(--text); font-size: var(--fs-sm); line-height: 1.6; text-decoration: none;
+}
+.markdown-body a.file-chip:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+.file-chip .ic-svg { width: 14px; height: 14px; flex: 0 0 auto; color: var(--text-dim); }
+.file-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-chip-type { flex: 0 0 auto; font-size: var(--fs-micro); font-weight: 700; letter-spacing: .04em; color: var(--text-faint); }
+
+/* ---------- 顯示方式切換（js/embedswitch.js）：滑到 PDF／附件／連結／卡片上才出現 ---------- */
+.embed-switch {
+  position: fixed; z-index: 900; display: flex; gap: 2px; padding: 2px;
+  background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+}
+.embed-switch button {
+  padding: 3px 10px; border: 0; background: transparent; color: var(--text-dim);
+  font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
+}
+.embed-switch button:hover { background: var(--row-hover); color: var(--text); }
+.embed-switch button.on { background: var(--accent); color: #fff; cursor: default; }
+
+/* ---------- 排序（js/sorting.js）：側邊欄搜尋框旁的排序鈕、首頁右上的排序選單、拖拉插入線 ---------- */
+.search-row { display: flex; align-items: center; gap: 6px; margin: 0 12px 8px; }
+.search-row .search-box { flex: 1 1 auto; min-width: 0; margin: 0; }
+.sidebar-actions + .search-row { margin-top: 12px; }
+.sort-btn { flex: 0 0 auto; }
+.sort-btn.is-auto { color: var(--accent); }
+.ctx-item.is-current { color: var(--accent); font-weight: 600; }
+.ctx-item.is-current .ic-svg { color: var(--accent); }
+.ctx-item .ctx-spacer { display: inline-block; width: 16px; flex: 0 0 auto; }
+.tree-row.drop-before { box-shadow: inset 0 2px 0 0 var(--accent); }
+.tree-row.drop-after { box-shadow: inset 0 -2px 0 0 var(--accent); }
+.dash-note-wrap.drop-before { box-shadow: inset 0 2px 0 0 var(--accent); }
+.dash-note-wrap.drop-after { box-shadow: inset 0 -2px 0 0 var(--accent); }
+.dash-folder-tile.drop-before { box-shadow: inset 3px 0 0 0 var(--accent); }
+.dash-folder-tile.drop-after { box-shadow: inset -3px 0 0 0 var(--accent); }
+.dash-sort-btn { flex: 0 0 auto; font-size: var(--fs-sm); padding: 7px 12px; }
+.dash-sort-btn .dash-sort-mode { font-weight: 600; color: var(--text); }
+
+/* Blog：把檔案拖進頁面時標出落點範圍 */
+.blog-scroll.drag-over .blog-doc { outline: 2px dashed var(--accent); outline-offset: 8px; }
+
+/* 檔案管理：標題列的上傳鈕 */
+.imglib-upload { flex: 0 0 auto; padding: 5px 10px; margin-right: 6px; font-size: var(--fs-sm); }

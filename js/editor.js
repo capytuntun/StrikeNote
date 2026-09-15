@@ -83,7 +83,11 @@
   // template called "Web App" is also reachable as /webapp.
   let extraSnippets = [];
   function setExtraSnippets(list) { extraSnippets = Array.isArray(list) ? list : []; }
-  function allSnippets() { return SNIPPETS.concat(extraSnippets); }
+  // Commands that do something instead of inserting text (/file opens the file
+  // picker). Each is { cmd, hint, action(textarea) }; app.js registers them.
+  let actionSnippets = [];
+  function setActionSnippets(list) { actionSnippets = Array.isArray(list) ? list : []; }
+  function allSnippets() { return SNIPPETS.concat(actionSnippets, extraSnippets); }
 
   const SNIPPETS = [
     { cmd: 'machine', hint: '新增機器區塊', text: MACHINE_SNIPPET },
@@ -114,6 +118,7 @@
     { cmd: 'h2', hint: '標題 2', text: '## $CURSOR' },
     { cmd: 'h3', hint: '標題 3', text: '### $CURSOR' },
     { cmd: 'link', hint: '連結', text: '[$CURSOR](url)' },
+    { cmd: 'preview', hint: '網址預覽卡片（標題、摘要、縮圖）', text: '{%preview $CURSOR %}' },
     { cmd: 'image', hint: '圖片', text: '![$CURSOR](url)' },
     { cmd: 'bold', hint: '粗體', text: '**$CURSOR**' },
     { cmd: 'italic', hint: '斜體', text: '*$CURSOR*' }
@@ -391,6 +396,12 @@
         const caret = ctx.from + 3 + item.label.length + 1;
         replaceRange(ctx.from, ctx.to, text, caret, caret);
       } else if (item.kind === 'slash') {
+        if (typeof item.snip.action === 'function') {
+          replaceRange(ctx.from, ctx.to, '');
+          closePopup();
+          item.snip.action(ta);
+          return;
+        }
         const t = item.snip.text;
         const idx = t.indexOf('$CURSOR');
         const clean = t.replace('$CURSOR', '');

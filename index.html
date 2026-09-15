@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=112">
+  <link rel="stylesheet" href="app.css?v=113">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -71,8 +71,8 @@
           <button data-mode="split" class="mode-btn active" title="分割檢視" data-icon="columns"><span class="btn-label">分割</span></button>
           <button data-mode="edit" class="mode-btn" title="純編輯" data-icon="pen-line"><span class="btn-label">編輯</span></button>
           <button data-mode="preview" class="mode-btn" title="純預覽" data-icon="eye"><span class="btn-label">預覽</span></button>
-          <!-- Blog mode（js/blogmode.js）：直接在排版好的頁面上改，語法和 Markdown 一樣 -->
-          <button data-mode="blog" class="mode-btn" title="Blog mode：直接在排版好的頁面上編輯，語法和 Markdown 一樣" data-icon="file-pen"><span class="btn-label">Blog mode</span></button>
+          <!-- Blog（js/blogmode.js）：直接在排版好的頁面上改，語法和 Markdown 一樣 -->
+          <button data-mode="blog" class="mode-btn" title="Blog：直接在排版好的頁面上編輯，語法和 Markdown 一樣" data-icon="file-pen"><span class="btn-label">Blog</span></button>
         </div>
         <!-- 標題連同資料夾路徑前綴（如 測試資料夾\測試筆記）包成一組，整組絕對定位
              置中在頂列正中線；輸入框寬度由 app.js 依文字量測，兩者才接得起來 -->
@@ -148,10 +148,14 @@
         </div>
         <button id="new-folder" class="btn" data-icon="folder-plus">資料夾</button>
       </div>
-      <div class="search-box">
-        <input id="search-input" type="text" placeholder="搜尋筆記…（Ctrl+K）"
-               autocomplete="off" spellcheck="false" aria-label="搜尋筆記">
-        <button id="search-clear" class="search-clear" title="清除搜尋" hidden data-icon="x"></button>
+      <div class="search-row">
+        <div class="search-box">
+          <input id="search-input" type="text" placeholder="搜尋筆記…（Ctrl+K）"
+                 autocomplete="off" spellcheck="false" aria-label="搜尋筆記">
+          <button id="search-clear" class="search-clear" title="清除搜尋" hidden data-icon="x"></button>
+        </div>
+        <!-- 排序方式（js/sorting.js）：手動拖拉、名稱、建立時間、最近更新；首頁的清單用同一套 -->
+        <button id="sort-btn" class="icon-btn sort-btn" type="button" title="排序方式" aria-haspopup="true" data-icon="arrow-up-down"></button>
       </div>
       <!-- 批次操作列：勾選筆記或資料夾後出現，可整批移動到資料夾或刪除 -->
       <div id="batch-bar" class="batch-bar" hidden>
@@ -165,11 +169,11 @@
       <div id="tree" class="tree" data-root="true"></div>
       <div id="search-results" class="search-results" hidden></div>
       <!-- 左下角工具，一顆一列、跟側邊欄等寬：關聯圖（反向連結＋標籤的力導向圖）、
-           圖片管理（上傳過的圖片／PDF 與它們用在哪些筆記）、垃圾桶（刪除的筆記保留期內可復原）。
+           檔案管理（上傳過的圖片／PDF／其他檔案與它們用在哪些筆記）、垃圾桶（刪除的筆記保留期內可復原）。
            id 沿用原本頂端按鈕的，app.js 裡的 click 處理不用改。 -->
       <nav class="sidebar-nav" aria-label="工具">
         <button id="graph-open-btn" class="sidebar-nav-item" type="button" title="用力導向圖看所有筆記的反向連結跟標籤關聯" data-icon="graph">關聯圖</button>
-        <button id="images-open-btn" class="sidebar-nav-item" type="button" title="上傳過的圖片與 PDF：看每個用在哪些筆記，清掉沒有筆記在用的" data-icon="image">圖片管理</button>
+        <button id="images-open-btn" class="sidebar-nav-item" type="button" title="上傳過的圖片、PDF 與其他檔案：看每個用在哪些筆記，清掉沒有筆記在用的" data-icon="files">檔案管理</button>
         <button id="trash-open-btn" class="sidebar-nav-item" type="button" title="刪除的筆記會先放在這裡，保留期內可以復原或永久刪除" data-icon="trash">垃圾桶</button>
       </nav>
       <div class="sidebar-foot">
@@ -208,7 +212,7 @@
               <button data-fmt="link" title="連結" data-icon="link"></button>
               <button data-fmt="notelink" title="連結到其他筆記（也可輸入 [[ ）" data-icon="files">筆記</button>
               <button data-fmt="image" title="圖片" data-icon="image"></button>
-              <button data-fmt="pdf" title="嵌入 PDF" data-icon="file-text">PDF</button>
+              <button data-fmt="file" title="上傳檔案：圖片、PDF 或任何附件（也可以直接拖進來、貼上，或輸入 /file）" data-icon="paperclip">檔案</button>
               <button data-fmt="table" title="表格" data-icon="table"></button>
               <button data-fmt="hr" title="分隔線" data-icon="minus"></button>
               <span class="tb-sep"></span>
@@ -319,17 +323,17 @@
   <script src="vendor/hljs-dos.min.js"></script>
 
   <!-- App -->
-  <script src="js/icons.js?v=7"></script>
+  <script src="js/icons.js?v=8"></script>
   <script src="js/merge.js?v=2"></script>
   <script src="js/mindmap.js?v=3"></script>
   <script src="js/graph.js?v=3"></script>
-  <script src="js/store.js?v=53"></script>
+  <script src="js/store.js?v=54"></script>
   <script src="js/auth.js?v=46"></script>
   <script src="js/migrate.js?v=41"></script>
   <script src="js/admin.js?v=48"></script>
   <script src="js/search.js?v=41"></script>
-  <script src="js/markdown.js?v=54"></script>
-  <script src="js/editor.js?v=51"></script>
+  <script src="js/markdown.js?v=55"></script>
+  <script src="js/editor.js?v=52"></script>
   <script src="js/templates.js?v=1"></script>
   <script src="js/edithl.js?v=46"></script>
   <script src="js/table.js?v=43"></script>
@@ -337,15 +341,17 @@
   <script src="js/secreport.js?v=41"></script>
   <script src="js/seceditor.js?v=43"></script>
   <script src="js/perfreport.js?v=43"></script>
-  <script src="js/dashboard.js?v=60"></script>
+  <script src="js/sorting.js?v=1"></script>
+  <script src="js/dashboard.js?v=61"></script>
   <script src="js/annotate.js?v=42"></script>
-  <script src="js/pdf.js?v=48"></script>
-  <script src="js/book.js?v=4"></script>
+  <script src="js/pdf.js?v=49"></script>
+  <script src="js/book.js?v=5"></script>
   <script src="js/versions.js?v=2"></script>
   <script src="js/trash.js?v=2"></script>
-  <script src="js/imagelib.js?v=2"></script>
-  <script src="js/linesync.js?v=5"></script>
-  <script src="js/blogmode.js?v=2"></script>
-  <script src="js/app.js?v=90"></script>
+  <script src="js/imagelib.js?v=3"></script>
+  <script src="js/linesync.js?v=6"></script>
+  <script src="js/embedswitch.js?v=1"></script>
+  <script src="js/blogmode.js?v=3"></script>
+  <script src="js/app.js?v=91"></script>
 </body>
 </html>
