@@ -329,6 +329,20 @@
     },
     adminDeleteUser: function (id) { return req('DELETE', '/api/admin/users/' + id); },
     adminStorage: function () { return req('GET', '/api/admin/storage'); },
+    // Backup and restore (js/backup.js). The zip is downloaded by navigating a
+    // hidden frame to backupUrl; a restore is uploaded in chunks, inspected, then
+    // run as a server-side job that is polled.
+    backupUrl: function (scope) { return '/api/backup?scope=' + (scope === 'site' ? 'site' : 'mine'); },
+    backupCreateUpload: function () { return req('POST', '/api/backup/upload', {}); },
+    backupAppend: function (id, offset, blob) {
+      return req('PUT', '/api/backup/upload/' + id + '?offset=' + offset, blob,
+        { raw: true, headers: { 'Content-Type': 'application/octet-stream' } });
+    },
+    backupUploadStatus: function (id) { return req('GET', '/api/backup/upload/' + id); },
+    backupDrop: function (id) { return req('DELETE', '/api/backup/upload/' + id); },
+    backupInspect: function (id) { return req('POST', '/api/backup/upload/' + id + '/inspect', {}); },
+    backupRestore: function (id, opts) { return req('POST', '/api/backup/upload/' + id + '/restore', opts || {}); },
+    backupJob: function (jobId) { return req('GET', '/api/backup/jobs/' + jobId); },
     // Registration mode ('open' | 'invite' | 'closed') and the invite code.
     // patch: { registerMode?, inviteCode?, regenerateInvite? }
     adminGetSettings: function () { return req('GET', '/api/admin/settings'); },

@@ -510,6 +510,36 @@ const q = {
     'UPDATE notes SET folder_id = ?, position = ? WHERE id = ? AND owner_id = ? AND deleted_at IS NULL'),
   orderFolder: stmt('UPDATE folders SET parent_id = ?, position = ? WHERE id = ? AND owner_id = ?'),
 
+  // backup / restore (server/backup.js). Export walks ids and fetches rows one at
+  // a time so a big site never has every note body in memory at once; the full
+  // INSERTs restore rows exactly as they were, ids and timestamps included.
+  usersAll: stmt('SELECT * FROM users ORDER BY id'),
+  insertUserFull: stmt(`
+    INSERT INTO users (username, pw_hash, pw_salt, created_at, role, disabled, must_change_pw, last_login)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+  foldersAll: stmt('SELECT * FROM folders ORDER BY created_at'),
+  insertFolderFull: stmt(
+    'INSERT INTO folders (id, owner_id, name, parent_id, created_at, is_book, position) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+  updateFolderFull: stmt('UPDATE folders SET name = ?, parent_id = ?, is_book = ?, position = ? WHERE id = ?'),
+  noteIdsOf: stmt('SELECT id FROM notes WHERE owner_id = ? ORDER BY created_at'),
+  noteIdsAll: stmt('SELECT id FROM notes ORDER BY created_at'),
+  insertNoteFull: stmt(`
+    INSERT INTO notes (id, owner_id, folder_id, title, content, meta, created_at, updated_at, rev, access, access_perm, deleted_at, position)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+  restoreNoteFull: stmt(`
+    UPDATE notes SET folder_id = ?, title = ?, content = ?, meta = ?, updated_at = ?, rev = ?,
+      access = ?, access_perm = ?, deleted_at = ?, position = ? WHERE id = ?`),
+  versionsOfNote: stmt('SELECT * FROM note_versions WHERE note_id = ? ORDER BY id'),
+  imageIdsOf: stmt('SELECT id FROM images WHERE owner_id = ? ORDER BY created_at'),
+  imageIdsAll: stmt('SELECT id FROM images ORDER BY created_at'),
+  imageOwner: stmt('SELECT id, owner_id FROM images WHERE id = ?'),
+  updateImageFull: stmt('UPDATE images SET mime = ?, name = ?, data = ?, original = ?, shapes = ? WHERE id = ?'),
+  bookVersionsOf: stmt('SELECT * FROM book_versions WHERE owner_id = ? ORDER BY id'),
+  bookVersionsAll: stmt('SELECT * FROM book_versions ORDER BY id'),
+  bookVersionExists: stmt('SELECT id FROM book_versions WHERE folder_id = ? AND owner_id = ? AND created_at = ? LIMIT 1'),
+  linksOf: stmt('SELECT * FROM book_links WHERE owner_id = ? ORDER BY created_at'),
+  linksAll: stmt('SELECT * FROM book_links ORDER BY created_at'),
+
   // site settings (server/settings.js)
   settingsAll: stmt('SELECT k, v FROM settings'),
   setSetting: stmt(

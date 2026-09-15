@@ -189,6 +189,11 @@
     if (pwBtn) pwBtn.addEventListener('click', function () { closeMenu(); Admin.showChangePassword({}); });
     const storageBtn = $('#storage-btn');
     if (storageBtn) storageBtn.addEventListener('click', function () { closeMenu(); Admin.showStorage(); });
+    const backupBtn = $('#backup-btn');
+    if (backupBtn) backupBtn.addEventListener('click', function () {
+      closeMenu();
+      if (global.Backup) Backup.open({ isAdmin: !!(currentUser && currentUser.role === 'admin') });
+    });
 
     Store.ready().then(function (r) {
       registerMode = r.registerMode || 'invite';

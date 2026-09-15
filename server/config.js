@@ -76,6 +76,10 @@ const config = {
   // days later (hourly sweep), or sooner if the owner empties the trash.
   trashKeepDays: int(process.env.TRASH_KEEP_DAYS, 30),
 
+  // A backup zip being uploaded for restore is written to the temp directory in
+  // chunks (each under MAX_BODY_BYTES); this caps the whole file.
+  backupMaxBytes: int(process.env.BACKUP_MAX_BYTES, 4 * 1024 * 1024 * 1024),
+
   // Link preview cards ({%preview url %}) make the server fetch the linked page
   // (server/linkpreview.js). Set LINK_PREVIEW=0 on a host that must not make
   // outbound requests; cards then show just the address.

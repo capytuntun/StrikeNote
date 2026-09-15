@@ -2517,6 +2517,40 @@ select.sec-info-input { cursor: pointer; }
 .admin-reg .btn { flex: 0 0 auto; padding: 6px 12px; font-size: var(--fs-sm); }
 .admin-reg .btn:disabled { opacity: .45; cursor: default; }
 
+/* ---------- 備份與還原（js/backup.js）---------- */
+.modal.backup-modal { width: min(680px, 94vw); max-height: 90vh; overflow-y: auto; }
+.bk-sec { border: 1px solid var(--border); background: var(--bg-2); padding: 12px 14px; margin-bottom: 12px; }
+.bk-sec-head {
+  display: flex; align-items: center; gap: 7px; margin-bottom: 10px;
+  font-size: var(--fs-micro); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-faint);
+}
+.bk-sec-head .ic-svg { width: 14px; height: 14px; }
+.bk-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.bk-row + .bk-row { margin-top: 10px; }
+.bk-row .btn { flex: 0 0 auto; }
+.bk-note, .bk-scope-desc { font-size: var(--fs-sm); color: var(--text-dim); line-height: 1.55; }
+.bk-progress { margin-top: 12px; }
+.bk-progress-label { font-size: var(--fs-sm); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.bk-summary, .bk-report { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--border); background: var(--bg); }
+.bk-summary-head, .bk-report-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: var(--fs-base); }
+.bk-summary-head b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bk-summary-head span:last-child { color: var(--text-faint); font-size: var(--fs-xs); font-family: var(--mono); }
+.bk-report-head { color: var(--ok, var(--accent)); font-weight: 600; }
+.bk-props { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0 0 10px; font-size: var(--fs-sm); }
+.bk-props dt { color: var(--text-faint); white-space: nowrap; }
+.bk-props dd { margin: 0; color: var(--text); }
+.bk-opt { display: block; font-size: var(--fs-sm); line-height: 1.6; margin: 10px 0; cursor: pointer; }
+.bk-opt input { margin-right: 6px; accent-color: var(--accent); }
+.bk-opt-sub { display: block; color: var(--text-faint); font-size: var(--fs-xs); margin-left: 22px; }
+.bk-warn {
+  display: flex; align-items: flex-start; gap: 8px; margin: 8px 0 10px; padding: 9px 11px;
+  font-size: var(--fs-sm); line-height: 1.6; color: var(--warn); background: var(--warn-weak);
+}
+.bk-warn .ic-svg { flex: 0 0 auto; width: 15px; height: 15px; margin-top: 3px; }
+.bk-warnings { margin-top: 8px; font-size: var(--fs-sm); }
+.bk-warnings summary { cursor: pointer; color: var(--text-dim); }
+.bk-warnings ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-dim); max-height: 180px; overflow-y: auto; }
+
 /* ---------- Change password ---------- */
 .modal.pw-modal { width: min(390px, 92vw); }
 .pw-warn {

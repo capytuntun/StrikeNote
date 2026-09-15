@@ -547,6 +547,155 @@ async function main() {
   }
 
   if (!OLD) {
+    section('backup and restore');
+    const { ZipReader } = require('../zip');
+    const os = require('node:os'), fs = require('node:fs'), path = require('node:path');
+    const openZip = function (buf) {
+      const f = path.join(os.tmpdir(), 'smoke-' + crypto.randomBytes(4).toString('hex') + '.zip');
+      fs.writeFileSync(f, buf);
+      return { zr: ZipReader.open(f), f: f };
+    };
+    const readJson = (zr, name) => JSON.parse(zr.read(name, 1 << 26).toString('utf8'));
+    const RAW = { raw: true, contentType: 'application/octet-stream' };
+    async function uploadZip(session, buf) {
+      const c = await call(session, 'POST', '/api/backup/upload', {});
+      const id = c.data.id;
+      const half = Math.ceil(buf.length / 2);
+      let res = await call(session, 'PUT', '/api/backup/upload/' + id + '?offset=0', buf.subarray(0, half), RAW);
+      if (res.status !== 200) throw new Error('chunk 1: ' + res.status + ' ' + JSON.stringify(res.data));
+      res = await call(session, 'PUT', '/api/backup/upload/' + id + '?offset=' + half, buf.subarray(half), RAW);
+      if (res.status !== 200) throw new Error('chunk 2: ' + res.status + ' ' + JSON.stringify(res.data));
+      return id;
+    }
+    async function waitJob(session, jobId) {
+      for (let i = 0; i < 300; i++) {
+        const s = await call(session, 'GET', '/api/backup/jobs/' + jobId);
+        if (s.data && s.data.finished) return s.data;
+        await new Promise(r => setTimeout(r, 200));
+      }
+      throw new Error('restore job did not finish');
+    }
+
+    // carol: a folder, a note with an image, an edit, a labelled version, a share, a trashed note.
+    const carol = jar();
+    r = await call(carol, 'POST', '/api/register', { username: 'carol', password: 'carol-password-123', invite: '' });
+    ok(r.status === 200, 'carol registered', r.data);
+    r = await call(carol, 'POST', '/api/folders', { name: '備份資料夾' });
+    const cFolder = r.data.folder.id;
+    r = await call(carol, 'POST', '/api/images', PNG, { raw: true, contentType: 'image/png', headers: { 'X-File-Name': encodeURIComponent('截圖.png') } });
+    const cImg = r.data.id;
+    r = await call(carol, 'POST', '/api/notes', { title: '第一章', content: '# 第一章\n\n![截圖](img:' + cImg + ')\n\n內文 🚀', folderId: cFolder });
+    const cNote = r.data.note;
+    r = await call(carol, 'PUT', '/api/notes/' + cNote.id, { title: cNote.title, content: cNote.content + '\n\n第二段', baseContent: cNote.content, folderId: cFolder });
+    const cNoteV2 = r.data.note;
+    await call(carol, 'POST', '/api/notes/' + cNote.id + '/versions', { label: '備份前標記' });
+    await call(carol, 'POST', '/api/notes/' + cNote.id + '/shares', { username: BOB, perm: 'read' });
+    r = await call(carol, 'POST', '/api/notes', { title: '要丟掉的', content: 'bin' });
+    const cBin = r.data.note.id;
+    await call(carol, 'DELETE', '/api/notes/' + cBin);
+
+    r = await call(carol, 'GET', '/api/backup?scope=mine', undefined, { buffer: true });
+    ok(r.status === 200 && (r.headers.get('content-type') || '').includes('zip') &&
+       /^attachment; filename="strikenote-backup-mine-/.test(r.headers.get('content-disposition') || ''), 'download a mine backup', r.status);
+    const mineZip = r.data;
+    let z = openZip(mineZip);
+    const man = readJson(z.zr, 'manifest.json');
+    const notesIdx = readJson(z.zr, 'notes.json');
+    const filesIdx = readJson(z.zr, 'files.json');
+    ok(man.format === 'strikenote-backup' && man.scope === 'mine' && man.counts.notes === 2 && man.counts.files === 1 && man.counts.folders === 1,
+      'manifest describes the backup', man);
+    const n1 = notesIdx.find(n => n.id === cNote.id);
+    ok(n1 && n1.file === 'notes/備份資料夾/第一章.md' && z.zr.read(n1.file).toString('utf8') === cNoteV2.content,
+      'a note is a .md under its folder path', n1 && n1.file);
+    ok(n1 && n1.versions.length >= 2 && n1.versions.some(v => v.label === '備份前標記') && n1.shares.some(s => s.username === BOB),
+      'versions and shares are indexed', n1 && { versions: n1.versions.length, shares: n1.shares });
+    const nBin = notesIdx.find(n => n.id === cBin);
+    ok(nBin && nBin.deletedAt && /^notes\/_垃圾桶\//.test(nBin.file), 'a trashed note sits under _垃圾桶', nBin && nBin.file);
+    ok(filesIdx.length === 1 && filesIdx[0].file === 'files/' + cImg + '.png' && z.zr.read(filesIdx[0].file).equals(PNG) && filesIdx[0].name === '截圖.png',
+      'an upload is stored byte for byte with its name', filesIdx[0]);
+    ok(!z.zr.has('users.json'), 'a mine backup carries no accounts');
+    z.zr.close(); fs.unlinkSync(z.f);
+
+    r = await call(carol, 'GET', '/api/backup?scope=site');
+    ok(r.status === 403, 'a site backup needs an admin', r.status);
+    r = await call(admin, 'GET', '/api/backup?scope=site', undefined, { buffer: true });
+    ok(r.status === 200, 'the admin downloads a site backup', r.status);
+    const siteZip = r.data;
+    z = openZip(siteZip);
+    const users = readJson(z.zr, 'users.json');
+    const bobRow = users.find(u => u.username === BOB);
+    ok(bobRow && bobRow.pwHash && bobRow.pwSalt && readJson(z.zr, 'manifest.json').scope === 'site',
+      'a site backup carries accounts with their password hashes', bobRow && Object.keys(bobRow));
+    ok(readJson(z.zr, 'notes.json').some(n => n.owner === 'carol' && /^notes\/carol\//.test(n.file)), 'a site backup nests notes under their owner');
+    ok(z.zr.has('settings.json'), 'a site backup carries the registration settings');
+    z.zr.close(); fs.unlinkSync(z.f);
+
+    // Wipe carol (cascade) and bring her back empty: the disaster this is for.
+    const carolId = (await call(carol, 'GET', '/api/me')).data.user.id;
+    r = await call(admin, 'DELETE', '/api/admin/users/' + carolId);
+    ok(r.status === 200, 'carol is deleted with everything she had');
+    const carol2 = jar();
+    r = await call(carol2, 'POST', '/api/register', { username: 'carol', password: 'carol-password-123', invite: '' });
+    ok(r.status === 200 && (await call(carol2, 'GET', '/api/notes')).data.notes.length === 0, 'carol is back with nothing');
+
+    let upId = await uploadZip(carol2, mineZip);
+    r = await call(carol2, 'PUT', '/api/backup/upload/' + upId + '?offset=0', Buffer.from('x'), RAW);
+    ok(r.status === 409, 'a chunk at the wrong offset is refused', r.status);
+    r = await call(bob, 'POST', '/api/backup/upload/' + upId + '/inspect', {});
+    ok(r.status === 404, "another user cannot see carol's upload", r.status);
+    r = await call(carol2, 'POST', '/api/backup/upload/' + upId + '/inspect', {});
+    ok(r.status === 200 && r.data.scope === 'mine' && r.data.counts.notes === 2 && r.data.canRestore === true, 'inspect reads the manifest', r.data);
+    r = await call(carol2, 'POST', '/api/backup/upload/' + upId + '/restore', {});
+    ok(r.status === 200 && r.data.job, 'restore starts a job', r.data);
+    let job = await waitJob(carol2, r.data.job);
+    ok(!job.error && job.report.notes.created === 2 && job.report.notes.trashed === 1 && job.report.files.created === 1 &&
+       job.report.folders.created === 1 && job.report.versions.created >= 2 && job.report.shares.created === 1,
+      'restore recreates folder, notes, versions, file and share', job.error || job.report);
+    r = await call(carol2, 'GET', '/api/notes/' + cNote.id);
+    ok(r.status === 200 && r.data.note.content === cNoteV2.content && r.data.note.folderId === cFolder && r.data.note.rev === cNoteV2.rev,
+      'the note is back with its content, folder and rev', r.data && r.data.note && { rev: r.data.note.rev, folder: r.data.note.folderId });
+    r = await call(carol2, 'GET', '/api/images/' + cImg, undefined, { buffer: true });
+    ok(r.status === 200 && r.data.equals(PNG), 'the image is back byte for byte', r.status);
+    r = await call(carol2, 'GET', '/api/notes/' + cNote.id + '/versions');
+    ok(r.status === 200 && r.data.versions.some(v => v.label === '備份前標記'), 'the labelled version is back', r.data && r.data.versions.map(v => v.label));
+    r = await call(bob, 'GET', '/api/notes/' + cNote.id);
+    ok(r.status === 200 && r.data.note.perm === 'read', 'the share to bob is back', r.status);
+    r = await call(carol2, 'GET', '/api/trash');
+    ok(r.data.notes.some(n => n.id === cBin), 'the trashed note is back in the trash');
+
+    upId = await uploadZip(carol2, mineZip);
+    r = await call(carol2, 'POST', '/api/backup/upload/' + upId + '/restore', {});
+    job = await waitJob(carol2, r.data.job);
+    ok(!job.error && job.report.notes.created === 0 && job.report.notes.skipped === 2 && job.report.files.skipped === 1 && job.report.folders.skipped === 1,
+      'restoring the same backup again changes nothing', job.error || job.report);
+
+    const curNote = (await call(carol2, 'GET', '/api/notes/' + cNote.id)).data.note;
+    await call(carol2, 'PUT', '/api/notes/' + cNote.id, { title: curNote.title, content: '改壞了', baseContent: curNote.content, folderId: cFolder });
+    upId = await uploadZip(carol2, mineZip);
+    r = await call(carol2, 'POST', '/api/backup/upload/' + upId + '/restore', { overwrite: true });
+    job = await waitJob(carol2, r.data.job);
+    r = await call(carol2, 'GET', '/api/notes/' + cNote.id);
+    ok(!job.error && job.report.notes.overwritten === 2 && r.data.note.content === cNoteV2.content,
+      'overwrite puts the backup text back', job.error || job.report);
+    r = await call(carol2, 'GET', '/api/notes/' + cNote.id + '/versions');
+    ok(r.data.versions.some(v => v.label === '還原備份前'), 'overwrite first snapshots the text it replaces', r.data && r.data.versions.map(v => v.label));
+
+    upId = await uploadZip(bob, siteZip);
+    r = await call(bob, 'POST', '/api/backup/upload/' + upId + '/inspect', {});
+    ok(r.status === 200 && r.data.canRestore === false, 'bob may look at a site backup but not restore it', r.data);
+    r = await call(bob, 'POST', '/api/backup/upload/' + upId + '/restore', {});
+    ok(r.status === 403, 'a site restore by a non-admin is 403', r.status);
+    await call(bob, 'DELETE', '/api/backup/upload/' + upId);
+    upId = await uploadZip(admin, siteZip);
+    r = await call(admin, 'POST', '/api/backup/upload/' + upId + '/restore', {});
+    job = await waitJob(admin, r.data.job);
+    ok(!job.error && job.report.users.created === 0 && job.report.users.kept >= 3 && job.report.notes.created === 0 && job.report.notes.conflicts === 0,
+      'a site restore onto the same site keeps every account and note', job.error || job.report);
+    r = await call(carol2, 'POST', '/api/login', { username: 'carol', password: 'carol-password-123' });
+    ok(r.status === 200, "an existing account's password survives a site restore", r.status);
+  }
+
+  if (!OLD) {
     section('request limits and static allow-list (MariaDB build only)');
     const big = JSON.stringify({ title: 'x', content: 'y'.repeat(BODY_LIMIT + 1024) });
     r = await call(admin, 'POST', '/api/notes', big, { raw: true, contentType: 'application/json' });

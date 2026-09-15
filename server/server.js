@@ -19,6 +19,7 @@ const dbmod = require('./db');
 const hub = require('./hub');
 const linkpreview = require('./linkpreview');
 const settings = require('./settings');
+const backup = require('./backup');
 
 // A crash is better than limping on with unknown state; systemd (or whoever
 // supervises the process) restarts it. Log first so the reason is in the journal.
@@ -521,6 +522,30 @@ async function handleApi(req, res, url) {
   // Manual order (js/sorting.js): one folder level's complete order after a drag.
   if (p === '/api/order' && method === 'PUT') return send(await api.saveOrder(user, await readJSON(req)));
 
+  // Backup and restore (server/backup.js, js/backup.js). The zip streams straight
+  // out; a restore comes in as chunks into a temp file and runs as a job.
+  if (p === '/api/backup' && method === 'GET') {
+    const scope = url.searchParams.get('scope') === 'site' ? 'site' : 'mine';
+    if (scope === 'site' && user.role !== 'admin') return json(res, 403, { error: '整個站台的備份需要管理員權限' });
+    return backup.exportZip(user, scope, req, res);
+  }
+  if (p === '/api/backup/upload' && method === 'POST') return json(res, 200, backup.createUpload(user));
+  if ((m = p.match(/^\/api\/backup\/upload\/([0-9a-f]{24})$/))) {
+    if (method === 'GET') return send(backup.uploadStatus(user, m[1]));
+    if (method === 'PUT') {
+      const buf = await readBody(req, config.maxBodyBytes);
+      return send(await backup.appendUpload(user, m[1], Number(url.searchParams.get('offset')), buf));
+    }
+    if (method === 'DELETE') return send(backup.dropUpload(user, m[1]));
+  }
+  if ((m = p.match(/^\/api\/backup\/upload\/([0-9a-f]{24})\/inspect$/)) && method === 'POST') {
+    return send(backup.inspectUpload(user, m[1]));
+  }
+  if ((m = p.match(/^\/api\/backup\/upload\/([0-9a-f]{24})\/restore$/)) && method === 'POST') {
+    return send(backup.startRestore(user, m[1], await readJSON(req)));
+  }
+  if ((m = p.match(/^\/api\/backup\/jobs\/([0-9a-f]{24})$/)) && method === 'GET') return send(backup.jobStatus(user, m[1]));
+
   // Link preview cards. Errors are 200 { error } — an unreachable site is an
   // ordinary answer for a card, which then just shows the address.
   if (p === '/api/link-preview' && method === 'GET') {
@@ -714,6 +739,7 @@ function purgeTrash() {
 
 function start() {
   auth.startHousekeeping();
+  backup.startHousekeeping();
   checkStorage();
   setInterval(checkStorage, 3600000).unref();
   purgeTrash();
