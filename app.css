@@ -1276,6 +1276,20 @@ mark.search-hit {
 .blog-src.is-quote { padding-left: 14px; border-left: 3px solid var(--border-strong); color: var(--text-dim); }
 .blog-doc > .blog-block:first-child > .blog-src { margin-top: 0; }
 
+/* 反白文字後浮出的格式工具列（js/blogmode.js 的 updateBubble）。body 子元素一律 fixed。 */
+.blog-fmt {
+  position: fixed; z-index: 1200; display: flex; align-items: center; gap: 1px;
+  padding: 3px; background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+}
+.blog-fmt-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
+  border: 0; background: transparent; color: var(--text-dim); cursor: pointer; padding: 0;
+  font: inherit; font-size: var(--fs-sm); transition: background .1s, color .1s;
+}
+.blog-fmt-btn:hover { background: var(--row-hover); color: var(--text); }
+.blog-fmt-btn .ic-svg { width: 16px; height: 16px; }
+.blog-fmt-sep { width: 1px; align-self: stretch; margin: 3px 3px; background: var(--border); }
+
 .pane-edit { flex-direction: column; overflow: hidden; }
 
 /* editor formatting toolbar — line icons, a few with a short label.

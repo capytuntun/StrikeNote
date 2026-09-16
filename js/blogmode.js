@@ -124,6 +124,7 @@
 
   function detach() {
     ed = null;
+    hideBubble();
     if (ta && ta.parentNode) ta.parentNode.removeChild(ta);
   }
 
@@ -586,11 +587,12 @@
     startNew(blocks.length - 1);
   }
 
-  // 點到頁面以外（側邊欄、頂列、別的面板）就結束編輯；自動完成選單不算。
+  // 點到頁面以外（側邊欄、頂列、別的面板）就結束編輯；自動完成選單、格式工具列不算，
+  // 不然按格式鈕的那一下會先把編輯收掉、選取消失。
   function onDocDown(e) {
     if (!ed || !scroller) return;
     const t = e.target;
-    if (scroller.contains(t) || (t.closest && t.closest('.ac-popup'))) return;
+    if (scroller.contains(t) || (t.closest && t.closest('.ac-popup, .blog-fmt'))) return;
     finish();
   }
 
@@ -644,6 +646,162 @@
     ta.setSelectionRange(caret, caret);
   }
 
+  // ---- 選取格式工具列（反白文字後浮出，像 Notion／Medium）----------------------
+  // 只掛在 Blog 的編輯框 ta 上。反白一段文字後浮出一排鈕：粗體／斜體／刪除線／行內碼／
+  // 連結改的是選取的字，標題／引言／清單／程式碼區塊改的是整行。每個動作都只是改 ta.value
+  // 再走 onInput() 回寫原始碼，跟手打語法完全同一條路——所以自動存檔、合併、版本都不用管它。
+  let bubble = null;
+  const INLINE = [
+    { icon: 'bold', title: '粗體', mark: '**' },
+    { icon: 'italic', title: '斜體', mark: '*' },
+    { icon: 'strikethrough', title: '刪除線', mark: '~~' },
+    { icon: 'code', title: '行內程式碼', mark: '`' }
+  ];
+  const BLOCK = [
+    { icon: 'heading-1', title: '標題 1', prefix: '# ' },
+    { icon: 'heading-2', title: '標題 2', prefix: '## ' },
+    { icon: 'heading-3', title: '標題 3', prefix: '### ' },
+    { icon: 'quote', title: '引言', prefix: '> ' },
+    { icon: 'list', title: '清單', prefix: '- ' }
+  ];
+
+  function ensureBubble() {
+    if (bubble) return bubble;
+    bubble = document.createElement('div');
+    bubble.className = 'blog-fmt';
+    bubble.hidden = true;
+    function add(spec) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'blog-fmt-btn';
+      b.title = spec.title;
+      b.innerHTML = (global.Icons && Icons.svg(spec.icon)) || spec.title;
+      // 不搶焦點：mousedown 就 preventDefault，textarea 的選取才不會消失
+      b.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      b.addEventListener('click', function (e) { e.preventDefault(); apply(spec); });
+      bubble.appendChild(b);
+    }
+    INLINE.forEach(add);
+    add({ icon: 'link', title: '連結', link: true });
+    const sep = document.createElement('span');
+    sep.className = 'blog-fmt-sep';
+    bubble.appendChild(sep);
+    BLOCK.forEach(add);
+    add({ icon: 'square-code', title: '程式碼區塊', codeblock: true });
+    document.body.appendChild(bubble);   // body 子元素一律 fixed（見 CLAUDE.md 的殼層不捲動規則）
+    return bubble;
+  }
+
+  // 換掉 ta 的一段內容、設定新的選取、回寫原始碼、重新定位工具列。
+  function replaceSel(from, to, text, selStart, selEnd) {
+    const v = ta.value;
+    ta.value = v.slice(0, from) + text + v.slice(to);
+    try { ta.focus({ preventScroll: true }); } catch (e) { ta.focus(); }
+    ta.setSelectionRange(selStart, selEnd == null ? selStart : selEnd);
+    onInput();
+    positionBubble();
+  }
+
+  // 選取的字兩邊包上 mark（粗體 ** 之類）；已經有這個格式就拆掉（切換）。
+  // 數兩側緊接的相同記號字元有幾個，判斷這一層在不在：星號要分奇偶（* 斜體是奇數、** 粗體是
+  // 至少兩顆），所以「粗體字裡面再按斜體」是 ** → ***（加一層），「粗斜體按斜體」是 *** → **
+  // （拆一層），都不會把 ** 誤拆成 *。` 與 ~~ 不會這樣疊，單純看夠不夠一層。
+  function wrapInline(mark) {
+    const v = ta.value, ch = mark[0], ml = mark.length;
+    let s = ta.selectionStart, e = ta.selectionEnd;
+    while (e > s && v[s] === ch) s++;          // 選取邊緣連記號一起選到時，先剝到只剩核心文字
+    while (e > s && v[e - 1] === ch) e--;
+    const core = v.slice(s, e);
+    let lb = 0; while (v[s - 1 - lb] === ch) lb++;
+    let la = 0; while (v[e + la] === ch) la++;
+    const run = Math.min(lb, la);              // 兩側成對、拆得掉的層數
+    let present;
+    if (ch === '*' && ml === 1) present = run % 2 === 1;
+    else if (ch === '*' && ml === 2) present = run >= 2;
+    else present = run >= ml;
+    const delta = present ? -ml : ml;
+    const left = Math.max(0, lb + delta), right = Math.max(0, la + delta);
+    const next = v.slice(0, s - lb) + ch.repeat(left) + core + ch.repeat(right) + v.slice(e + la);
+    const selStart = (s - lb) + left;
+    replaceSel(0, v.length, next, selStart, selStart + core.length);
+  }
+
+  function makeLink() {
+    const s = ta.selectionStart, e = ta.selectionEnd;
+    const sel = ta.value.slice(s, e) || '文字';
+    const text = '[' + sel + '](url)';
+    const urlAt = s + 1 + sel.length + 2;   // 把 url 三個字選起來，直接貼網址取代
+    replaceSel(s, e, text, urlAt, urlAt + 3);
+  }
+
+  // 選取碰到的整行（含只碰一部分的頭尾兩行）。LEAD 抓行首縮排 + 既有的標題／引言／清單記號。
+  const LEAD = /^(\s*)(#{1,6}\s|>\s?|(?:[-*+]|\d+[.)])\s)?/;
+  function lineRange() {
+    const v = ta.value;
+    const start = v.lastIndexOf('\n', ta.selectionStart - 1) + 1;
+    let end = v.indexOf('\n', ta.selectionEnd);
+    if (end < 0) end = v.length;
+    return { start: start, end: end, block: v.slice(start, end) };
+  }
+  // 每一行換上 prefix；本來就都是這個 prefix 就拿掉（切換）。換前先剝掉舊的標題／引言／清單記號，
+  // 所以「標題 1」點成「標題 2」是替換，不是疊加。
+  function togglePrefix(prefix) {
+    const r = lineRange();
+    const lines = r.block.split('\n');
+    const has = lines.every(function (l) { return (l.match(LEAD)[2] || '') === prefix; });
+    const next = lines.map(function (l) {
+      const m = l.match(LEAD);
+      const bare = l.slice(m[0].length);
+      return has ? m[1] + bare : m[1] + prefix + bare;
+    }).join('\n');
+    replaceSel(r.start, r.end, next, r.start, r.start + next.length);
+  }
+  function toggleCodeBlock() {
+    const r = lineRange();
+    const lines = r.block.split('\n');
+    if (lines.length >= 2 && lines[0].trim().indexOf('```') === 0 && lines[lines.length - 1].trim() === '```') {
+      const inner = lines.slice(1, -1).join('\n');
+      replaceSel(r.start, r.end, inner, r.start, r.start + inner.length);
+    } else {
+      const next = '```\n' + r.block + '\n```';
+      replaceSel(r.start, r.end, next, r.start, r.start + next.length);
+    }
+  }
+
+  function apply(spec) {
+    if (!ed || readOnly) return;
+    if (spec.mark) wrapInline(spec.mark);
+    else if (spec.link) makeLink();
+    else if (spec.prefix) togglePrefix(spec.prefix);
+    else if (spec.codeblock) toggleCodeBlock();
+  }
+
+  function positionBubble() {
+    if (!bubble || bubble.hidden || !ed || !ta || !Editor || !Editor.caretCoords) return;
+    const rect = ta.getBoundingClientRect();
+    const a = Editor.caretCoords(ta, ta.selectionStart);
+    const z = Editor.caretCoords(ta, ta.selectionEnd);
+    const sameLine = Math.abs(z.top - a.top) < 2;   // 同一行就置中在選取正上方，跨行對齊起點
+    const cx = sameLine ? rect.left + (a.left + z.left) / 2 : rect.left + a.left;
+    const w = bubble.offsetWidth, h = bubble.offsetHeight;
+    let left = Math.max(8, Math.min(cx - w / 2, global.innerWidth - w - 8));
+    let top = rect.top + a.top - h - 8;
+    if (top < 56) top = rect.top + a.top + a.height + 8;   // 上面被頂列擋住就放到選取下方
+    bubble.style.left = Math.round(left) + 'px';
+    bubble.style.top = Math.round(top) + 'px';
+  }
+
+  function updateBubble() {
+    if (!ed || readOnly || composing || document.activeElement !== ta ||
+        ta.selectionStart === ta.selectionEnd || document.querySelector('.ac-popup')) {
+      hideBubble();
+      return;
+    }
+    ensureBubble().hidden = false;
+    positionBubble();
+  }
+  function hideBubble() { if (bubble) bubble.hidden = true; }
+
   // ---- 對外 ----------------------------------------------------------------
   function init(docEl, o) {
     root = docEl;
@@ -660,8 +818,13 @@
     ta.addEventListener('paste', onPaste);
     ta.addEventListener('compositionstart', function () { composing = true; });
     ta.addEventListener('compositionend', function () { composing = false; });
+    // 反白文字後浮出格式工具列（updateBubble）。selectionchange 涵蓋鍵盤選取；mouseup 涵蓋
+    // 滑鼠拖選放開的那一刻（拖選過程中 selectionchange 也會連續觸發，位置跟著更新）。
+    ta.addEventListener('mouseup', function () { setTimeout(updateBubble, 0); });
+    document.addEventListener('selectionchange', function () { if (document.activeElement === ta) updateBubble(); });
     root.addEventListener('click', onClick);
     scroller.addEventListener('click', onScrollerClick);
+    scroller.addEventListener('scroll', function () { if (bubble && !bubble.hidden) positionBubble(); });
     scroller.addEventListener('dragover', onDragOver);
     scroller.addEventListener('dragleave', onDragLeave);
     scroller.addEventListener('drop', onDrop);
