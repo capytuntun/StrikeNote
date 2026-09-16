@@ -764,15 +764,31 @@
   // 頂列夠不夠寬是量出來的，不是照視窗寬度猜的：標題絕對定位貼死在正中線（對齊分割檢視的
   // 分隔線），左邊的模式切換鈕、右邊的版本／分享／PDF 都不會讓步，視窗一窄就可能疊到標題
   // 上——加了 Blog mode 這顆鈕之後左邊變寬，疊到的臨界寬度也跟著變寬了。逐級收：先收純
-  // 裝飾（水豚、線上人數），不夠再把按鈕文字收成純圖示，最後才不得已把標題整個藏起來——
-  // 標題被蓋住看不出是哪篇筆記，比暫時看不到小水豚嚴重多了。每一級收完都重量一次，
-  // 收太多之後空間夠了（例如視窗變寬回去）也要能一路放寬回來。
+  // 裝飾（水豚、線上人數），再把標題截短（資料夾路徑先讓，見 capTitle），還不夠才把按鈕
+  // 文字收成純圖示，最後才不得已把標題整個藏起來。資料夾路徑很長的筆記在一般筆電寬度下
+  // 原本會直接跳到收按鈕文字——「分割／編輯／預覽／版本／分享」少了字不好認，截掉一段
+  // 路徑卻幾乎沒有損失。每一級收完都重量一次，空間夠了（視窗變寬回去）也要能一路放寬回來。
+  const TITLE_MIN = 240;   // 標題截到比這還窄就不截了，改收按鈕文字
   function fitTopbar() {
     const topbar = $('#topbar');
     const modeSwitch = topbar && topbar.querySelector('.mode-switch');
     const titleWrap = topbar && topbar.querySelector('.note-title-wrap');
     const rightCluster = $('#history-btn');
     if (!topbar || !modeSwitch || !titleWrap || !rightCluster) return;
+    // 標題置中在正中線，所以它能用的寬度是「正中線到兩側按鈕群，較近那邊的距離」乘二。
+    // 放得下就不設上限；放不下但還有 TITLE_MIN 就設成剛好那麼寬，路徑會先被截成「…/」。
+    function capTitle() {
+      titleWrap.style.maxWidth = '';
+      if (!titleWrap.getClientRects().length) return;
+      const gap = 12;
+      const bar = topbar.getBoundingClientRect();
+      const mid = bar.left + bar.width / 2;
+      const room = 2 * Math.min(mid - modeSwitch.getBoundingClientRect().right - gap,
+        rightCluster.getBoundingClientRect().left - gap - mid);
+      if (room >= TITLE_MIN && titleWrap.getBoundingClientRect().width > room) {
+        titleWrap.style.maxWidth = Math.floor(room) + 'px';
+      }
+    }
     function fits() {
       // 頂列本身的內容有沒有真的超出它自己的寬度——標題藏起來之後（lvl3+）就只看這個，
       // 不然藏起來的標題還在原來的位置，位置比對永遠算「疊到」，沒辦法再往下一級判斷。
@@ -785,11 +801,16 @@
         t.right + gap <= rightCluster.getBoundingClientRect().left;
     }
     topbar.classList.remove('topbar-lvl1', 'topbar-lvl2', 'topbar-lvl3', 'topbar-lvl4', 'topbar-lvl5');
+    titleWrap.style.maxWidth = '';
     if (fits()) return;
     topbar.classList.add('topbar-lvl1');
     if (fits()) return;
-    topbar.classList.add('topbar-lvl2');
+    capTitle();
     if (fits()) return;
+    topbar.classList.add('topbar-lvl2');
+    capTitle();   // 按鈕文字收掉後兩側多出空間，重算一次，標題能少截一點
+    if (fits()) return;
+    titleWrap.style.maxWidth = '';
     topbar.classList.add('topbar-lvl3');
     if (fits()) return;
     topbar.classList.add('topbar-lvl4');

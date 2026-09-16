@@ -570,14 +570,19 @@
       // ```linux（含 linux=）當成 shell 高亮，並標記 code-linux 讓 CSS 套用 Kali 終端配色。
       const ALIAS = { linux: 'bash', kali: 'bash' };
       const isKali = requested === 'linux' || requested === 'kali';
-      const hlLang = ALIAS[requested] || requested;
-      // 只依使用者標明的語言上色；沒標語言（或 hljs 不認得）就是純文字，不自動猜——
-      // 猜錯會把終端輸出塗成別種語言的顏色，右上角的標籤也跟著錯。
-      const lang = requested;   // 標籤永遠顯示使用者寫的字（例如 linux）
+      // 沒標語言時預設用 bash 文法上色：滲透報告裡沒標語言的區塊絕大多數是指令。bash 文法
+      // 很保守——只認得 # 註解、"字串"、$變數、少數內建指令，所以貼進來的「終端輸出」（nmap
+      // 結果、whoami 表格、雜湊、mimikatz dump）幾乎一個 span 都不會有、維持純文字，指令才會
+      // 上到色。這正是之前拿掉 highlightAuto 想要的效果：highlightAuto 會自信地把 whoami 輸出
+      // 判成 SQL、把雜湊判成 Ruby 整片塗錯；bash 因為保守，同樣的輸出只會是純文字。ignoreIllegals
+      // 讓奇怪內容不會丟例外。標籤留空——使用者沒說這是 bash，右上角就不寫，免得把輸出誤標成指令。
+      const autoShell = !requested;
+      const hlLang = ALIAS[requested] || (autoShell ? 'bash' : requested);
+      const lang = requested;   // 標籤永遠顯示使用者寫的字（例如 linux）；沒標就不顯示
       let out;
       try {
         if (hlLang && global.hljs && global.hljs.getLanguage(hlLang)) {
-          out = global.hljs.highlight(code, { language: hlLang }).value;
+          out = global.hljs.highlight(code, { language: hlLang, ignoreIllegals: autoShell }).value;
         } else {
           out = escapeHtml(code);
         }

@@ -347,6 +347,9 @@ input, select, textarea { transition: border-color var(--dur-1) var(--ease-out),
 #topbar .note-title-wrap {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   display: flex; align-items: center; max-width: min(52vw, 680px);
+  /* app.js 的 capTitle() 可能把上限再收窄：路徑截到只剩「/」、標題也被截時，多出來的那一點
+     不能畫到兩側按鈕上 */
+  overflow: hidden;
 }
 /* 頂列夠不夠寬，是量出來的，不是按視窗寬度猜的（見 app.js 的 fitTopbar）：標題固定貼在
    正中線，兩側的按鈕群本身寬度又不會讓步，視窗一窄，四個模式鈕（多了 Blog mode 之後更寬）
@@ -381,7 +384,7 @@ input, select, textarea { transition: border-color var(--dur-1) var(--ease-out),
 /* 標題不讓步（flex-shrink 0）：空間不夠時先截前面的資料夾路徑，筆記名稱永遠完整 */
 #topbar .note-title {
   flex: 0 0 auto; width: auto; min-width: 40px; max-width: 100%;
-  text-align: left; margin: 0;
+  text-align: left; margin: 0; text-overflow: ellipsis;
 }
 /* 量標題文字寬度用的隱形 span：字型設定要跟 .note-title 一模一樣 */
 .note-title-measure {
