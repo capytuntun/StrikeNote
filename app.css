@@ -1252,6 +1252,18 @@ mark.search-hit {
 .blog-fmt-btn .ic-svg { width: 16px; height: 16px; }
 .blog-fmt-sep { width: 1px; align-self: stretch; margin: 3px 3px; background: var(--border); }
 
+/* Blog 表格拉欄寬：欄與欄的邊界上一條細條（js/blogmode.js 的 attachTableResize）。
+   平常透明，滑過去才顯示 accent 線；拉的時候整頁 col-resize 游標、暫停選字。 */
+.blog-col-grip { position: absolute; z-index: 5; width: 11px; margin-left: -5px; cursor: col-resize; }
+.blog-col-grip::after {
+  content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px;
+  background: transparent; transition: background .1s;
+}
+.blog-col-grip:hover::after, body.col-resizing .blog-col-grip::after { background: var(--accent); }
+body.col-resizing { cursor: col-resize; user-select: none; }
+/* 設過欄寬的表格是 table-layout: fixed，內容太長的欄要換行而不是撐破版面 */
+.markdown-body table[data-colw] td, .markdown-body table[data-colw] th { overflow-wrap: anywhere; }
+
 .pane-edit { flex-direction: column; overflow: hidden; }
 
 /* editor formatting toolbar — line icons, a few with a short label.

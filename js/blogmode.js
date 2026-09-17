@@ -74,6 +74,7 @@
     root.appendChild(frag);
     root.classList.toggle('is-readonly', readOnly);
     MD.resolveImages(root);
+    applyTableWidths();
     if (scroller) scroller.scrollTop = keep;
     if (opts.onRender) opts.onRender();   // app.js 重建旁邊的目錄
   }
@@ -534,6 +535,7 @@
   function onClick(e) {
     const t = e.target;
     if (!t.closest || t === ta) return;
+    if (t.closest('.blog-col-grip')) return;   // 拉表格欄寬，不是要編輯這個區塊
     const task = t.closest('.task-check');
     if (task) { onTask(e, task); return; }
     const link = t.closest('.note-link');
@@ -802,6 +804,81 @@
   }
   function hideBubble() { if (bubble) bubble.hidden = true; }
 
+  // ---- 表格拉欄寬（像 Notion）------------------------------------------------
+  // 欄寬存在 note.meta（app.js 的 getTableWidths/onTableWidths），依表格在整份筆記裡的順序
+  // 索引。每次排版把存下的欄寬套回每個 <table>（MD.setTableCols 注入 <colgroup>、改成 fixed
+  // 版面），再在每個欄邊界放一條可拉的細條。拉的時候即時改 colgroup，放開才寫回 meta。
+  function applyTableWidths() {
+    if (!root) return;
+    const widths = (opts.getTableWidths && opts.getTableWidths()) || null;
+    const tables = root.querySelectorAll('table');
+    for (let i = 0; i < tables.length; i++) {
+      if (widths && widths[i]) MD.setTableCols(tables[i], widths[i]);
+      if (!readOnly) attachTableResize(tables[i], i);
+    }
+  }
+
+  // 目前每一欄佔整表寬度的百分比（沒設過欄寬的表格就是照內容量出來的當前比例）。
+  function currentPct(table) {
+    const cells = table.rows[0].cells;
+    const raw = Array.prototype.map.call(cells, function (c) { return c.getBoundingClientRect().width; });
+    const sum = raw.reduce(function (a, b) { return a + b; }, 0) || 1;
+    return raw.map(function (w) { return 100 * w / sum; });
+  }
+
+  function attachTableResize(table, idx) {
+    const block = table.closest('.blog-block');
+    if (!block || !table.rows[0] || table.rows[0].cells.length < 2) return;
+    function relayout() {
+      block.querySelectorAll('.blog-col-grip[data-t="' + idx + '"]').forEach(function (g) { g.remove(); });
+      const brect = block.getBoundingClientRect();
+      const trect = table.getBoundingClientRect();
+      const cells = table.rows[0].cells;
+      for (let c = 0; c < cells.length - 1; c++) {
+        const cr = cells[c].getBoundingClientRect();
+        const grip = document.createElement('div');
+        grip.className = 'blog-col-grip';
+        grip.setAttribute('data-t', idx);
+        grip.style.left = Math.round(cr.right - brect.left) + 'px';
+        grip.style.top = Math.round(trect.top - brect.top) + 'px';
+        grip.style.height = Math.round(trect.height) + 'px';
+        (function (col) {
+          grip.addEventListener('mousedown', function (e) { startColDrag(e, table, idx, col, relayout); });
+        })(c);
+        block.appendChild(grip);
+      }
+    }
+    table._gripLayout = relayout;
+    relayout();
+  }
+
+  function startColDrag(e, table, idx, col, relayout) {
+    e.preventDefault();
+    e.stopPropagation();   // 不要進入這個區塊的編輯
+    const total = table.getBoundingClientRect().width || 1;
+    const pct = currentPct(table);
+    const startX = e.clientX;
+    const origL = pct[col], pair = pct[col] + pct[col + 1];
+    const MIN = 6;   // 每一欄至少留 6%，兩欄之間拉的差額由右邊那欄吸收，整表寬度不變
+    document.body.classList.add('col-resizing');
+    function move(ev) {
+      const dx = 100 * (ev.clientX - startX) / total;
+      const l = Math.max(MIN, Math.min(pair - MIN, origL + dx));
+      pct[col] = l;
+      pct[col + 1] = pair - l;
+      MD.setTableCols(table, pct);
+      relayout();
+    }
+    function up() {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.classList.remove('col-resizing');
+      if (opts.onTableWidths) opts.onTableWidths(idx, pct.map(function (x) { return Math.round(x * 10) / 10; }));
+    }
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  }
+
   // ---- 對外 ----------------------------------------------------------------
   function init(docEl, o) {
     root = docEl;
@@ -843,7 +920,11 @@
       canEdit: function () { return !readOnly; },
       onPdfPref: function (v) { if (opts.onPdfPref) opts.onPdfPref(v); }
     });
-    global.addEventListener('resize', function () { if (ed) autosize(); });
+    global.addEventListener('resize', function () {
+      if (ed) autosize();
+      // 視窗變寬變窄，欄邊界的位置也變了，把每個表格的拉條重新擺一次
+      if (root) root.querySelectorAll('table').forEach(function (t) { if (t._gripLayout) t._gripLayout(); });
+    });
   }
 
   // 打開一篇筆記（或切進這個模式）：丟掉之前的編輯狀態，整份重新排版。

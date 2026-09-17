@@ -267,6 +267,7 @@
 
     els.article.innerHTML = MD.render(ch.note.content || '');
     MD.resolveImages(els.article);
+    if (ch.note.meta) MD.applyColWidths(els.article, ch.note.meta.tableWidths);
     els.pager.innerHTML = pagerHTML(book, ch, false);
 
     const ol = outlineHTML(els.article);
@@ -333,6 +334,7 @@
     book.chapters.forEach(function (ch) {
       p = p.then(function () {
         work.innerHTML = MD.render(ch.note.content || '');
+        if (ch.note.meta) MD.applyColWidths(work, ch.note.meta.tableWidths);
         // 附件 PDF 無法打包進單檔：換成一行說明
         work.querySelectorAll('.pdf-embed').forEach(function (n) {
           const name = (n.querySelector('.pdf-embed-name') || {}).textContent || 'PDF';

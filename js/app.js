@@ -1078,6 +1078,7 @@
     // src lands on a discarded <img> and pictures stay blank until a re-render.
     if (window.LineSync) LineSync.rebuild(editorEl.value);
     MD.resolveImages(previewEl);
+    if (state.current && state.current.meta) MD.applyColWidths(previewEl, state.current.meta.tableWidths);
     restoreInlineTocState();
     // Mind maps are edited in place in the preview, and the preview is rebuilt
     // from scratch here, so the selection has to be re-applied every time.
@@ -1893,6 +1894,21 @@
       renderPreviewNow();
     }
     if (mode === 'preview') renderPreview();
+  }
+  // Blog 表格拉欄寬：欄寬存在 note.meta.tableWidths（依表格在文件中的順序索引，每個是一個
+  // 各欄百分比的陣列）。只改 meta、走一般自動存檔——跟釘選一樣是「記帳」變更，伺服器不動
+  // 內文、不 bump rev。開著的筆記以 state.current 為準，直接改就好，不用 patchNoteMeta 那套
+  // 先抓最新再合併（那是給沒開著的筆記在儀表板釘選用的）。
+  function setTableWidths(tableIndex, widths) {
+    const cur = state.current;
+    if (!cur || cur.perm === 'read') return;
+    const meta = cur.meta = cur.meta || {};
+    const tw = (meta.tableWidths || []).slice();
+    tw[tableIndex] = widths;
+    meta.tableWidths = tw;
+    const n = state.notes.find(function (x) { return x.id === cur.id; });
+    if (n) n.meta = meta;
+    scheduleSave();
   }
   // BlogMode 每次輸入都把整份 Markdown 交回來：寫回 #editor，走一般的自動存檔。
   function onBlogChange(text) {
@@ -2916,6 +2932,8 @@
     // Make sure preview reflects latest text before export.
     previewEl.innerHTML = MD.render(editorEl.value);
     MD.resolveImages(previewEl);
+    // Table column widths (set in Blog) live in meta; carry them into the print clone.
+    if (state.current.meta) MD.applyColWidths(previewEl, state.current.meta.tableWidths);
     statusSave.textContent = '準備列印預覽…';
     // small delay so images resolve
     setTimeout(function () {
@@ -3161,7 +3179,10 @@
       onTag: browseTag,
       onAnnotate: openAnnotator,
       copyText: copyText,
-      toast: toast
+      toast: toast,
+      // 表格拉欄寬：讀寫 note.meta.tableWidths（依表格在文件中的順序索引）
+      getTableWidths: function () { return state.current && state.current.meta ? state.current.meta.tableWidths : null; },
+      onTableWidths: setTableWidths
     });
     // 預覽裡 PDF 的「檔案｜預覽」、獨佔一行的網址的「連結｜預覽卡片」（js/embedswitch.js）。
     // 改寫範圍是 LineSync 標在預覽元素上的原始碼行號。

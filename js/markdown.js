@@ -813,6 +813,49 @@
     }));
   }
 
+  // ---- Table column widths --------------------------------------------------
+  // Markdown has no column-width concept, so widths live in note.meta.tableWidths
+  // (an array indexed by the table's document order; each entry an array of
+  // per-column percentages). They are applied to the RENDERED DOM here, not in the
+  // markdown, so Blog, the preview, the PDF and the book all show the same widths
+  // by calling applyColWidths on their own rendered container. A table with no
+  // stored widths (or a stored entry whose length no longer matches the columns —
+  // a column was added or removed) is left in its default content-sized layout.
+  function setTableCols(table, pct) {
+    if (!table) return false;
+    const head = table.rows && table.rows[0];
+    const ncol = head ? head.cells.length : 0;
+    const old = table.querySelector(':scope > colgroup[data-cols]');
+    if (!ncol || !Array.isArray(pct) || pct.length !== ncol) {
+      if (old) old.remove();
+      table.style.tableLayout = ''; table.style.width = ''; table.style.display = '';
+      table.removeAttribute('data-colw');
+      return false;
+    }
+    const total = pct.reduce(function (a, b) { return a + (Number(b) || 0); }, 0) || ncol;
+    const cg = document.createElement('colgroup');
+    cg.setAttribute('data-cols', '1');
+    pct.forEach(function (x) {
+      const col = document.createElement('col');
+      col.style.width = (100 * (Number(x) || 0) / total).toFixed(3) + '%';
+      cg.appendChild(col);
+    });
+    if (old) old.remove();
+    table.insertBefore(cg, table.firstChild);
+    // A fixed layout is what makes <col> widths authoritative; without it the
+    // browser still sizes columns to content and ignores them.
+    table.style.display = 'table';
+    table.style.tableLayout = 'fixed';
+    table.style.width = '100%';
+    table.setAttribute('data-colw', '1');   // CSS 用它讓內容過長的欄改為換行而不是撐破
+    return true;
+  }
+  function applyColWidths(container, widths) {
+    if (!container) return;
+    const tables = container.querySelectorAll('table');
+    for (let i = 0; i < tables.length; i++) setTableCols(tables[i], widths && widths[i]);
+  }
+
   // Build TOC entries from rendered container: [{level, text, id}]
   function extractHeadings(container) {
     const nodes = container.querySelectorAll('h1, h2, h3, h4, h5, h6');
@@ -879,6 +922,8 @@
     invalidateImage: invalidateImage,
     resolveLinkCards: resolveLinkCards,
     switchEmbed: switchEmbed,
+    applyColWidths: applyColWidths,
+    setTableCols: setTableCols,
     extractFindings: extractFindings,
     riskLevels: RISK_LEVELS
   };
