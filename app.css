@@ -965,7 +965,7 @@ mark.search-hit {
 .dash-folder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
 .dash-folder-tile {
   position: relative; display: flex; flex-direction: column; gap: 9px;
-  padding: 15px 15px 13px; min-height: 76px;
+  padding: 15px 15px 13px; min-height: 134px;
   border: 1px solid var(--border); background: var(--bg); cursor: pointer; outline: none;
   transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out),
               box-shadow var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
