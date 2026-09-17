@@ -965,7 +965,7 @@ mark.search-hit {
 .dash-folder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
 .dash-folder-tile {
   position: relative; display: flex; flex-direction: column; gap: 9px;
-  padding: 15px 15px 13px; min-height: 134px;
+  padding: 15px 15px 13px; min-height: 76px;
   border: 1px solid var(--border); background: var(--bg); cursor: pointer; outline: none;
   transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out),
               box-shadow var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
@@ -989,44 +989,6 @@ mark.search-hit {
 .dash-folder-ic .ic-svg { width: 16px; height: 16px; }
 .dash-folder-name { font-size: var(--fs-base); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-folder-meta { margin-top: -5px; padding-left: 38px; font-size: var(--fs-xs); color: var(--text-faint); }
-.dash-folder-preview {
-  list-style: none; margin: auto 0 0; padding: 11px 0 0; border-top: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 6px;
-}
-.dash-folder-preview li {
-  display: flex; align-items: center; gap: 7px; font-size: var(--fs-xs); color: var(--text-dim);
-  overflow: hidden; white-space: nowrap;
-}
-.dash-folder-preview li span { overflow: hidden; text-overflow: ellipsis; }
-.dash-folder-preview li .ic-svg { width: 13px; height: 13px; color: var(--text-faint); flex: 0 0 auto; }
-.dash-folder-preview li.more { color: var(--text-faint); font-style: italic; }
-/* 方塊只列三篇，超過就只補一個「…」；滑過方塊 0.35 秒後整份清單以浮層蓋在方塊
-   下緣露出來——方塊本身不長高，格線不會跳；浮層是方塊的子元素，滑進去 :hover 不會斷 */
-.dash-folder-ellipsis { font-style: normal; letter-spacing: .15em; color: var(--text-dim); }
-.dash-folder-peek {
-  position: absolute; left: -1px; right: -1px; top: calc(100% - 1px); z-index: 6;
-  background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
-  padding: 10px 15px 12px;
-  opacity: 0; visibility: hidden;
-  transition: opacity .12s, visibility 0s linear .12s;
-}
-.dash-folder-tile:hover { z-index: 7; }
-.dash-folder-tile:hover .dash-folder-peek {
-  opacity: 1; visibility: visible; transition-delay: .35s;
-}
-.dash-folder-peek-title {
-  display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
-  font-size: var(--fs-micro); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-faint);
-}
-.dash-folder-peek-title .ic-svg { width: 12px; height: 12px; }
-.dash-folder-peek ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.dash-folder-peek li {
-  display: flex; align-items: center; gap: 7px; font-size: var(--fs-xs); color: var(--text-dim);
-  overflow: hidden; white-space: nowrap;
-}
-.dash-folder-peek li span { overflow: hidden; text-overflow: ellipsis; }
-.dash-folder-peek li .ic-svg { width: 13px; height: 13px; color: var(--text-faint); flex: 0 0 auto; }
-.dash-folder-peek li.more { color: var(--text-faint); font-style: italic; }
 /* 右上角：電子書 + 直式「⋮」，平常淡、滑過去才清楚 */
 .dash-folder-acts { position: absolute; top: 11px; right: 11px; display: flex; align-items: center; gap: 2px; }
 .dash-folder-book, .dash-folder-menu {

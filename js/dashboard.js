@@ -462,7 +462,6 @@
 
   function makeFolderTile(folder, o) {
     const notes = o.notes, folders = o.folders;
-    const own = notesIn(notes, folder.id);
     const subs = foldersIn(folders, folder.id);
     const deep = countNotesDeep(notes, folders, folder.id);
     const metaBits = [deep + ' 筆記'];
@@ -482,31 +481,6 @@
     head.appendChild(nameEl);
     tile.appendChild(head);
     tile.appendChild(el('div', 'dash-folder-meta', esc(metaBits.join('・'))));
-
-    let preview = '';
-    own.slice(0, 3).forEach(function (n) {
-      const k = noteKind(n);
-      preview += '<li>' + ic(k.icon) + '<span>' + esc(n.title || '未命名筆記') + '</span></li>';
-    });
-    // 超過三篇只補一個「…」；整份清單放進滑過去才浮出來的 peek，方塊本身不長高
-    if (own.length > 3) {
-      preview += '<li class="more dash-folder-ellipsis" title="還有 ' + (own.length - 3) + ' 篇，滑過去看全部">…</li>';
-    }
-    if (!own.length && subs.length) preview += '<li class="more">筆記在子資料夾裡</li>';
-    if (!own.length && !subs.length) preview += '<li class="more">空資料夾</li>';
-    tile.appendChild(el('ul', 'dash-folder-preview', preview));
-    if (own.length > 3) {
-      const PEEK_MAX = 15;
-      let peek = '<div class="dash-folder-peek-title">' + ic('file-text') +
-        '<span>全部 ' + own.length + ' 篇</span></div><ul>';
-      own.slice(0, PEEK_MAX).forEach(function (n) {
-        const k = noteKind(n);
-        peek += '<li>' + ic(k.icon) + '<span>' + esc(n.title || '未命名筆記') + '</span></li>';
-      });
-      if (own.length > PEEK_MAX) peek += '<li class="more">還有 ' + (own.length - PEEK_MAX) + ' 篇…</li>';
-      peek += '</ul>';
-      tile.appendChild(el('div', 'dash-folder-peek', peek));
-    }
 
     // 右上角：電子書 + 直式「⋮」選單
     const acts = el('div', 'dash-folder-acts');
