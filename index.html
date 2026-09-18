@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=125">
+  <link rel="stylesheet" href="app.css?v=127">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -144,6 +144,7 @@
             <button id="oscp-report" class="user-menu-item" role="menuitem" type="button" title="證照考試範本模式" data-icon="award">證照範本</button>
             <button id="sec-report" class="user-menu-item" role="menuitem" type="button" title="資安院報告模式" data-icon="shield">資安院報告</button>
             <button id="perf-report" class="user-menu-item" role="menuitem" type="button" title="成效報告模式" data-icon="chart">成效報告</button>
+            <button id="rel-map" class="user-menu-item" role="menuitem" type="button" title="自由畫布的節點／連線圖，像簡化版的 React Flow" data-icon="network">關聯分析</button>
             <div class="user-menu-sep" role="separator"></div>
             <button id="new-book" class="user-menu-item" role="menuitem" type="button" title="挑一個資料夾做成電子書；做過的電子書會列在首頁的「電子書」區" data-icon="book-open">電子書</button>
           </div>
@@ -173,6 +174,15 @@
       <!-- 左下角工具，一顆一列、跟側邊欄等寬：關聯圖（反向連結＋標籤的力導向圖）、
            檔案管理（上傳過的圖片／PDF／其他檔案與它們用在哪些筆記）、垃圾桶（刪除的筆記保留期內可復原）。
            id 沿用原本頂端按鈕的，app.js 裡的 click 處理不用改。 -->
+      <!-- 四個獨立區域，各自的筆記跟資料夾都跟一般筆記分開放（js/areas.js AREAS）：
+           證照課程筆記、隨筆（Keep 風格）、知識區都是普通筆記只是分頁；小說多一關
+           密碼（js/novel.js），連筆記列表都要解鎖後才會送到瀏覽器。 -->
+      <nav class="sidebar-nav sidebar-areas" aria-label="區域">
+        <button id="course-open-btn" class="sidebar-nav-item" type="button" title="證照與課程筆記，跟一般筆記分開放" data-icon="award">證照／課程筆記</button>
+        <button id="quick-open-btn" class="sidebar-nav-item" type="button" title="隨手記一下，像 Google Keep 一樣的卡片牆" data-icon="pin">隨筆</button>
+        <button id="knowledge-open-btn" class="sidebar-nav-item" type="button" title="自己整理彙整出來的筆記" data-icon="book-open">知識區</button>
+        <button id="novel-open-btn" class="sidebar-nav-item" type="button" title="需要再輸入一次密碼才能進入" data-icon="lock">小說</button>
+      </nav>
       <nav class="sidebar-nav" aria-label="工具">
         <button id="graph-open-btn" class="sidebar-nav-item" type="button" title="用力導向圖看所有筆記的反向連結跟標籤關聯" data-icon="graph">關聯圖</button>
         <button id="images-open-btn" class="sidebar-nav-item" type="button" title="上傳過的圖片、PDF 與其他檔案：看每個用在哪些筆記，清掉沒有筆記在用的" data-icon="files">檔案管理</button>
@@ -311,6 +321,20 @@
       <div id="trash-wrap" class="trash-wrap" hidden>
         <div id="trash-page" class="dashboard trash-page"></div>
       </div>
+      <!-- 四個獨立區域頁面（js/areabrowser.js 畫證照課程／知識區／小說；js/quicknotes.js 畫隨筆），
+           版面跟垃圾桶頁同一套：一個可捲動的外框 + Dashboard 風格的內容格線。 -->
+      <div id="course-wrap" class="trash-wrap area-wrap" hidden>
+        <div id="course-page" class="dashboard trash-page"></div>
+      </div>
+      <div id="knowledge-wrap" class="trash-wrap area-wrap" hidden>
+        <div id="knowledge-page" class="dashboard trash-page"></div>
+      </div>
+      <div id="novel-wrap" class="trash-wrap area-wrap" hidden>
+        <div id="novel-page" class="dashboard trash-page"></div>
+      </div>
+      <div id="quick-wrap" class="trash-wrap area-wrap" hidden>
+        <div id="quick-page" class="quick-page"></div>
+      </div>
     </main>
     </div><!-- /#app-body -->
   </div>
@@ -330,6 +354,7 @@
   <script src="js/icons.js?v=8"></script>
   <script src="js/merge.js?v=2"></script>
   <script src="js/mindmap.js?v=3"></script>
+  <script src="js/relmap.js?v=1"></script>
   <script src="js/graph.js?v=3"></script>
   <script src="js/store.js?v=56"></script>
   <script src="js/auth.js?v=48"></script>
@@ -337,7 +362,7 @@
   <script src="js/admin.js?v=49"></script>
   <script src="js/backup.js?v=1"></script>
   <script src="js/search.js?v=41"></script>
-  <script src="js/markdown.js?v=57"></script>
+  <script src="js/markdown.js?v=58"></script>
   <script src="js/editor.js?v=53"></script>
   <script src="js/templates.js?v=1"></script>
   <script src="js/edithl.js?v=46"></script>
@@ -349,6 +374,8 @@
   <script src="js/perfreport.js?v=43"></script>
   <script src="js/sorting.js?v=1"></script>
   <script src="js/dashboard.js?v=62"></script>
+  <script src="js/areabrowser.js?v=1"></script>
+  <script src="js/quicknotes.js?v=1"></script>
   <script src="js/annotate.js?v=42"></script>
   <script src="js/pdf.js?v=49"></script>
   <script src="js/book.js?v=6"></script>
@@ -359,6 +386,6 @@
   <script src="js/embedswitch.js?v=1"></script>
   <script src="js/blogwyg.js?v=2"></script>
   <script src="js/blogmode.js?v=10"></script>
-  <script src="js/app.js?v=95"></script>
+  <script src="js/app.js?v=97"></script>
 </body>
 </html>

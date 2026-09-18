@@ -101,6 +101,15 @@
       const last = wantNote || LS.get('lastNote', null);
       if (location.hash === '#trash') {
         openTrash();
+      } else if (location.hash === '#course') {
+        openArea('course');
+      } else if (location.hash === '#knowledge') {
+        openArea('knowledge');
+      } else if (location.hash === '#quick') {
+        openQuick();
+      } else if (location.hash === '#novel') {
+        // 一定要先問過密碼才能進去，重新整理也一樣——openArea('novel') 本身就會擋下來彈窗。
+        openArea('novel');
       } else if (wantFolder && state.folders.some(function (f) { return f.id === wantFolder; })) {
         // 在資料夾裡重新整理：留在那個資料夾，網址不動
         showEmpty(true);
@@ -118,17 +127,23 @@
 
   // ---- Tree rendering ----------------------------------------------------
   // 排序方式與手動順序跟首頁共用（js/sorting.js）
+  // 側邊欄樹跟首頁儀表板永遠只看一般區域（area 是 null／undefined）——證照課程、
+  // 知識區、隨筆、小說都是各自獨立的分頁（見 areaNotes/areaFolders 與四個
+  // openXxx 函式），不會混進這裡，即使小說解鎖後它的筆記已經在 state.notes 裡。
   function childFolders(parentId, mode) {
     return state.folders
-      .filter(function (f) { return (f.parentId || null) === parentId; })
+      .filter(function (f) { return !f.area && (f.parentId || null) === parentId; })
       .sort(function (a, b) { return Sorting.compareFolders(a, b, mode); });
   }
   const isMine = n => !n.perm || n.perm === 'owner';
   function childNotes(folderId, mode) {
     return state.notes
-      .filter(function (n) { return isMine(n) && (n.folderId || null) === folderId; })
+      .filter(function (n) { return !n.area && isMine(n) && (n.folderId || null) === folderId; })
       .sort(function (a, b) { return Sorting.compareNotes(a, b, mode); });
   }
+  // 四個獨立區域各自的筆記／資料夾（永遠是自己的，不含分享來的）。
+  function areaNotes(area) { return state.notes.filter(function (n) { return n.area === area && isMine(n); }); }
+  function areaFolders(area) { return state.folders.filter(function (f) { return f.area === area; }); }
   // Notes shared with me live in their owner's folder tree, not mine, so they get
   // their own section instead of being filed under a folder id I do not have.
   function sharedNotes() {
@@ -507,16 +522,22 @@
       updateBatchBar();
     }
   };
-  // 批次動作後同時刷新側邊欄與（若正在顯示的）儀表板
+  // 批次動作後同時刷新側邊欄與（若正在顯示的）儀表板 / 四個獨立區域頁面
   function refreshViews() {
     renderTree();
     if (!emptyEl.hidden && window.Dashboard) Dashboard.refresh(dashOpts());
     if (trashWrapEl && !trashWrapEl.hidden && window.Trash) Trash.render(trashPageEl, trashOpts());
+    if (courseWrapEl && !courseWrapEl.hidden && window.AreaBrowser) AreaBrowser.refresh(areaOpts('course'));
+    if (knowledgeWrapEl && !knowledgeWrapEl.hidden && window.AreaBrowser) AreaBrowser.refresh(areaOpts('knowledge'));
+    if (novelWrapEl && !novelWrapEl.hidden && window.AreaBrowser) AreaBrowser.refresh(areaOpts('novel'));
+    if (quickWrapEl && !quickWrapEl.hidden && window.QuickNotes) QuickNotes.refresh(quickOpts());
   }
   // 儀表板需要的資料與回呼，集中一處，render / refresh 共用
   function dashOpts() {
     return {
-      notes: state.notes, folders: state.folders,
+      // 一般區域專用：跟側邊欄樹同一條規則，過濾掉四個獨立區域的筆記／資料夾。
+      notes: state.notes.filter(function (n) { return !n.area; }),
+      folders: state.folders.filter(function (f) { return !f.area; }),
       onOpen: openNote, onBook: openBook, onBookRemove: unmarkBook, onBookUpdate: updateBook,
       onPin: pinNote, onRename: renameNoteTo, onMenu: showNoteMenu,
       onFolderMenu: showFolderMenu, onFolderRename: renameFolderTo,
@@ -529,6 +550,230 @@
       onNavigate: function (folderId) { setHash(folderId ? 'folder/' + encodeURIComponent(folderId) : ''); },
       selection: selectionApi
     };
+  }
+
+  // ---- 四個獨立區域（證照／課程筆記、隨筆、知識區、小說）--------------------
+  // 證照課程／知識區／小說用同一個簡化檔案總管（js/areabrowser.js）；隨筆是它
+  // 自己的 Keep 風格卡片牆（js/quicknotes.js）。三個共用瀏覽器的區域共用同一套
+  // 回呼邏輯（新增／改名／刪除／移動），差別只在 area 這個字串跟顯示用的標題。
+  const AREA_INFO = {
+    course: { title: '證照／課程筆記', icon: 'award', wrap: null, page: null },
+    knowledge: { title: '知識區', icon: 'book-open', wrap: null, page: null },
+    novel: { title: '小說', icon: 'lock', wrap: null, page: null }
+  };
+  // wrap/page 要等 DOM 元素都取好才填——上面宣告時 courseWrapEl 等還沒定義。
+  function initAreaInfo() {
+    AREA_INFO.course.wrap = courseWrapEl; AREA_INFO.course.page = coursePageEl;
+    AREA_INFO.knowledge.wrap = knowledgeWrapEl; AREA_INFO.knowledge.page = knowledgePageEl;
+    AREA_INFO.novel.wrap = novelWrapEl; AREA_INFO.novel.page = novelPageEl;
+  }
+
+  function areaOpts(area) {
+    const info = AREA_INFO[area];
+    return {
+      title: info.title, icon: info.icon,
+      notes: areaNotes(area), folders: areaFolders(area),
+      onOpen: openNote,
+      onNewNote: function (folderId) {
+        return Store.createNote('未命名筆記', folderId, { area: area }).then(function (n) {
+          state.notes.push(n); renderTree(); return n;
+        }, function (e) { toast('新增失敗：' + (e && e.message || e)); return null; });
+      },
+      onNewFolder: function (parentId) {
+        return Store.createFolder('新資料夾', parentId, area).then(function (f) {
+          state.folders.push(f); return f;
+        }, function (e) { toast('新增失敗：' + (e && e.message || e)); return null; });
+      },
+      onRenameNote: function (note, title) { renameNoteTo(note, title); },
+      onRenameFolder: function (folder, name) { renameFolderTo(folder, name); },
+      onDeleteNote: function (note) {
+        return Store.deleteNote(note.id).then(function () {
+          state.notes = state.notes.filter(function (n) { return n.id !== note.id; });
+          renderTree();
+          return true;
+        }, function (e) { toast('刪除失敗：' + (e && e.message || e)); return false; });
+      },
+      onDeleteFolder: function (folder) {
+        const subNoteIds = areaNotes(area).filter(function (n) { return (n.folderId || null) === folder.id; }).map(function (n) { return n.id; });
+        return Promise.all(subNoteIds.map(function (id) { return Store.deleteNote(id); })).then(function () {
+          state.notes = state.notes.filter(function (n) { return subNoteIds.indexOf(n.id) < 0; });
+          return Store.deleteFolder(folder.id);
+        }).then(function () {
+          state.folders = state.folders.filter(function (f) { return f.id !== folder.id; });
+          renderTree();
+          return true;
+        }, function (e) { toast('刪除失敗：' + (e && e.message || e)); return false; });
+      },
+      onMoveNote: function (note) {
+        return showFolderPicker('移動「' + (note.title || '筆記') + '」', { folders: areaFolders(area) }).then(function (r) {
+          if (!r) return false;
+          return Store.updateNote(Object.assign({}, note, { folderId: r.folderId })).then(function (n) {
+            note.folderId = n.folderId; return true;
+          }, function (e) { toast('移動失敗：' + (e && e.message || e)); return false; });
+        });
+      },
+      onMoveFolder: function (folder) {
+        return showFolderPicker('移動「' + (folder.name || '資料夾') + '」', { folders: areaFolders(area).filter(function (f) { return f.id !== folder.id; }) }).then(function (r) {
+          if (!r) return false;
+          return Store.updateFolder(Object.assign({}, folder, { parentId: r.folderId })).then(function (f) {
+            folder.parentId = f.parentId; return true;
+          }, function (e) { toast('移動失敗：' + (e && e.message || e)); return false; });
+        });
+      }
+    };
+  }
+
+  function quickOpts() {
+    return {
+      notes: areaNotes('quick'),
+      onCreate: function (text) {
+        // 不特別拆第一行當標題——隨筆卡片本來就沒有標題欄（像 Keep 一樣），拆了
+        // 反而讓第一行在卡片上重複出現一次（標題一次、內文渲染又一次）。
+        Store.createNote('', null, { area: 'quick', content: text }).then(function (n) {
+          state.notes.push(n);
+          if (quickWrapEl && !quickWrapEl.hidden) QuickNotes.refresh(quickOpts());
+        }, function (e) { toast('新增失敗：' + (e && e.message || e)); });
+      },
+      onEdit: function (note, content) {
+        Store.updateNote(Object.assign({}, note, { content: content })).then(function (n) {
+          note.content = n.content; note.rev = n.rev; note.updatedAt = n.updatedAt;
+        }, function (e) { toast('儲存失敗：' + (e && e.message || e)); });
+      },
+      onPatch: function (note, patch) {
+        const meta = Object.assign({}, note.meta || {});
+        if (patch.pinned !== undefined) meta.pinned = patch.pinned || undefined;
+        if (patch.archived !== undefined) meta.archived = patch.archived || undefined;
+        if (patch.color !== undefined) meta.color = patch.color || undefined;
+        note.meta = meta;
+        Store.updateNote(Object.assign({}, note, { meta: meta })).then(function (n) {
+          note.meta = n.meta;
+          if (quickWrapEl && !quickWrapEl.hidden) QuickNotes.refresh(quickOpts());
+        }, function (e) { toast('儲存失敗：' + (e && e.message || e)); });
+      },
+      onDelete: function (note) {
+        Store.deleteNote(note.id).then(function () {
+          state.notes = state.notes.filter(function (n) { return n.id !== note.id; });
+          if (quickWrapEl && !quickWrapEl.hidden) QuickNotes.refresh(quickOpts());
+        }, function (e) { toast('刪除失敗：' + (e && e.message || e)); });
+      }
+    };
+  }
+
+  function closeAreaViews() {
+    ['course', 'knowledge', 'novel'].forEach(function (a) {
+      const info = AREA_INFO[a];
+      if (info.wrap) info.wrap.hidden = true;
+      setNavActive(a + '-open-btn', false);
+    });
+    if (quickWrapEl) quickWrapEl.hidden = true;
+    setNavActive('quick-open-btn', false);
+  }
+
+  // 進入一個區域頁面前的共用收尾：跟 openTrash／openBook 同一套「收起其他檢視」。
+  function leaveOtherViews() {
+    saveNow();
+    closeStream();
+    if (window.BlogMode) BlogMode.reset();
+    blogNoteId = null;
+    LS.set('lastNote', '');
+    noteBar(false);
+    if (notePathEl) notePathEl.textContent = '';
+    state.currentId = null; state.current = null;
+    emptyEl.hidden = true;
+    wrapEl.hidden = true;
+    if (secWrapEl) secWrapEl.hidden = true;
+    if (perfWrapEl) perfWrapEl.hidden = true;
+    closeBookView();
+    closeTrashView();
+  }
+
+  function openArea(area) {
+    const info = AREA_INFO[area];
+    if (!info || !info.wrap || !window.AreaBrowser) return;
+    if (area === 'novel' && !novelIsUnlocked) {
+      // 取消就退回首頁，不要留著一片空白（例如帶著 #novel 重新整理又按取消）。
+      promptNovelPassword().then(function (ok) { if (ok) openArea('novel'); else showEmpty(); });
+      return;
+    }
+    leaveOtherViews();
+    closeAreaViews();
+    info.wrap.hidden = false;
+    info.wrap.scrollTop = 0;
+    setNavActive(area + '-open-btn', true);
+    setSidebarOpen(true);
+    setHash(area);
+    AreaBrowser.render(info.page, areaOpts(area));
+    renderTree();
+  }
+  function openQuick() {
+    if (!quickWrapEl || !window.QuickNotes) return;
+    leaveOtherViews();
+    closeAreaViews();
+    quickWrapEl.hidden = false;
+    quickWrapEl.scrollTop = 0;
+    setNavActive('quick-open-btn', true);
+    setSidebarOpen(true);
+    setHash('quick');
+    QuickNotes.render(quickPageEl, quickOpts());
+    renderTree();
+  }
+
+  // 小說的第二層密碼：彈窗重新輸入目前帳號的密碼，通過才把 novelIsUnlocked 打開、
+  // 重抓一次筆記／資料夾列表（這時伺服器才會把 area:'novel' 的項目也一起送回來）。
+  // 這個彈窗只存在這一頁的生命週期——重新整理一律要再輸入一次，見 novelIsUnlocked
+  // 宣告處的說明。
+  function promptNovelPassword() {
+    return new Promise(function (resolve) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML =
+        '<div class="modal" role="dialog" aria-modal="true">' +
+        '<div class="modal-title">' + (Icons ? Icons.svg('lock') : '') + '<span>再次確認密碼</span></div>' +
+        '<div class="modal-body">小說區需要再輸入一次目前帳號的密碼才能進入。</div>' +
+        '<input class="modal-input" type="password" autocomplete="current-password">' +
+        '<div class="modal-error" hidden></div>' +
+        '<div class="modal-actions">' +
+        '<button class="btn modal-cancel" type="button">取消</button>' +
+        '<button class="btn btn-primary modal-ok" type="button">確認</button>' +
+        '</div></div>';
+      document.body.appendChild(overlay);
+      const field = overlay.querySelector('.modal-input');
+      const err = overlay.querySelector('.modal-error');
+      let busy = false;
+      function close(val) {
+        overlay.remove();
+        document.removeEventListener('keydown', onKey, true);
+        resolve(val);
+      }
+      function submit() {
+        if (busy || !field.value) return;
+        busy = true;
+        err.hidden = true;
+        Store.unlockNovel(field.value).then(function () {
+          novelIsUnlocked = true;
+          return Store.getNotes().then(function (notes) { state.notes = notes; });
+        }).then(function () {
+          return Store.getFolders().then(function (folders) { state.folders = folders; });
+        }).then(function () {
+          close(true);
+        }, function (e) {
+          busy = false;
+          err.textContent = (e && e.message) || '密碼不正確';
+          err.hidden = false;
+          field.value = '';
+          field.focus();
+        });
+      }
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); close(false); }
+        else if (e.key === 'Enter') { e.preventDefault(); submit(); }
+      }
+      overlay.querySelector('.modal-cancel').addEventListener('click', function () { close(false); });
+      overlay.querySelector('.modal-ok').addEventListener('click', submit);
+      overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) close(false); });
+      document.addEventListener('keydown', onKey, true);
+      setTimeout(function () { field.focus(); }, 30);
+    });
   }
 
   // Drag-and-drop filing from the dashboard (onto a folder tile or a crumb).
@@ -679,7 +924,7 @@
       const modal = document.createElement('div');
       modal.className = 'modal';
       const opts = o.noRoot ? [] : ['<option value="">（最上層）</option>'];
-      state.folders.slice().sort(function (a, b) {
+      (o.folders || state.folders).slice().sort(function (a, b) {
         return folderFullName(a.id).localeCompare(folderFullName(b.id), 'zh-Hant');
       }).forEach(function (f) {
         opts.push('<option value="' + f.id + '">' + MD.escapeHtml(folderFullName(f.id)) + '</option>');
@@ -720,6 +965,15 @@
   const bookWrapEl = $('#book-wrap');
   const trashWrapEl = $('#trash-wrap');
   const trashPageEl = $('#trash-page');
+  // 四個獨立區域（js/areas.js）：證照課程筆記、知識區、小說共用 AreaBrowser；
+  // 隨筆是它自己的 Keep 風格卡片牆（js/quicknotes.js）。
+  const courseWrapEl = $('#course-wrap'), coursePageEl = $('#course-page');
+  const knowledgeWrapEl = $('#knowledge-wrap'), knowledgePageEl = $('#knowledge-page');
+  const quickWrapEl = $('#quick-wrap'), quickPageEl = $('#quick-page');
+  const novelWrapEl = $('#novel-wrap'), novelPageEl = $('#novel-page');
+  // 只存在瀏覽器這一頁的生命週期裡，重新整理就重置——小說每次重新載入頁面都要
+  // 再輸入一次密碼，即使伺服器那邊的解鎖狀態還沒過期（見 CLAUDE.md 的小說區段落）。
+  let novelIsUnlocked = false;
   // 切換頂列的「筆記模式」：開一般筆記時顯示標題與編輯按鈕，回首頁時只留 logo + 帳號。
   function noteBar(on) {
     const app = document.getElementById('app');
@@ -877,6 +1131,7 @@
     if (perfWrapEl) perfWrapEl.hidden = true;
     closeBookView();
     closeTrashView();
+    closeAreaViews();
     if (window.Dashboard) {
       Dashboard.render(dashOpts());
     }
@@ -926,6 +1181,7 @@
     if (secWrapEl) secWrapEl.hidden = true;
     if (perfWrapEl) perfWrapEl.hidden = true;
     closeBookView();
+    closeAreaViews();
     trashWrapEl.hidden = false;
     trashWrapEl.scrollTop = 0;
     setNavActive('trash-open-btn', true);
@@ -948,6 +1204,7 @@
     if (secWrapEl) secWrapEl.hidden = true;
     if (perfWrapEl) perfWrapEl.hidden = true;
     closeTrashView();
+    closeAreaViews();
     bookWrapEl.hidden = false;
     setSidebarOpen(false);
     setHash('book/' + folderId);
@@ -1027,8 +1284,16 @@
     // 才收尾，收尾的回寫會落到新筆記上。
     if (window.BlogMode) BlogMode.reset();
     blogNoteId = null;
+    // 小說筆記在 state.notes 裡卻打不開，八成是 server/api.js 的一小時解鎖過期了
+    // （見 novelIsUnlocked 宣告處）——跟一般「筆記不見了」分開處理，讓使用者知道
+    // 只是要再輸入一次密碼，不是筆記真的不見。
+    const wasNovel = state.notes.some(function (n) { return n.id === id && n.area === 'novel'; });
     Store.getNote(id).then(function (note) {
       if (!note) { showEmpty(); return; }
+      // 關聯分析（meta.relMap）是疊在目前畫面上的工具，不是像一般筆記那樣「開啟」
+      // 它——不動 state.currentId、不收起首頁，取消或存檔都只是把疊層收掉，見
+      // openRelMapNote 開頭的說明。一定要在任何畫面狀態被改掉之前判斷。
+      if (window.RelMap && RelMap.isRelNote(note)) { openRelMapNote(note); return; }
       state.currentId = id;
       state.current = note;
       // Seed the collaboration baseline: this is the version we're now in sync with.
@@ -1040,6 +1305,7 @@
       emptyEl.hidden = true;
       closeBookView();
       closeTrashView();
+      closeAreaViews();
       setSidebarOpen(false);   // 從抽屜點開筆記後收回，把整個寬度留給筆記
 
       // 儲存後同步樹狀標題 / 記憶體中的筆記（給步驟式與表格式編輯器共用）。
@@ -1099,7 +1365,13 @@
       renderTree();
       startStream(note);   // go live: receive others' edits + presence
       if (note.perm !== 'read' && state.mode !== 'blog') editorEl.focus();
-    }).catch(function () { showEmpty(); });
+    }).catch(function () {
+      showEmpty();
+      if (wasNovel) {
+        novelIsUnlocked = false;
+        toast('小說區的解鎖已過期，請再輸入一次密碼');
+      }
+    });
   }
 
   let previewTimer = null;
@@ -1368,12 +1640,12 @@
     applyEditorText(lines.join('\n'));
   }
 
-  // Replace the body of the nth ```mindmap block in the source.
-  function replaceMindmapBlock(index, outline) {
+  // Replace the body of the nth ```<fence> block (mindmap or relmap) in the source.
+  function replaceFenceBlock(fence, index, outline) {
     const lines = editorEl.value.split('\n');
     let seq = -1;
     for (let i = 0; i < lines.length; i++) {
-      const open = lines[i].match(/^(\s{0,3})(```+|~~~+)\s*mindmap\s*$/);
+      const open = lines[i].match(new RegExp('^(\\s{0,3})(```+|~~~+)\\s*' + fence + '\\s*$'));
       if (!open) continue;
       let end = i + 1;
       while (end < lines.length && !new RegExp('^\\s{0,3}' + open[2][0] + '{3,}\\s*$').test(lines[end])) end++;
@@ -1385,6 +1657,8 @@
     }
     return false;
   }
+  function replaceMindmapBlock(index, outline) { return replaceFenceBlock('mindmap', index, outline); }
+  function replaceRelMapBlock(index, outline) { return replaceFenceBlock('relmap', index, outline); }
 
   function openMindMapBlock(block) {
     if (!block || !window.MindMap || !MindMap.open) return;
@@ -1397,6 +1671,35 @@
     if (index < 0) return;
     MindMap.open(block.getAttribute('data-mindmap') || '', function (outline) {
       if (!replaceMindmapBlock(index, outline)) toast('找不到對應的心智圖區塊，請重試');
+    });
+  }
+
+  function openRelMapBlock(block) {
+    if (!block || !window.RelMap || !RelMap.open) return;
+    if (state.current && state.current.perm === 'read') {
+      toast('這篇筆記你只有唯讀權限');
+      return;
+    }
+    const all = previewEl.querySelectorAll('.relmap-block');
+    const index = Array.prototype.indexOf.call(all, block);
+    if (index < 0) return;
+    RelMap.open(block.getAttribute('data-relmap') || '', function (dsl) {
+      if (!replaceRelMapBlock(index, dsl)) toast('找不到對應的關聯分析區塊，請重試');
+    });
+  }
+  // 關聯分析是「多一種筆記」（meta.relMap）：整篇筆記就是一張圖，一打開就直接進
+  // 全螢幕編輯器，不用先在預覽裡點一下——跟資安院報告／成效報告一開筆記就是
+  // 專用編輯器同一個道理。刻意不動 state.currentId／不收起首頁：這是一個疊在
+  // 目前畫面上的工具（跟 關聯圖／檔案管理 同一種模式），取消或完成都只是把疊層
+  // 收掉，回到原本開著的那一頁，不需要另外處理「取消要回哪裡」。
+  function openRelMapNote(note) {
+    RelMap.open(note.content || '', function (dsl) {
+      const updated = Object.assign({}, note, { content: '```relmap\n' + dsl + '\n```\n' });
+      Store.updateNote(updated).then(function (n) {
+        const idx = state.notes.findIndex(function (x) { return x.id === n.id; });
+        if (idx >= 0) { state.notes[idx].content = n.content; state.notes[idx].rev = n.rev; state.notes[idx].updatedAt = n.updatedAt; }
+        toast('已儲存');
+      }, function (e) { toast('儲存失敗：' + (e && e.message || e)); });
     });
   }
 
@@ -3162,8 +3465,11 @@
     document.addEventListener('mousedown', function (e) {
       if (!isSidebarOpen()) return;
       if (toggleBtn && toggleBtn.contains(e.target)) return;
-      // 首頁與垃圾桶頁預設開著抽屜：點頁面內容不收回，只有 ☰、Esc 或開啟筆記才會收
-      if (!emptyEl.hidden || (trashWrapEl && !trashWrapEl.hidden)) return;
+      // 首頁、垃圾桶頁跟四個獨立區域頁面預設開著抽屜：點頁面內容不收回，
+      // 只有 ☰、Esc 或開啟筆記才會收
+      if (!emptyEl.hidden || (trashWrapEl && !trashWrapEl.hidden) ||
+        (courseWrapEl && !courseWrapEl.hidden) || (knowledgeWrapEl && !knowledgeWrapEl.hidden) ||
+        (quickWrapEl && !quickWrapEl.hidden) || (novelWrapEl && !novelWrapEl.hidden)) return;
       const main = $('#main'), top = $('#topbar');
       if ((main && main.contains(e.target)) || (top && top.contains(e.target))) setSidebarOpen(false);
     });
@@ -3328,6 +3634,18 @@
     const perfBtn = $('#perf-report');
     if (perfBtn && window.PerfReport) perfBtn.addEventListener('click', createPerfReport);
 
+    // 關聯分析：新建立就帶一組起點範例，一開就直接進全螢幕編輯器（見 openNote 裡
+    // 的 RelMap.isRelNote 分支），不用像其他範本一樣再等 openNote 跑完一般流程。
+    const relBtn = $('#rel-map');
+    if (relBtn && window.RelMap) relBtn.addEventListener('click', function () {
+      Store.createNote('未命名關聯分析', currentFolderId(), { meta: { relMap: true }, content: RelMap.generate() })
+        .then(function (n) {
+          state.notes.push(n);
+          renderTree();
+          openNote(n.id);
+        }, function (e) { toast('新增失敗：' + (e && e.message || e)); });
+    });
+
     document.querySelectorAll('.mode-btn').forEach(function (b) {
       b.addEventListener('click', function () { setMode(b.dataset.mode); });
     });
@@ -3369,6 +3687,10 @@
         if (trashWrapEl && trashWrapEl.hidden) openTrash();
         return;
       }
+      if (location.hash === '#course') { if (courseWrapEl && courseWrapEl.hidden) openArea('course'); return; }
+      if (location.hash === '#knowledge') { if (knowledgeWrapEl && knowledgeWrapEl.hidden) openArea('knowledge'); return; }
+      if (location.hash === '#quick') { if (quickWrapEl && quickWrapEl.hidden) openQuick(); return; }
+      if (location.hash === '#novel') { if (novelWrapEl && novelWrapEl.hidden) openArea('novel'); return; }
       const bid = bookIdFromHash();
       if (bid) {
         if (state.folders.some(function (f) { return f.id === bid; })) openBook(bid);
@@ -3389,7 +3711,9 @@
       }
       // hash 變回空字串：「上一頁」退回首頁那一層。從筆記／電子書／垃圾桶回來就切回儀表板；
       // 本來就在儀表板、只是停在某個資料夾裡，就回到「所有筆記」。
-      if (state.currentId || (bookWrapEl && !bookWrapEl.hidden) || (trashWrapEl && !trashWrapEl.hidden)) goHome();
+      const inArea = (courseWrapEl && !courseWrapEl.hidden) || (knowledgeWrapEl && !knowledgeWrapEl.hidden) ||
+        (quickWrapEl && !quickWrapEl.hidden) || (novelWrapEl && !novelWrapEl.hidden);
+      if (state.currentId || (bookWrapEl && !bookWrapEl.hidden) || (trashWrapEl && !trashWrapEl.hidden) || inArea) goHome();
       else if (window.Dashboard && Dashboard.currentFolder()) Dashboard.openFolder(null);
     });
     // 新增 → 電子書：挑一個資料夾做成電子書；開過就會出現在首頁的「電子書」區
@@ -3416,6 +3740,13 @@
         onOpenNote: function (id) { openNote(id); }
       });
     });
+
+    // 四個獨立區域：證照／課程筆記、隨筆、知識區、小說（見 openArea / openQuick）
+    initAreaInfo();
+    const courseBtn = $('#course-open-btn'); if (courseBtn) courseBtn.addEventListener('click', function () { openArea('course'); });
+    const knowledgeBtn = $('#knowledge-open-btn'); if (knowledgeBtn) knowledgeBtn.addEventListener('click', function () { openArea('knowledge'); });
+    const novelBtn = $('#novel-open-btn'); if (novelBtn) novelBtn.addEventListener('click', function () { openArea('novel'); });
+    const quickBtn = $('#quick-open-btn'); if (quickBtn) quickBtn.addEventListener('click', openQuick);
 
     editorEl.addEventListener('input', function () {
       renderPreview();
@@ -3535,6 +3866,8 @@
       }
       const mmBtn = e.target.closest('.mm-edit-btn');
       if (mmBtn) { e.preventDefault(); openMindMapBlock(mmBtn.closest('.mindmap-block')); return; }
+      const rmBtn = e.target.closest('.rm-edit-btn');
+      if (rmBtn) { e.preventDefault(); openRelMapBlock(rmBtn.closest('.relmap-block')); return; }
       const link = e.target.closest('.note-link');
       if (link) { e.preventDefault(); handleNoteLink(link); return; }
       const tag = e.target.closest('.hashtag');

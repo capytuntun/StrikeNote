@@ -2791,6 +2791,75 @@ select.sec-info-input { cursor: pointer; }
   outline: none;
 }
 
+/* ---------- 關聯分析（js/relmap.js）：自由畫布節點／連線圖 ---------- */
+/* 唯讀渲染（預覽／PDF）：跟心智圖的 .mindmap-block 同一個殼 */
+.relmap-block {
+  position: relative; margin: 0 0 14px; border: 1px solid var(--border);
+  background: var(--bg-2); padding: 12px; overflow-x: auto;
+}
+.relmap-block .rm-edit-btn {
+  position: absolute; top: 6px; right: 6px; z-index: 1;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px; font-size: var(--fs-xs); font-weight: 600;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text-dim);
+  cursor: pointer;
+}
+.relmap-block .rm-edit-btn:hover { background: var(--row-hover); color: var(--text); }
+.relmap-block .rm-edit-btn .ic-svg { width: 14px; height: 14px; }
+.relmap-svg { display: block; max-width: 100%; height: auto; font-family: var(--sans); }
+
+/* 節點底色／字色走 CSS class（跟心智圖同一個理由：pdf.js 才能用自己的列印樣式
+   表覆寫同一批 class，不用管 SVG 裡的 inline 顏色），只有選取色是唯一的例外。 */
+.rm-node rect { fill: var(--bg); stroke: var(--border-strong); stroke-width: 1.5; }
+.rm-node text { fill: var(--text); font-size: 13px; font-weight: 600; }
+.rm-node.rm-sel rect { stroke: var(--accent); stroke-width: 2.5; }
+.rm-edge line { stroke: var(--text-faint); stroke-width: 1.5; }
+.rm-edge.rm-sel line { stroke: var(--accent); stroke-width: 2.5; }
+.rm-edge-lbg { fill: var(--bg-2); }
+.rm-edge-lbl { fill: var(--text-dim); font-size: 11px; }
+.rm-arrowhead { fill: var(--text-faint); }
+.rm-edge.rm-sel .rm-arrowhead { fill: var(--accent); }
+/* 節點顏色（新增節點時可選，跟隨筆卡片同一組色名但用邊框／文字著色，不是整塊底色，
+   保持表格式圖表一貫的白底黑字觀感） */
+.rm-node.rm-red rect { stroke: #d6293e; } .rm-node.rm-red text { fill: #d6293e; }
+.rm-node.rm-orange rect { stroke: #c9701c; } .rm-node.rm-orange text { fill: #c9701c; }
+.rm-node.rm-yellow rect { stroke: #a68a00; } .rm-node.rm-yellow text { fill: #a68a00; }
+.rm-node.rm-green rect { stroke: #1f8a3d; } .rm-node.rm-green text { fill: #1f8a3d; }
+.rm-node.rm-teal rect { stroke: #128a80; } .rm-node.rm-teal text { fill: #128a80; }
+.rm-node.rm-blue rect { stroke: #1c64d1; } .rm-node.rm-blue text { fill: #1c64d1; }
+.rm-node.rm-purple rect { stroke: #7c3aed; } .rm-node.rm-purple text { fill: #7c3aed; }
+
+/* ---------- 編輯器（殼跟心智圖共用 .mm-overlay/.mm-editor/.mm-bar/.mm-canvas/.mm-stage）---------- */
+.rm-canvas { cursor: grab; }
+.rm-canvas:active { cursor: grabbing; }
+.rm-stage { padding: 0; display: block; }
+.rm-node { cursor: grab; }
+.rm-node:active { cursor: grabbing; }
+.rm-edge { cursor: pointer; }
+/* 連線把手：平常很淡，滑到節點才明顯；拖它開始拉線，不是移動節點 */
+/* 每個節點的 <g class="rm-node"> 後面緊接著自己的 <circle class="rm-handle">
+   （見 relmap.js 的 draw()），所以只用「緊鄰手足」+ 選到，不能用 ~（會連到後面
+   所有節點的把手）。 */
+.rm-handle { fill: var(--bg); stroke: var(--border-strong); stroke-width: 1.5; opacity: 0; cursor: crosshair; }
+.rm-node:hover + .rm-handle, .rm-handle:hover { opacity: 1; }
+.rm-node.rm-sel + .rm-handle { opacity: 1; }
+.rm-rubberband { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 3; pointer-events: none; }
+.rm-input { text-align: left; }
+.rm-input-edge { font-weight: 400; font-size: var(--fs-sm); text-align: center; }
+
+/* 節點顏色選單（跟隨筆的調色盤同一個做法，body 子元素一律 fixed） */
+.rm-colors {
+  position: fixed; z-index: 2100; display: flex; flex-wrap: wrap; gap: 6px; width: 148px;
+  padding: 8px; background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+}
+.rm-swatch { width: 24px; height: 24px; border: 1px solid var(--border); cursor: pointer; padding: 0; background: var(--bg); }
+.rm-swatch.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rm-swatch.rm-none { background: repeating-linear-gradient(45deg, var(--bg-2), var(--bg-2) 4px, var(--bg) 4px, var(--bg) 8px); }
+.rm-swatch.rm-red { background: #d6293e; } .rm-swatch.rm-orange { background: #c9701c; }
+.rm-swatch.rm-yellow { background: #a68a00; } .rm-swatch.rm-green { background: #1f8a3d; }
+.rm-swatch.rm-teal { background: #128a80; } .rm-swatch.rm-blue { background: #1c64d1; }
+.rm-swatch.rm-purple { background: #7c3aed; }
+
 /* ---------- 關聯圖（反向連結＋標籤，Obsidian 風格的力導向圖） ---------- */
 .graph-overlay {
   position: fixed; inset: 0; z-index: 2000;
@@ -2965,6 +3034,8 @@ div.ver-item.ver-now { cursor: default; }
   font-size: var(--fs-md);
 }
 .modal-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); outline: none; }
+/* 小說密碼彈窗（js/app.js promptNovelPassword）的錯誤訊息，蓋掉輸入框原本的下邊距 */
+.modal-error { margin: -10px 0 16px; font-size: var(--fs-sm); color: var(--danger); }
 
 /* ---------- 儀表板：麵包屑與拖曳歸檔 ---------- */
 /* 目前所在的那一層不是連結，所以不做 hover 反應，只是把位置說清楚。 */
@@ -3489,3 +3560,90 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 
 /* 檔案管理：標題列的上傳鈕 */
 .imglib-upload { flex: 0 0 auto; padding: 5px 10px; margin-right: 6px; font-size: var(--fs-sm); }
+
+/* ---------- 四個獨立區域：證照／課程筆記、知識區、小說（js/areabrowser.js）用
+   跟首頁一樣的 .dash-* class，不需要另外的 CSS；隨筆（js/quicknotes.js）是自己
+   的 Keep 風格卡片牆，以下才是它專用的樣式。 ---------- */
+.quick-page { max-width: 1100px; margin: 0 auto; padding: 28px 32px 40vh; }
+.qn-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.qn-title-h { display: flex; align-items: center; gap: 9px; margin: 0; font-size: var(--fs-xl); font-weight: 700; }
+.qn-title-h .ic-svg { width: 20px; height: 20px; color: var(--accent); }
+
+/* 常駐在牆頂端的「記點什麼…」輸入列 */
+.qn-composer {
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; margin-bottom: 22px;
+  background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+}
+.qn-composer-input {
+  flex: 1; min-height: 24px; max-height: 260px; resize: none; overflow-y: auto;
+  border: 0; outline: none; background: transparent; color: var(--text);
+  font: inherit; font-size: var(--fs-md); line-height: 1.55;
+}
+.qn-composer-actions[hidden] { display: none; }
+.qn-composer-actions .btn { padding: 6px 16px; font-size: var(--fs-sm); }
+
+.qn-section-head { margin: 4px 0 10px; }
+
+/* 卡片牆：CSS 多欄排出的錯落效果，不需要量測版面的 JS */
+.qn-grid { column-width: 230px; column-gap: 14px; margin-bottom: 26px; }
+.qn-card {
+  display: inline-block; width: 100%; break-inside: avoid; margin-bottom: 14px;
+  background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+  cursor: text; transition: box-shadow .12s;
+}
+.qn-card:hover { box-shadow: var(--shadow); }
+.qn-title { padding: 12px 14px 0; font-weight: 700; font-size: var(--fs-md); word-break: break-word; }
+.qn-body { padding: 12px 14px; font-size: var(--fs-sm); line-height: 1.6; word-break: break-word; max-height: 320px; overflow: hidden; }
+.qn-body:empty::before { content: '空白的隨筆'; color: var(--text-faint); font-style: italic; }
+.qn-body p:first-child { margin-top: 0; }
+.qn-body p:last-child { margin-bottom: 0; }
+.qn-body .task-check { cursor: not-allowed; }
+
+/* 顏色（meta.color）：淡色底，跟看板卡片一樣只染背景，字色不動 */
+.qn-card.qn-c-red { background: var(--qn-red, #fdeceb); }
+.qn-card.qn-c-orange { background: var(--qn-orange, #fdf1e2); }
+.qn-card.qn-c-yellow { background: var(--qn-yellow, #fdf7dc); }
+.qn-card.qn-c-green { background: var(--qn-green, #e9f6ea); }
+.qn-card.qn-c-teal { background: var(--qn-teal, #e3f4f2); }
+.qn-card.qn-c-blue { background: var(--qn-blue, #e8f1fb); }
+.qn-card.qn-c-purple { background: var(--qn-purple, #f1ecfa); }
+.qn-card.qn-c-pink { background: var(--qn-pink, #fbebf3); }
+:root[data-theme="dark"] .qn-card.qn-c-red { background: var(--qn-red-dark, #3a2321); }
+:root[data-theme="dark"] .qn-card.qn-c-orange { background: var(--qn-orange-dark, #3a2c1c); }
+:root[data-theme="dark"] .qn-card.qn-c-yellow { background: var(--qn-yellow-dark, #383219); }
+:root[data-theme="dark"] .qn-card.qn-c-green { background: var(--qn-green-dark, #1f3220); }
+:root[data-theme="dark"] .qn-card.qn-c-teal { background: var(--qn-teal-dark, #1a3230); }
+:root[data-theme="dark"] .qn-card.qn-c-blue { background: var(--qn-blue-dark, #1c2c3f); }
+:root[data-theme="dark"] .qn-card.qn-c-purple { background: var(--qn-purple-dark, #2a2440); }
+:root[data-theme="dark"] .qn-card.qn-c-pink { background: var(--qn-pink-dark, #3a2231); }
+
+/* 卡片底部的釘選／顏色／封存／刪除，平常很淡，滑過卡片才明顯 */
+.qn-toolbar { display: flex; align-items: center; gap: 2px; padding: 4px 8px 6px; opacity: 0; transition: opacity .12s; }
+.qn-card:hover .qn-toolbar, .qn-card:focus-within .qn-toolbar { opacity: 1; }
+.qn-tbtn {
+  display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+  border: 0; background: transparent; color: var(--text-faint); cursor: pointer; padding: 0;
+}
+.qn-tbtn:hover { background: var(--row-hover); color: var(--text); }
+.qn-tbtn.on { color: var(--accent); }
+.qn-tbtn .ic-svg { width: 15px; height: 15px; }
+
+/* 就地編輯：textarea 蓋住卡片內文那塊，字級跟排版後的樣子接近 */
+.qn-edit {
+  display: block; width: 100%; min-height: 60px; padding: 12px 14px; margin: 0; border: 0; outline: none;
+  resize: none; overflow: hidden; background: transparent; color: var(--text); caret-color: var(--accent);
+  font: inherit; font-size: var(--fs-sm); line-height: 1.6; white-space: pre-wrap;
+}
+
+/* 顏色選單（body 子元素一律 fixed） */
+.qn-palette { position: fixed; z-index: 1300; display: flex; flex-wrap: wrap; gap: 6px; width: 160px; padding: 8px; background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow); }
+.qn-swatch { width: 26px; height: 26px; border: 1px solid var(--border); cursor: pointer; padding: 0; background: var(--bg); }
+.qn-swatch.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.qn-swatch.qn-c-red { background: var(--qn-red, #fdeceb); }
+.qn-swatch.qn-c-orange { background: var(--qn-orange, #fdf1e2); }
+.qn-swatch.qn-c-yellow { background: var(--qn-yellow, #fdf7dc); }
+.qn-swatch.qn-c-green { background: var(--qn-green, #e9f6ea); }
+.qn-swatch.qn-c-teal { background: var(--qn-teal, #e3f4f2); }
+.qn-swatch.qn-c-blue { background: var(--qn-blue, #e8f1fb); }
+.qn-swatch.qn-c-purple { background: var(--qn-purple, #f1ecfa); }
+.qn-swatch.qn-c-pink { background: var(--qn-pink, #fbebf3); }

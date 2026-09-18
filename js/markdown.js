@@ -560,6 +560,18 @@
             '直接拖曳可換上層</div></div>';
         }
       }
+      // ```relmap 是關聯分析（js/relmap.js）：自由畫布的節點／連線圖，DSL 存節點
+      // 位置跟連線，SVG 每次都重新畫。跟心智圖同一個做法，唯讀渲染只給看，要編輯
+      // 按「全螢幕」進 RelMap.open()。
+      if (info === 'relmap' && global.RelMap) {
+        let svg = '';
+        try { svg = RelMap.renderSVG(code); } catch (e) { svg = ''; }
+        if (svg) {
+          return '<div class="relmap-block" data-relmap="' + escapeHtml(code) + '">' +
+            '<button class="rm-edit-btn" type="button" title="在全螢幕編輯器裡打開">' +
+            (global.Icons ? Icons.svg('network') : '') + ' 全螢幕</button>' + svg + '</div>';
+        }
+      }
       let requested = info, lineNumbers = false, startLine = 1;
       const opt = info.match(/^([^\s=]*)=(\d*)$/);
       if (opt) {
@@ -717,6 +729,7 @@
         'data-toc',    // [toc] 的展開鈕
         'data-task',   // 待辦清單：勾選框在文件中的序號，用來回寫原始 markdown
         'data-mindmap', 'data-i',    // 心智圖：原始大綱文字，以及節點索引
+        'data-relmap',    // 關聯分析：原始 DSL 文字（js/relmap.js）
         'data-link-url', 'data-file-id', 'data-file-kind', 'rel'],   // 網址預覽卡片、附件連結
       ADD_TAGS: ['input', 'button', 'iframe'] // checkboxes, annotate button, PDF embed
     });

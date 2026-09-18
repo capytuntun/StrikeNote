@@ -401,7 +401,7 @@
       '.pdf-content .code-block { position: relative; margin: 0 0 10pt; }',
       '.pdf-content .code-block .code-tools { position: absolute; top: 0; right: 0; }',
       '.pdf-content .code-copy, .pdf-content .img-annotate, .pdf-content .mm-edit-btn,' +
-      ' .pdf-content .mm-hint { display: none; }',
+      ' .pdf-content .mm-hint, .pdf-content .rm-edit-btn { display: none; }',
       /* 心智圖：節點的底色與字色在畫面上是靠 CSS 變數決定的，列印文件裡沒有那些
          變數，不補這幾行的話 fill 會失效變成整塊黑。 */
       '.pdf-content .mindmap-block { border: 1px solid #d0d7de; padding: 8pt; margin: 0 0 12pt;',
@@ -412,6 +412,23 @@
       '.pdf-content .mm-text { fill: #1f2430; }',
       '.pdf-content .mm-text-root { fill: #ffffff; }',
       '.pdf-content .mm-badge-t { fill: #ffffff; }',
+      /* 關聯分析：同一個理由，節點／連線的顏色也要在紙本上重新指定一次固定值。 */
+      '.pdf-content .relmap-block { border: 1px solid #d0d7de; padding: 8pt; margin: 0 0 12pt;',
+      '  break-inside: avoid; overflow: hidden; }',
+      '.pdf-content .relmap-svg { display: block; max-width: 100%; height: auto; }',
+      '.pdf-content .rm-node rect { fill: #ffffff; stroke: #57606a; stroke-width: 1.5; }',
+      '.pdf-content .rm-node text { fill: #1f2430; }',
+      '.pdf-content .rm-edge line { stroke: #57606a; stroke-width: 1.5; }',
+      '.pdf-content .rm-edge-lbg { fill: #ffffff; }',
+      '.pdf-content .rm-edge-lbl { fill: #57606a; }',
+      '.pdf-content .rm-arrowhead { fill: #57606a; }',
+      '.pdf-content .rm-node.rm-red rect { stroke: #d6293e; } .pdf-content .rm-node.rm-red text { fill: #d6293e; }',
+      '.pdf-content .rm-node.rm-orange rect { stroke: #c9701c; } .pdf-content .rm-node.rm-orange text { fill: #c9701c; }',
+      '.pdf-content .rm-node.rm-yellow rect { stroke: #a68a00; } .pdf-content .rm-node.rm-yellow text { fill: #a68a00; }',
+      '.pdf-content .rm-node.rm-green rect { stroke: #1f8a3d; } .pdf-content .rm-node.rm-green text { fill: #1f8a3d; }',
+      '.pdf-content .rm-node.rm-teal rect { stroke: #128a80; } .pdf-content .rm-node.rm-teal text { fill: #128a80; }',
+      '.pdf-content .rm-node.rm-blue rect { stroke: #1c64d1; } .pdf-content .rm-node.rm-blue text { fill: #1c64d1; }',
+      '.pdf-content .rm-node.rm-purple rect { stroke: #7c3aed; } .pdf-content .rm-node.rm-purple text { fill: #7c3aed; }',
       /* 待辦清單：紙本上不畫項目符號，只留勾選框與文字。 */
       /* 勾選框絕對定位、文字靠 padding 內縮：折行的第二行才會對齊文字，而不是跑到勾選框底下 */
       '.pdf-content li.task-item { list-style: none; position: relative; margin-left: -1.2em; padding-left: 1.45em; }',

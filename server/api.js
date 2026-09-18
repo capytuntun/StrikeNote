@@ -25,12 +25,40 @@ function uid(prefix) {
   return prefix + '_' + Date.now().toString(36) + '_' + crypto.randomBytes(6).toString('hex');
 }
 
+// ---------------- areas ----------------
+// A note's or folder's home: undefined/null = 一般 (the dashboard/tree exactly as
+// before this feature), or one of these four, set once at creation — updateNote's
+// SQL has no area column, so an existing row's area can never change afterwards.
+// A folder's area must match every note and sub-folder placed inside it (checked
+// in folderAreaOf below, not a DB constraint: MariaDB has no portable "check
+// against a joined row").
+const AREAS = ['course', 'knowledge', 'quick', 'novel'];
+function normalizeArea(a) { return AREAS.indexOf(a) >= 0 ? a : null; }
+
+// 小說 (novel): the one area with a second gate. POST /api/novel/unlock (server/
+// auth.js) sets sessions.novel_unlocked_at after the caller re-types their own
+// password; this — not anything client-side — is what actually keeps a novel
+// note unreadable, because it is checked inside permFor() below, the same choke
+// point that already makes a trashed note invisible to every route. The unlock
+// is timed from here, not from the session's own expiry, so a stale browser tab
+// left open overnight re-locks on its own without needing to log out.
+const NOVEL_UNLOCK_TTL_MS = 60 * 60 * 1000;   // 1 hour
+function novelUnlocked(user) {
+  return !!(user.novelUnlockedAt && (Date.now() - user.novelUnlockedAt) < NOVEL_UNLOCK_TTL_MS);
+}
+
 // ---------------- permissions ----------------
 async function permFor(user, note) {
   // A trashed note does not exist as far as every normal route is concerned —
   // reading, saving, versions, shares, images all 404. Only the trash endpoints
   // (listTrash / restoreNote / purgeNote) look at those rows, owner-only.
   if (!note || note.deleted_at) return null;
+  // A novel note is never shareable (setAccess refuses it) and is only ever the
+  // owner's own — but the owner too gets nothing back until the session has
+  // re-typed the password within the last hour. This one check is what keeps
+  // GET/PUT on a note id, its versions, its images and its PDF export all 404
+  // for a locked session, without each of those routes having to know.
+  if (note.area === 'novel' && !(note.owner_id === user.id && novelUnlocked(user))) return null;
   if (note.owner_id === user.id) return 'owner';
   const s = await q.shareFor.get(note.id, user.id);
   if (s) return s.perm;              // 'read' | 'edit'
@@ -56,7 +84,8 @@ function shapeNote(row, perm, ownerName, viaSite) {
     sharedBy: ownerName || undefined,
     access: row.access || 'restricted',          // owner's "general access" setting
     accessPerm: row.access_perm || 'read',
-    viaSite: viaSite ? true : undefined          // reached through site-wide access, not a share
+    viaSite: viaSite ? true : undefined,         // reached through site-wide access, not a share
+    area: row.area || undefined          // undefined = 一般, else 'course'|'knowledge'|'quick'|'novel'
   };
 }
 
@@ -65,7 +94,12 @@ async function listNotes(user) {
   const own = (await q.notesOwned.all(user.id)).map(r => shapeNote(r, 'owner'));
   const shared = (await q.notesSharedWith.all(user.id)).map(r => shapeNote(r, r.share_perm, r.owner_name));
   const site = (await q.notesSiteWide.all(user.id, user.id)).map(r => shapeNote(r, r.share_perm, r.owner_name, true));
-  return own.concat(shared, site);
+  // 'novel' rides along in this same list once unlocked, so the client's normal
+  // GET /api/notes — the one call it already knows how to make — is enough to
+  // pick novel notes up right after POST /api/novel/unlock succeeds; no separate
+  // endpoint needed. Locked, or never unlocked this session, it is simply absent.
+  const novel = novelUnlocked(user) ? (await q.notesOwnedArea.all(user.id, 'novel')).map(r => shapeNote(r, 'owner')) : [];
+  return own.concat(shared, site, novel);
 }
 
 async function getNote(user, id) {
@@ -81,19 +115,41 @@ async function getNote(user, id) {
 async function setAccess(user, id, body) {
   const row = await q.noteById.get(id);
   if (!row || row.owner_id !== user.id) return { status: 404 };
+  // 小說沒有「一般存取」這回事：不管解鎖與否都不能開放給別人，這個區域本來就是
+  // 為了不給別人看才做的。
+  if (row.area === 'novel') return { status: 403, error: '小說筆記不能分享或開放給其他人' };
   const mode = body.mode === 'site' ? 'site' : 'restricted';
   const perm = body.perm === 'edit' ? 'edit' : 'read';
   await q.setAccess.run(mode, perm, id);
   return { ok: true, access: mode, accessPerm: perm };
 }
 
+// A note/folder placed inside folderId must belong to the SAME area as that
+// folder (or, with no folderId, the area the caller asked for) — otherwise a
+// course note could be filed into a general folder and disappear from both
+// views, or worse, a novel note filed into a public folder would leak through
+// a folder listing that has no reason to gate itself. Returns the resolved,
+// validated area (a string or null), or throws a shaped error.
+async function resolveArea(user, wantArea, folderId) {
+  const area = normalizeArea(wantArea);
+  if (!folderId) return area;
+  const folder = await q.folderById.get(folderId);
+  if (!folder || folder.owner_id !== user.id) throw { status: 404, error: '找不到這個資料夾' };
+  if ((folder.area || null) !== area) throw { status: 400, error: '資料夾跟筆記不在同一個區域' };
+  return area;
+}
+
 async function createNote(user, body) {
+  let area;
+  try { area = await resolveArea(user, body.area, body.folderId); }
+  catch (e) { return e; }
+  if (area === 'novel' && !novelUnlocked(user)) return { status: 403, error: 'novel_locked' };
   const now = Date.now();
   const id = uid('note');
   await q.insertNote.run(
     id, user.id, body.folderId || null,
     String(body.title || '未命名筆記'), String(body.content || ''),
-    body.meta ? JSON.stringify(body.meta) : null, now, now);
+    body.meta ? JSON.stringify(body.meta) : null, now, now, area);
   return shapeNote(await q.noteById.get(id), 'owner');
 }
 
@@ -522,7 +578,15 @@ async function updateNote(user, id, body) {
     if (!row) return { status: 404 };
     // A recipient with edit rights may change content, but must not be able to
     // move someone else's note into their own folder tree.
-    const folderId = perm === 'owner' ? (body.folderId || null) : row.folder_id;
+    let folderId = perm === 'owner' ? (body.folderId || null) : row.folder_id;
+    // A note's area is fixed at creation, so a move must stay inside that same
+    // area — the target folder has to belong to it (and to this owner; folders
+    // are never shared, so a stray id from elsewhere just falls back to the top
+    // level here rather than erroring the whole save).
+    if (folderId && perm === 'owner') {
+      const target = await q.folderById.get(folderId);
+      if (!target || target.owner_id !== user.id || (target.area || null) !== (row.area || null)) folderId = null;
+    }
     // Collaborative merge: `baseContent` is the text this client last had in sync
     // with the server. If someone else saved in the meantime (row.content moved
     // on), reconcile the two edits; on a same-line clash this save wins.
@@ -631,22 +695,39 @@ async function purgeExpiredTrash() {
 function shapeFolder(r) {
   return {
     id: r.id, name: r.name, parentId: r.parent_id, createdAt: r.created_at, isBook: !!r.is_book,
-    position: r.position == null ? null : Number(r.position)
+    position: r.position == null ? null : Number(r.position),
+    area: r.area || undefined
   };
 }
 async function listFolders(user) {
-  return (await q.foldersOf.all(user.id)).map(shapeFolder);
+  const own = (await q.foldersOf.all(user.id)).map(shapeFolder);
+  // Same idea as listNotes: novel folders ride along in this same response once
+  // this session has re-typed the password, and are simply absent otherwise.
+  const novel = novelUnlocked(user) ? (await q.foldersOfArea.all(user.id, 'novel')).map(shapeFolder) : [];
+  return own.concat(novel);
 }
 async function createFolder(user, body) {
+  let area;
+  try { area = await resolveArea(user, body.area, body.parentId); }
+  catch (e) { return e; }
+  if (area === 'novel' && !novelUnlocked(user)) return { status: 403, error: 'novel_locked' };
   const id = uid('fld');
-  await q.insertFolder.run(id, user.id, String(body.name || '新資料夾'), body.parentId || null, Date.now());
+  await q.insertFolder.run(id, user.id, String(body.name || '新資料夾'), body.parentId || null, Date.now(), area);
   return shapeFolder(await q.folderById.get(id));
 }
 async function updateFolder(user, id, body) {
   const r = await q.folderById.get(id);
   if (!r || r.owner_id !== user.id) return { status: 404 };
+  // A folder's own area never changes (same rule as a note's), so a move must
+  // land it under a parent of that SAME area — resolveArea, pinned to the area
+  // this folder already has instead of one the caller gets to pick.
+  const parentId = body.parentId !== undefined ? body.parentId : r.parent_id;
+  if (parentId) {
+    try { await resolveArea(user, r.area, parentId); }
+    catch (e) { return e; }
+  }
   await tx(async function () {
-    await q.updateFolder.run(String(body.name || r.name), body.parentId || null, id, user.id);
+    await q.updateFolder.run(String(body.name || r.name), parentId || null, id, user.id);
     // isBook is optional so that a rename or a move leaves the bookshelf alone.
     if (body.isBook !== undefined) await q.setFolderBook.run(body.isBook ? 1 : 0, id, user.id);
   }, 'updateFolder');
@@ -666,6 +747,15 @@ async function deleteFolder(user, id) {
 // another is a single request. Like a folder move in updateNote this is
 // bookkeeping: no rev, no broadcast, no updated_at. Rows that are not the
 // caller's, or are in the trash, are skipped by the statements themselves.
+// Deliberately not cross-checked against `area` here the way updateNote's folder
+// move is: q.orderNote/orderFolder only ever touch folder_id/parent_id, never
+// `area`, so even a forged cross-area call cannot smuggle a note out of the
+// novel gate (permFor() and the general listing key off `area`, not folder_id).
+// The worst it can do is leave a note's folder_id pointing at a folder from a
+// different area, which just makes it fall out of that area's own folder tree —
+// a display-only rough edge each area's own (area-scoped) drag-and-drop never
+// produces on its own, so it is left as a known gap rather than adding an
+// id -> area lookup to every drag here.
 const ORDER_MAX = 5000;
 async function saveOrder(user, body) {
   const b = body || {};
@@ -957,5 +1047,6 @@ module.exports = {
   listBookLinks, createBookLink, updateBookLink, deleteBookLink, publicBook,
   listFolders, createFolder, updateFolder, deleteFolder,
   createImage, getImage, saveImage, deleteImage, listImages, saveOrder,
-  listShares, addShare, removeShare
+  listShares, addShare, removeShare,
+  normalizeArea   // server/backup.js reuses this so a restored area is validated the same way a live create is
 };

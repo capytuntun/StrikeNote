@@ -330,6 +330,19 @@ async function handleApi(req, res, url) {
     return (r && r.status) ? json(res, r.status, { error: r.error || 'error' }) : json(res, 200, r);
   };
 
+  // 小說區：重新輸入目前帳號的密碼，通過就把這個 session 標記為已解鎖（js/app.js
+  // promptNovelPassword）。跟一般 API 錯誤不同：這裡的失敗一律回一句「密碼不正確」，
+  // 不分帳號是否存在——帳號本來就是自己的，不用假裝不知道。失敗一定是 403，不是
+  // 401——這裡的登入 session 本身完全沒事，401 會被 js/store.js 的 req() 當成
+  // 「session 過期」，跳出「請重新登入」的 alert() 把使用者整個登出，那是要處理
+  // 完全不同的錯（session cookie 失效），不是「小說第二層密碼打錯了」。
+  if (p === '/api/novel/unlock' && method === 'POST') {
+    const body = await readJSON(req);
+    const cookies = auth.parseCookies(req.headers.cookie);
+    const r = await auth.unlockNovel(cookies[auth.COOKIE], user, body.password, clientIp(req));
+    return r.error ? json(res, 403, { error: r.error }) : json(res, 200, { ok: true });
+  }
+
   if (p === '/api/change-password' && method === 'POST') {
     const body = await readJSON(req);
     const check = await auth.verifyPassword(user.username, String(body.current || ''));
@@ -372,7 +385,8 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/notes' && method === 'GET') return json(res, 200, { notes: await api.listNotes(user) });
   if (p === '/api/notes' && method === 'POST') {
-    return json(res, 200, { note: await api.createNote(user, await readJSON(req)) });
+    const r = await api.createNote(user, await readJSON(req));
+    return r && r.status ? send(r) : json(res, 200, { note: r });
   }
 
   let m;
@@ -471,7 +485,8 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/folders' && method === 'GET') return json(res, 200, { folders: await api.listFolders(user) });
   if (p === '/api/folders' && method === 'POST') {
-    return json(res, 200, { folder: await api.createFolder(user, await readJSON(req)) });
+    const r = await api.createFolder(user, await readJSON(req));
+    return r && r.status ? send(r) : json(res, 200, { folder: r });
   }
   if ((m = p.match(/^\/api\/folders\/([\w.-]+)$/))) {
     if (method === 'PUT') return send(await api.updateFolder(user, m[1], await readJSON(req)));

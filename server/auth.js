@@ -147,7 +147,27 @@ async function userFromToken(token) {
     await q.deleteSessionsOf.run(user.id);
     return null;
   }
+  // 小說區解鎖狀態跟著這個 session token 走（見 unlockNovel）；api.js 的
+  // permFor()/novelUnlocked() 只看這個欄位，從不重新查一次 sessions 表。
+  user.novelUnlockedAt = row.novel_unlocked_at || null;
   return user;
+}
+
+// 小說區的第二層密碼：重新輸入目前帳號的密碼，通過就把這個 session 標記為已解鎖
+// （server/api.js 的 novelUnlocked() 只認一小時內的標記，過期要再輸入一次）。跟登入
+// 共用同一組節流計數，key 多加 'novel:' 前綴，不會因為打錯小說密碼而連帶鎖住登入。
+async function unlockNovel(token, user, password, ip) {
+  const key = 'novel:' + user.username;
+  const wait = isLockedOut(key, ip);
+  if (wait) return { error: '嘗試次數過多，請於 ' + wait + ' 秒後再試' };
+  const check = await verifyPassword(user.username, String(password || ''));
+  if (!check || check.disabled) {
+    noteFailure(key, ip);
+    return { error: '密碼不正確' };
+  }
+  noteSuccess(key, ip);
+  await q.setNovelUnlock.run(Date.now(), sha256(token));
+  return { ok: true };
 }
 
 async function destroySession(token) {
@@ -219,5 +239,5 @@ function startHousekeeping() {
 module.exports = {
   COOKIE, createUser, verifyPassword, createSession, userFromToken, destroySession,
   isLockedOut, noteFailure, noteSuccess, parseCookies, sessionCookie, clearCookie, validUsername,
-  ensureAdmin, setPassword, hashPassword, startHousekeeping
+  ensureAdmin, setPassword, hashPassword, startHousekeeping, unlockNovel
 };

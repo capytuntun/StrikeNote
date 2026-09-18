@@ -146,6 +146,7 @@ const SCHEMA = [
     parent_id  VARCHAR(64) COLLATE utf8mb4_bin NULL,
     created_at BIGINT NOT NULL,
     is_book    TINYINT(1) NOT NULL DEFAULT 0,
+    area       VARCHAR(16) NULL,
     KEY idx_folders_owner (owner_id),
     CONSTRAINT fk_folders_owner FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -162,6 +163,7 @@ const SCHEMA = [
     rev         INT NOT NULL DEFAULT 0,
     access      VARCHAR(16) NOT NULL DEFAULT 'restricted',
     access_perm VARCHAR(8) NOT NULL DEFAULT 'read',
+    area        VARCHAR(16) NULL,
     KEY idx_notes_owner (owner_id),
     CONSTRAINT fk_notes_owner FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -276,7 +278,18 @@ const MIGRATIONS = [
   ['notes', 'position', 'INT NULL'],
   ['folders', 'position', 'INT NULL'],
   // The uploaded file's own name, for downloads and the file library.
-  ['images', 'name', 'VARCHAR(255) NULL']
+  ['images', 'name', 'VARCHAR(255) NULL'],
+  // Areas (server/api.js "areas"): a note/folder's home is NULL (一般, unchanged
+  // default) or 'course' | 'knowledge' | 'quick' | 'novel', set once at creation
+  // and never changed afterwards. A folder's own area must match every note and
+  // sub-folder placed inside it (enforced in api.js, not by a DB constraint,
+  // since MariaDB has no portable "check against a joined row" constraint).
+  ['notes', 'area', 'VARCHAR(16) NULL'],
+  ['folders', 'area', 'VARCHAR(16) NULL'],
+  // Set by POST /api/novel/unlock after the caller re-types their own password;
+  // permFor() only grants access to an area:'novel' note while this is set and
+  // fresh (NOVEL_UNLOCK_TTL_MS in api.js) — see the 小說 bullet in CLAUDE.md.
+  ['sessions', 'novel_unlocked_at', 'BIGINT NULL']
 ];
 
 async function addColumnIfMissing(table, col, ddl) {
@@ -369,19 +382,30 @@ const q = {
   sessionByHash: stmt('SELECT * FROM sessions WHERE token_hash = ?'),
   deleteSession: stmt('DELETE FROM sessions WHERE token_hash = ?'),
   deleteExpiredSessions: stmt('DELETE FROM sessions WHERE expires_at < ?'),
+  // 小說區解鎖（server/auth.js unlockNovel）：這個 session 最後一次成功重新輸入密碼的時間。
+  setNovelUnlock: stmt('UPDATE sessions SET novel_unlocked_at = ? WHERE token_hash = ?'),
 
   // folders
-  foldersOf: stmt('SELECT * FROM folders WHERE owner_id = ?'),
+  // "Areas" (server/api.js): course/knowledge/quick folders ride along in the
+  // normal listing — the client filters by .area client-side, same idea as
+  // filtering by .folderId — because they cost nothing to expose. 'novel' is
+  // the one area excluded here even from its owner: api.js only folds it back
+  // in via foldersOfArea once the caller's session has re-typed the password
+  // (see novelUnlocked() / permFor()).
+  foldersOf: stmt("SELECT * FROM folders WHERE owner_id = ? AND (area IS NULL OR area <> 'novel')"),
+  foldersOfArea: stmt('SELECT * FROM folders WHERE owner_id = ? AND area = ?'),
   folderById: stmt('SELECT * FROM folders WHERE id = ?'),
   insertFolder: stmt(
-    'INSERT INTO folders (id, owner_id, name, parent_id, created_at) VALUES (?, ?, ?, ?, ?)'),
+    'INSERT INTO folders (id, owner_id, name, parent_id, created_at, area) VALUES (?, ?, ?, ?, ?, ?)'),
   updateFolder: stmt('UPDATE folders SET name = ?, parent_id = ? WHERE id = ? AND owner_id = ?'),
   setFolderBook: stmt('UPDATE folders SET is_book = ? WHERE id = ? AND owner_id = ?'),
   deleteFolder: stmt('DELETE FROM folders WHERE id = ? AND owner_id = ?'),
 
   // notes
   // Every listing excludes trashed notes; only the trash statements below see them.
-  notesOwned: stmt('SELECT * FROM notes WHERE owner_id = ? AND deleted_at IS NULL'),
+  // Same area split as folders above: everything except 'novel' rides along.
+  notesOwned: stmt("SELECT * FROM notes WHERE owner_id = ? AND deleted_at IS NULL AND (area IS NULL OR area <> 'novel')"),
+  notesOwnedArea: stmt('SELECT * FROM notes WHERE owner_id = ? AND deleted_at IS NULL AND area = ?'),
   notesSharedWith: stmt(`
     SELECT n.*, s.perm AS share_perm, u.username AS owner_name
     FROM notes n
@@ -390,11 +414,15 @@ const q = {
     WHERE s.user_id = ? AND n.deleted_at IS NULL`),
   // Notes opened up to the whole site by their owner. An explicit share for the
   // same person takes precedence (it may grant more), so those rows are skipped.
+  // area <> 'novel': a novel note is never shareable in the first place
+  // (setAccess refuses it in api.js), but this is the same belt-and-braces
+  // exclusion notesSharedWith relies on by construction.
   notesSiteWide: stmt(`
     SELECT n.*, n.access_perm AS share_perm, u.username AS owner_name
     FROM notes n
     JOIN users u ON u.id = n.owner_id
     WHERE n.access = 'site' AND n.owner_id != ? AND n.deleted_at IS NULL
+      AND (n.area IS NULL OR n.area <> 'novel')
       AND NOT EXISTS (SELECT 1 FROM shares s WHERE s.note_id = n.id AND s.user_id = ?)`),
   setAccess: stmt('UPDATE notes SET access = ?, access_perm = ? WHERE id = ?'),
   noteById: stmt('SELECT * FROM notes WHERE id = ?'),
@@ -403,8 +431,8 @@ const q = {
   // read rev 5 would both write rev 6 and one edit would silently vanish.
   noteByIdForUpdate: stmt('SELECT * FROM notes WHERE id = ? FOR UPDATE'),
   insertNote: stmt(`
-    INSERT INTO notes (id, owner_id, folder_id, title, content, meta, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+    INSERT INTO notes (id, owner_id, folder_id, title, content, meta, created_at, updated_at, area)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   updateNote: stmt(
     'UPDATE notes SET folder_id = ?, title = ?, content = ?, meta = ?, updated_at = ?, rev = ? WHERE id = ?'),
   // Hard delete — only the trash sweep / purge call this; "delete" in the UI is trashNote.
@@ -519,13 +547,16 @@ const q = {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
   foldersAll: stmt('SELECT * FROM folders ORDER BY created_at'),
   insertFolderFull: stmt(
-    'INSERT INTO folders (id, owner_id, name, parent_id, created_at, is_book, position) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+    'INSERT INTO folders (id, owner_id, name, parent_id, created_at, is_book, position, area) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
   updateFolderFull: stmt('UPDATE folders SET name = ?, parent_id = ?, is_book = ?, position = ? WHERE id = ?'),
   noteIdsOf: stmt('SELECT id FROM notes WHERE owner_id = ? ORDER BY created_at'),
   noteIdsAll: stmt('SELECT id FROM notes ORDER BY created_at'),
+  // area is restored on insert only (a missing row is recreated exactly as it
+  // was); an existing row's area never changes on restore, same as a live edit
+  // can never change it — restoreNoteFull deliberately has no area column.
   insertNoteFull: stmt(`
-    INSERT INTO notes (id, owner_id, folder_id, title, content, meta, created_at, updated_at, rev, access, access_perm, deleted_at, position)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    INSERT INTO notes (id, owner_id, folder_id, title, content, meta, created_at, updated_at, rev, access, access_perm, deleted_at, position, area)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   restoreNoteFull: stmt(`
     UPDATE notes SET folder_id = ?, title = ?, content = ?, meta = ?, updated_at = ?, rev = ?,
       access = ?, access_perm = ?, deleted_at = ?, position = ? WHERE id = ?`),

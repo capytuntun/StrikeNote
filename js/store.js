@@ -97,9 +97,12 @@
 
     // Folders (private — never shared)
     getFolders: function () { return req('GET', '/api/folders').then(r => r.folders); },
-    createFolder: function (name, parentId) {
-      return req('POST', '/api/folders', { name: name || '新資料夾', parentId: parentId || null })
-        .then(r => r.folder);
+    // area: undefined = 一般 (unchanged default), or 'course'/'knowledge'/'quick'/'novel'
+    // (js/areas.js AREAS) — must match parentId's own area, checked server-side.
+    createFolder: function (name, parentId, area) {
+      const body = { name: name || '新資料夾', parentId: parentId || null };
+      if (area) body.area = area;
+      return req('POST', '/api/folders', body).then(r => r.folder);
     },
     updateFolder: function (folder) {
       const body = { name: folder.name, parentId: folder.parentId || null };
@@ -118,9 +121,14 @@
     // Notes
     getNotes: function () { return req('GET', '/api/notes').then(r => r.notes); },
     getNote: function (id) { return req('GET', '/api/notes/' + id).then(r => r.note); },
-    createNote: function (title, folderId) {
-      return req('POST', '/api/notes', { title: title || '未命名筆記', folderId: folderId || null, content: '' })
-        .then(r => r.note);
+    // opts: { area, meta, content } — area must match folderId's own area (or be
+    // top-level within that area with no folderId), checked server-side.
+    createNote: function (title, folderId, opts) {
+      const o = opts || {};
+      const body = { title: title || '未命名筆記', folderId: folderId || null, content: o.content || '' };
+      if (o.area) body.area = o.area;
+      if (o.meta) body.meta = o.meta;
+      return req('POST', '/api/notes', body).then(r => r.note);
     },
     updateNote: function (note) {
       return req('PUT', '/api/notes/' + note.id, {
@@ -143,6 +151,11 @@
     restoreNote: function (id) { return req('POST', '/api/notes/' + id + '/restore').then(r => r.note); },
     purgeNote: function (id) { return req('DELETE', '/api/trash/' + id); },
     emptyTrash: function () { return req('DELETE', '/api/trash'); },
+
+    // 小說區（js/novel.js）：重新輸入目前帳號的密碼，通過後這個 session 一小時內
+    // 都算已解鎖（server/api.js NOVEL_UNLOCK_TTL_MS）——之後 getNotes/getFolders
+    // 才會把 area:'novel' 的項目也一起帶回來。密碼錯誤時 reject，訊息可直接顯示。
+    unlockNovel: function (password) { return req('POST', '/api/novel/unlock', { password: password }); },
 
     // Version history. The list never carries note bodies — only sizes — so
     // opening the panel on a long note stays cheap.
