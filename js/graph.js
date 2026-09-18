@@ -22,6 +22,29 @@
   function normTitle(t) { return String(t || '').trim().toLowerCase(); }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
+  // 節點／連線的顏色、彎曲方向都是「看資料算出來的固定值」，不是隨機——同一張圖
+  // 重畫（切換顯示標籤、視窗大小改變）顏色跟彎法要一樣，不能每次都跳動。用 id
+  // 算一個穩定的雜湊當種子。
+  function hash(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }
+  const NODE_COLORS = ['#e0c674', '#6fa8dc', '#e08a52', '#5fb88a', '#d97a9c', '#9a86d6', '#5cc2c2', '#d66a6a'];
+  const EDGE_COLORS = ['#c9822a', '#4f8fd6', '#4fb0a8', '#d65f6b', '#8e6fd6', '#5fae5f', '#d6a23f', '#4fa0d6'];
+  function nodeColor(n) { return n.kind === 'tag' ? null : NODE_COLORS[hash(n.id) % NODE_COLORS.length]; }
+  function edgeColor(e) { return EDGE_COLORS[hash(e.a + '|' + e.b) % EDGE_COLORS.length]; }
+  // 二次貝茲曲線：控制點從邊的中點沿垂直方向偏移，偏移量隨線長縮放、方向照雜湊
+  // 奇偶交替（有的往左彎有的往右彎），整張圖才會有機、不會每條線都彎同一邊。
+  function curvePath(ax, ay, bx, by, seed) {
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+    const bend = (seed % 2 === 0 ? 1 : -1) * Math.min(len * 0.18, 70);
+    const mx = (ax + bx) / 2 + (-dy / len) * bend;
+    const my = (ay + by) / 2 + (dx / len) * bend;
+    return 'M' + ax + ',' + ay + ' Q' + mx + ',' + my + ' ' + bx + ',' + by;
+  }
+
   // ---- 從筆記內容建圖：節點 = 筆記 + 標籤，邊 = wikilink 解析結果 + 標籤歸屬 ----
   function buildGraph(notes) {
     const nodes = [];
@@ -90,16 +113,25 @@
       '<label class="graph-tag-toggle"><input type="checkbox" class="graph-tags-cb" checked> 顯示標籤</label>' +
       '<span class="graph-bar-sp"></span>' +
       '<span class="graph-legend"><i class="graph-dot graph-dot-note"></i>筆記<i class="graph-dot graph-dot-tag"></i>標籤</span>' +
-      '<button class="btn graph-fit" type="button" title="縮放置中，讓整張圖剛好塞進畫面">置中</button>' +
       '<button class="btn graph-close" type="button">關閉</button>' +
       '</header>' +
-      '<div class="graph-canvas" tabindex="0"></div>' +
+      '<div class="graph-canvas" tabindex="0">' +
+      '<div class="graph-zoom-ctrl">' +
+      '<button class="graph-ctrl-btn graph-zo" type="button" title="縮小">' + (global.Icons ? Icons.svg('minus') : '') + '</button>' +
+      '<button class="graph-ctrl-btn graph-zi" type="button" title="放大">' + (global.Icons ? Icons.svg('plus') : '') + '</button>' +
+      '<button class="graph-ctrl-btn graph-zfit" type="button" title="縮放置中，讓整張圖剛好塞進畫面">' + (global.Icons ? Icons.svg('maximize') : '') + '</button>' +
+      '</div>' +
+      '<button class="graph-reset-btn" type="button" title="還原成一開始的佈局，重新跑一次模擬">重置視圖</button>' +
+      '</div>' +
       '</div>';
     document.body.appendChild(overlay);
 
     const canvas = overlay.querySelector('.graph-canvas');
     const closeBtn = overlay.querySelector('.graph-close');
-    const fitBtn = overlay.querySelector('.graph-fit');
+    const zoomOutBtn = overlay.querySelector('.graph-zo');
+    const zoomInBtn = overlay.querySelector('.graph-zi');
+    const zoomFitBtn = overlay.querySelector('.graph-zfit');
+    const resetBtn = overlay.querySelector('.graph-reset-btn');
     const tagsCb = overlay.querySelector('.graph-tags-cb');
 
     if (!data.nodes.length) {
@@ -110,7 +142,6 @@
       closeBtn.addEventListener('click', closeEmpty);
       overlay.querySelector('.graph-tag-toggle').hidden = true;
       overlay.querySelector('.graph-legend').hidden = true;
-      fitBtn.hidden = true;
       return { close: closeEmpty };
     }
 
@@ -134,20 +165,29 @@
     function visibleEdges() { return showTags ? data.edges : data.edges.filter(function (e) { return e.kind !== 'tag'; }); }
 
     // ---- DOM：每個節點/邊固定對應一個元素，之後每個 tick 只更新屬性 ----
+    // 邊是彎的（curvePath），節點顏色跟邊顏色都是雜湊出來的固定值，只有「度數」
+    // 高於平均的節點預設就顯示標籤——其餘節點的標籤還在，只是靠 CSS 的
+    // .is-minor 藏著，滑過去（既有的 is-hover）就會現形，不用另外接邏輯。
     const edgeEls = {}, nodeEls = {};
     function rebuildDom() {
       edgeLayer.innerHTML = ''; nodeLayer.innerHTML = '';
       Object.keys(edgeEls).forEach(function (k) { delete edgeEls[k]; });
       Object.keys(nodeEls).forEach(function (k) { delete nodeEls[k]; });
-      visibleEdges().forEach(function (e, i) {
-        const line = svgEl('line', { class: 'graph-edge graph-edge-' + e.kind });
-        edgeLayer.appendChild(line);
-        edgeEls[e.a + '|' + e.b + '|' + i] = { el: line, edge: e };
+      visibleEdges().forEach(function (e) {
+        const path = svgEl('path', { class: 'graph-edge graph-edge-' + e.kind });
+        path.style.stroke = edgeColor(e);
+        edgeLayer.appendChild(path);
+        edgeEls[e.a + '|' + e.b] = { el: path, edge: e, seed: hash(e.a + '|' + e.b) };
       });
-      visibleNodes().forEach(function (n) {
+      const vn = visibleNodes();
+      const avgDeg = vn.length ? vn.reduce(function (s, n) { return s + n.deg; }, 0) / vn.length : 0;
+      vn.forEach(function (n) {
         const r = n.kind === 'tag' ? 5 : (7 + Math.min(n.deg * 1.6, 14));
-        const g = svgEl('g', { class: 'graph-node graph-node-' + n.kind, 'data-id': n.id });
+        const major = n.deg > avgDeg;
+        const g = svgEl('g', { class: 'graph-node graph-node-' + n.kind + (major ? '' : ' is-minor'), 'data-id': n.id });
         const c = svgEl('circle', { r: r, class: 'graph-node-dot' });
+        const fill = nodeColor(n);
+        if (fill) c.style.fill = fill;
         const t = svgEl('text', { class: 'graph-node-label', x: 0, y: -(r + 6) });
         t.textContent = n.label.length > 40 ? n.label.slice(0, 39) + '…' : n.label;
         const title = svgEl('title', {});
@@ -253,14 +293,23 @@
     }
     let hasAutoFit = false;
 
+    // 重置視圖跟「置中」不一樣：置中只是重新對焦當下的位置；這裡連位置本身都
+    // 丟掉，回到一開始的螺旋佈局重新跑模擬，等於把拖曳過的節點全部復原。
+    function resetView() {
+      data.nodes.forEach(function (n) { n.x = undefined; n.y = undefined; n.vx = 0; n.vy = 0; });
+      seedPositions(data.nodes);
+      hasAutoFit = false;
+      kick();
+    }
+    function zoomStep(factor) { zoom = clamp(zoom * factor, 0.15, 3); render(); }
+
     function render() {
       Object.keys(edgeEls).forEach(function (k) {
         const rec = edgeEls[k];
         const a = nodeEls[rec.edge.a] && nodeEls[rec.edge.a].node;
         const b = nodeEls[rec.edge.b] && nodeEls[rec.edge.b].node;
         if (!a || !b) return;
-        rec.el.setAttribute('x1', a.x); rec.el.setAttribute('y1', a.y);
-        rec.el.setAttribute('x2', b.x); rec.el.setAttribute('y2', b.y);
+        rec.el.setAttribute('d', curvePath(a.x, a.y, b.x, b.y, rec.seed));
       });
       Object.keys(nodeEls).forEach(function (id) {
         const rec = nodeEls[id];
@@ -343,7 +392,10 @@
     function onKey(e) { if (e.key === 'Escape') close(); }
     document.addEventListener('keydown', onKey);
     closeBtn.addEventListener('click', close);
-    fitBtn.addEventListener('click', fitView);
+    zoomOutBtn.addEventListener('click', function () { zoomStep(1 / 1.25); });
+    zoomInBtn.addEventListener('click', function () { zoomStep(1.25); });
+    zoomFitBtn.addEventListener('click', fitView);
+    resetBtn.addEventListener('click', resetView);
 
     function close() {
       if (raf) cancelAnimationFrame(raf);

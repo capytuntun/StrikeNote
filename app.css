@@ -2907,7 +2907,31 @@ select.sec-info-input { cursor: pointer; }
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   color: var(--text-faint); font-size: var(--fs-sm);
 }
-.graph-edge { stroke: var(--border-strong); stroke-width: 1; transition: opacity .12s; }
+/* 浮在畫布左上角的縮放群組跟右下角的重置鈕——跟 .graph-bar 的按鈕不同，這兩個是
+   「操作畫布本身」的鈕，放在畫布上比放在頂欄更貼近操作對象。 */
+.graph-zoom-ctrl {
+  position: absolute; top: 14px; left: 14px; z-index: 2;
+  display: flex; flex-direction: column; background: var(--bg);
+  border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+}
+.graph-ctrl-btn {
+  display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  border: 0; background: transparent; color: var(--text-dim); cursor: pointer; padding: 0;
+}
+.graph-ctrl-btn + .graph-ctrl-btn { border-top: 1px solid var(--border); }
+.graph-ctrl-btn:hover { background: var(--row-hover); color: var(--text); }
+.graph-ctrl-btn .ic-svg { width: 16px; height: 16px; }
+.graph-reset-btn {
+  position: absolute; right: 14px; bottom: 14px; z-index: 2;
+  padding: 7px 14px; font-size: var(--fs-sm); font-weight: 600;
+  background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+  color: var(--text-dim); cursor: pointer; transition: border-color .12s, color .12s;
+}
+.graph-reset-btn:hover { border-color: var(--border-strong); color: var(--text); }
+/* 邊是彎的 <path>，一定要 fill:none，不然 SVG 預設把曲線圍成的區域塗黑實心。
+   顏色是每條邊自己的 inline stroke（js 依 id 雜湊出來），這裡只留粗細、線頭
+   跟一般連結／標籤連結的虛實線之分。 */
+.graph-edge { fill: none; stroke: var(--border-strong); stroke-width: 1.4; stroke-linecap: round; transition: opacity .12s; }
 .graph-edge-tag { stroke-dasharray: 3 3; }
 .graph-edge.is-dim { opacity: .12; }
 .graph-node { cursor: pointer; }
@@ -2920,6 +2944,10 @@ select.sec-info-input { cursor: pointer; }
   text-anchor: middle; fill: var(--text-dim); font-family: var(--sans);
   font-size: 11px; pointer-events: none; user-select: none; transition: opacity .12s;
 }
+/* 只有度數高於平均的節點預設就有標籤——其餘的標籤還在 DOM 裡，只是透明，滑過
+   （既有的 is-hover）才現形，這樣一張連結很多的圖才不會滿版文字看不出結構。 */
+.graph-node.is-minor .graph-node-label { opacity: 0; }
+.graph-node.is-minor.is-hover .graph-node-label { opacity: 1; }
 .graph-node.is-dim .graph-node-dot,
 .graph-node.is-dim .graph-node-label { opacity: .18; }
 .graph-node.is-hover .graph-node-dot { stroke: var(--accent); }

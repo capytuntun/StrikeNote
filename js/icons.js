@@ -38,6 +38,7 @@
     search:            '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
     home:              '<path d="m3 11 9-8 9 8v10h-6v-6H9v6H3z"/>',
     'external-link':   '<path d="M14 4h6v6M20 4l-9 9M18 13v7H4V6h7"/>',
+    maximize:          '<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/>',
     clock:             '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     'alert-triangle':  '<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/>',
     info:              '<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 12v5"/>',
