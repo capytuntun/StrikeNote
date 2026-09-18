@@ -2876,7 +2876,10 @@
       // icon: '' keeps the label aligned with siblings that do have an icon (a check mark)
       const lead = a.icon ? Icons.svg(a.icon) : (a.icon === '' ? '<span class="ctx-spacer"></span>' : '');
       b.innerHTML = lead + '<span>' + MD.escapeHtml(a.label) + '</span>';
-      b.addEventListener('click', function () { hideCtx(); a.fn(); });
+      // stopPropagation: an item's fn can itself open another menu (e.g. 換區域…
+      // opens a second openMenuAt) — without this the same click's bubble to
+      // document's hideCtx below closes that new menu in the same tick.
+      b.addEventListener('click', function (e) { e.stopPropagation(); hideCtx(); a.fn(); });
       ctxMenu.appendChild(b);
     });
     ctxMenu.hidden = false;
