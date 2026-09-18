@@ -272,26 +272,64 @@
   // folder before / after it among its siblings, the middle moves it inside
   // (a dragged note always goes inside). A note row answers in halves, for notes
   // only. The empty tree area below the rows is the top level (see below).
-  let dragData = null;   // { type: 'note' | 'folder', ids: [...] }
+  // js/dashboard.js starts its own drags with these same two MIME types. The tree
+  // publishes them as well, and reads them back below, so a drag started on one
+  // surface can be dropped on the other: the sidebar is a drawer floating *over*
+  // the dashboard, so tree rows and folder tiles are on screen at the same time
+  // and dragging between them is the obvious gesture. Carrying real data also
+  // keeps the drag working in browsers that refuse to begin one whose data store
+  // is empty (only Chrome is lenient about that).
+  const DND_NOTES = 'application/x-strikenote-notes';
+  const DND_FOLDER = 'application/x-strikenote-folder';
+  let dragData = null;   // { type: 'note' | 'folder', ids: [...] }, when the drag started here
+  // What kind of thing is being dragged — from the module var when this surface
+  // started it, otherwise from the types the drag carries. Only `types` is
+  // readable during dragover; the ids have to wait for the drop (dragPayload).
+  function dragKind(e) {
+    if (dragData) return dragData.type;
+    const t = e.dataTransfer && e.dataTransfer.types;
+    if (!t) return null;
+    if (Array.prototype.indexOf.call(t, DND_NOTES) >= 0) return 'note';
+    if (Array.prototype.indexOf.call(t, DND_FOLDER) >= 0) return 'folder';
+    return null;
+  }
+  function dragPayload(e) {
+    if (dragData) return dragData;
+    try {
+      const notes = e.dataTransfer.getData(DND_NOTES);
+      if (notes) return { type: 'note', ids: JSON.parse(notes) };
+      const folder = e.dataTransfer.getData(DND_FOLDER);
+      if (folder) return { type: 'folder', ids: [folder] };
+    } catch (err) { /* unreadable data store: treat it as nothing being dragged */ }
+    return null;
+  }
   function attachDrag(el, type, id) {
     el.addEventListener('dragstart', function (e) {
       // Dragging one of several ticked notes takes them all, as on the dashboard.
       const ids = type === 'note' && selected.has(id) && selected.size > 1 ? Array.from(selected) : [id];
       dragData = { type: type, ids: ids };
       e.dataTransfer.effectAllowed = 'move';
+      try {
+        if (type === 'note') e.dataTransfer.setData(DND_NOTES, JSON.stringify(ids));
+        else e.dataTransfer.setData(DND_FOLDER, id);
+        // A plain-text fallback keeps the cursor from showing "no drop" in
+        // browsers that ignore unknown MIME types during dragover.
+        e.dataTransfer.setData('text/plain', (el.querySelector('.label') || el).textContent || '');
+      } catch (err) { /* older browsers restrict setData; the module var still works */ }
       e.stopPropagation();
     });
     el.addEventListener('dragend', function () { dragData = null; clearDropHints(); });
   }
   function dropZone(e, row, rowType) {
-    if (!dragData) return null;
+    const kind = dragKind(e);
+    if (!kind) return null;
     const r = row.getBoundingClientRect();
     const y = (e.clientY - r.top) / r.height;
     if (rowType === 'folder') {
-      if (dragData.type === 'note') return 'into';
+      if (kind === 'note') return 'into';
       return y < 0.3 ? 'before' : y > 0.7 ? 'after' : 'into';
     }
-    if (dragData.type !== 'note') return null;
+    if (kind !== 'note') return null;
     return y < 0.5 ? 'before' : 'after';
   }
   function attachDrop(el, rowType, item) {
@@ -312,8 +350,9 @@
       e.preventDefault();
       e.stopPropagation();
       clearDropHints();
-      const data = dragData;
+      const data = dragPayload(e);
       dragData = null;
+      if (!data || !data.ids.length) return;
       if (zone === 'into') moveItem(data, item.id);
       else if (rowType === 'folder') placeItems('folder', data.ids, item.parentId || null, item.id, zone === 'after');
       else placeItems('note', data.ids, item.folderId || null, item.id, zone === 'after');
@@ -666,9 +705,13 @@
   }
 
   // Allow dropping onto empty tree area => move to root
-  treeEl.addEventListener('dragover', function (e) { if (dragData) { e.preventDefault(); } });
+  treeEl.addEventListener('dragover', function (e) { if (dragKind(e)) { e.preventDefault(); } });
   treeEl.addEventListener('drop', function (e) {
-    if (dragData && e.target === treeEl) { e.preventDefault(); moveItem(dragData, null); }
+    if (!dragKind(e) || e.target !== treeEl) return;
+    e.preventDefault();
+    const data = dragPayload(e);
+    dragData = null;
+    if (data && data.ids.length) moveItem(data, null);
   });
 
   // ---- Note open / editor ------------------------------------------------
