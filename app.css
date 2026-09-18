@@ -1323,6 +1323,40 @@ body.tg-dragging { cursor: grabbing; user-select: none; }
 .tg-menu button.is-danger .ic-svg { color: var(--danger); }
 .tg-menu-sep { height: 1px; margin: 4px 2px; background: var(--border); }
 
+/* ---------- Blog 所見即所得（js/blogwyg.js）---------- */
+/* 正在編輯的區塊就是排版好的它自己（contentEditable），左邊亮一條 accent 跟 textarea 版一致 */
+.blog-block.wyg-editing { outline: none; caret-color: var(--accent); }
+.blog-block.wyg-editing > * { outline: none; }
+.blog-doc .blog-block.wyg-editing::before,
+.blog-doc:not(.is-readonly) .blog-block.wyg-editing:hover::before { background: var(--accent); }
+/* 空段落要看得到游標在哪：給一點最小高度 */
+.blog-block.wyg-editing > p:empty::before, .blog-block.wyg-editing > p > br:only-child { content: ''; }
+.blog-block.wyg-editing > p { min-height: 1.6em; }
+
+/* / 類型選單（body 子元素一律 fixed） */
+.wyg-slash {
+  position: fixed; z-index: 1300; min-width: 180px; max-height: 320px; overflow-y: auto; padding: 4px;
+  background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+}
+.wyg-slash-item {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 10px; border: 0;
+  background: transparent; color: var(--text); cursor: pointer; font: inherit; font-size: var(--fs-sm); text-align: left;
+}
+.wyg-slash-item:hover, .wyg-slash-item.active { background: var(--row-hover); }
+.wyg-slash-item .ic-svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--text-dim); }
+
+/* 反白工具列按「連結」後浮出的網址小輸入框（body 子元素一律 fixed） */
+.wyg-link {
+  position: fixed; z-index: 1300; display: flex; gap: 6px; padding: 6px;
+  background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+}
+.wyg-link input {
+  width: 260px; padding: 5px 8px; border: 1px solid var(--border); background: var(--bg-2); color: var(--text);
+  font: inherit; font-size: var(--fs-sm); outline: none;
+}
+.wyg-link input:focus { border-color: var(--accent); }
+.wyg-link .btn { padding: 4px 10px; font-size: var(--fs-sm); }
+
 .pane-edit { flex-direction: column; overflow: hidden; }
 
 /* editor formatting toolbar — line icons, a few with a short label.

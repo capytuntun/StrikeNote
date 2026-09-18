@@ -33,6 +33,7 @@
   let readOnly = false;
   let composing = false;
   let gridFocus = null;   // 排版後要打開的表格儲存格 { idx, r, c, sel }（js/tablegrid.js）
+  let lastFinishedEndLine = 0;   // 最後一次 finishWyg() 收尾的區塊佔到第幾行（見 wygPasteFiles）
 
   function splitLines(s) { return s === '' ? [] : s.split('\n'); }
 
@@ -126,8 +127,10 @@
   }
 
   function detach() {
+    if (ed && ed.wyg) ed.wyg.destroy();
     ed = null;
     hideBubble();
+    if (global.BlogWyg) BlogWyg.closeSlash();
     if (global.TableGrid) TableGrid.closeAll();
     if (ta && ta.parentNode) ta.parentNode.removeChild(ta);
   }
@@ -139,8 +142,129 @@
     const text = blockText(b);
     // 空段落（見 blankHere）編輯時是空的框，不讓人看到 &nbsp;
     const blank = text.trim() === BLANK;
-    ed = { index: i, after: i + 1, line0: b.start, count: b.end - b.start + 1, prefix: [], suffix: [], isNew: false, blank: blank };
-    mount(el, blank ? '' : text, blank ? 'start' : caret);
+    ed = { index: i, after: i + 1, line0: b.start, count: b.end - b.start + 1, prefix: [], suffix: [], isNew: false, blank: blank, wyg: null };
+    // 散文區塊（標題／內文／清單／引言）走 WYSIWYG——直接把排版好的區塊變成可編輯，看不到
+    // Markdown 符號；序列化涵蓋不到的（程式碼、表格、callout…）或空段落退回原本的 textarea。
+    // caret 可以是 'start'／'end'／原始碼位移，或 onClick 傳來的 { x, y, offset }：
+    // WYSIWYG 用座標放游標，textarea 用位移。
+    const isPt = caret && typeof caret === 'object';
+    if (!blank && global.BlogWyg && BlogWyg.canEdit(b.kind, text)) mountWyg(el, b.kind, caret);
+    else mount(el, blank ? '' : text, blank ? 'start' : (isPt ? caret.offset : caret));
+  }
+
+  // ---- WYSIWYG（js/blogwyg.js）：就地編排版好的散文區塊 ----------------------
+  function mountWyg(el, kind, caret) {
+    ed.wyg = BlogWyg.mount(el, wygOpts(kind), caret);
+    reveal(el, caret !== 'end');
+  }
+  function wygOpts(kind) {
+    return {
+      kind: kind,
+      onChange: function (md) { commitText(md); },
+      onSave: function () { if (opts.onSave) opts.onSave(); },
+      onLeave: function (dir) { return wygLeave(dir); },
+      onSplit: function (afterMd) { wygSplit(afterMd); },
+      onMerge: function () { wygMerge(); },
+      onRetype: function (newMd, newKind) { wygRetype(newMd, newKind); },
+      onFiles: function (files) { wygPasteFiles(files); }
+    };
+  }
+  // 在 WYSIWYG 區塊裡貼上檔案（圖片、PDF…）：先收尾這一塊（把目前打的字正常寫回原始碼、
+  // 重新排版），上傳完成後插在它後面自成一個新區塊——跟一般段落貼圖片同一個「各自成區塊」
+  // 的行為；跟 textarea 版在清單/引言裡原地插入不同，換來的是不用碰正在編輯中、還沒收尾的
+  // DOM 就能算出插入點，不會有插壞語法的風險。
+  let docToken = 0;
+  function wygPasteFiles(files) {
+    if (!ed || !opts.uploadFiles) return;
+    const token = docToken;
+    finish();
+    const line = lastFinishedEndLine;
+    upload(files, { pasted: true }).then(function (mds) {
+      if (!mds) return;
+      if (token !== docToken) { note('檔案已上傳，但已經離開這篇筆記，沒有插入'); return; }
+      insertAfterLine(line, mds);
+    });
+  }
+  function wygLeave(dir) {
+    if (dir === 0) { finish(); return true; }
+    return go(dir);
+  }
+  // 收尾一個 WYSIWYG 區塊：把它序列化的 Markdown 寫回原始碼（跟 textarea 版 finish 一樣的
+  // 空區塊收合邏輯），重新排版。回傳後面行號的位移。
+  function finishWyg() {
+    let md = ed.wyg.getMd().replace(/\n+$/, '');
+    if (md.trim() === '') md = '';
+    const before = ed.count;
+    commitText(md);
+    let delta = ed.count - before;
+    lastFinishedEndLine = ed.line0 + Math.max(ed.count, 1) - 1;   // 見 wygPasteFiles
+    if (md === '' && before > 0 && !ed.blank) {
+      const ls = splitLines(src);
+      const at = ed.line0 - 1;
+      let changed = false;
+      if (at > 0 && ls[at - 1] === '' && ls[at] === '') { ls.splice(at, 1); delta--; changed = true; }
+      if (at === 0) while (ls.length && ls[0] === '') { ls.shift(); delta--; changed = true; }
+      if (changed) { src = ls.join('\n'); if (opts.onChange) opts.onChange(src); }
+    }
+    detach();
+    render();
+    return delta;
+  }
+  // Enter：游標後面的內容已被切成 afterMd，本區塊收尾後在它下面開一個新段落放 afterMd。
+  function wygSplit(afterMd) {
+    const endLine = ed.line0 + ed.count - 1;
+    const at0 = ed.line0;
+    const shift = finish();
+    const end = endLine > at0 ? endLine + shift : endLine;
+    if (afterMd === '') {
+      // 在句尾按 Enter：開一個全新的空白 WYSIWYG 段落（跟 startNew 一樣，打了字才寫進原始碼）
+      let k = -1;
+      for (let i = 0; i < blocks.length; i++) if (blocks[i].start <= end) k = i;
+      startNew(k);
+      return;
+    }
+    // 在句中按 Enter：游標後面那段變成緊接在下面的新段落
+    const ls = splitLines(src);
+    const at = Math.min(end, ls.length);
+    const ins = [''].concat(afterMd.split('\n'));
+    Array.prototype.splice.apply(ls, [at, 0].concat(ins));
+    src = ls.join('\n');
+    if (opts.onChange) opts.onChange(src);
+    render();
+    editAtLine(at + 2, 'start');   // 空行後那一行（end 行 + 空行 + 內容）
+  }
+  // Backspace 在區塊開頭：空區塊就拿掉並回到上一塊尾；上下都是段落就併進上一塊；其餘只是跳到上一塊尾。
+  function wygMerge() {
+    const md = ed.wyg.getMd();
+    const prev = ed.index > 0 ? blocks[ed.index - 1] : null;
+    if (md.trim() === '') { if (!go(-1)) finish(); return; }
+    if (prev && prev.kind === 'para' && (blocks[ed.index] && blocks[ed.index].kind === 'para')) {
+      const prevMd = blockText(prev);
+      const joined = prevMd + md;
+      const line = prev.start;
+      // 用一個橫跨兩塊的暫時範圍改寫：把上一塊＋這一塊換成合併後的段落
+      const ls = splitLines(src);
+      const from = prev.start - 1, to = blocks[ed.index].end;
+      ls.splice(from, to - from, joined);
+      detach();
+      src = ls.join('\n');
+      if (opts.onChange) opts.onChange(src);
+      render();
+      // 游標放在接縫處（上一塊原本的長度）
+      editAtLine(line, 'end');
+      return;
+    }
+    go(-1);
+  }
+  // / 指令切換區塊類型：把這一塊換成新的 Markdown，重排後重新進入編輯（表格／分隔線不自動編）。
+  function wygRetype(newMd, newKind) {
+    commitText(newMd);
+    const line = ed.line0;
+    detach();
+    render();
+    if (newKind === 'hr') { return; }
+    if (newKind === 'table') { return; }   // 交給表格 grid，點格編輯
+    editAtLine(line, newKind === 'code' ? 'start' : 'end');
   }
 
   // 在 blocks[i] 後面（i = -1 表示最前面）開一個空白的新區塊。原始碼要等真的打了字才改，
@@ -153,7 +277,7 @@
     const prev = prevEnd > 0 ? ls[prevEnd - 1] : null;
     const next = ls[line0 - 1];
     ed = {
-      index: -1, after: i + 1, line0: line0, count: 0, isNew: true,
+      index: -1, after: i + 1, line0: line0, count: 0, isNew: true, wyg: null,
       // 前後有字就各空一行，不然新打的字會黏進上一段或下一段
       prefix: (prev != null && prev.trim() !== '') ? [''] : [],
       suffix: (next != null && next.trim() !== '') ? [''] : []
@@ -163,7 +287,14 @@
     const empty = root.querySelector('.blog-block-empty');
     if (empty) root.replaceChild(el, empty);
     else root.insertBefore(el, elOf(i + 1));
-    mount(el, '', 'start');
+    // 新區塊預設是段落，直接用 WYSIWYG 開一個空的可編輯段落（沒有 Markdown 符號可看）。
+    if (global.BlogWyg) {
+      el.innerHTML = '<p><br></p>';
+      ed.wyg = BlogWyg.mount(el, wygOpts('para'), 'start');
+      reveal(el, true);
+    } else {
+      mount(el, '', 'start');
+    }
   }
 
   // 空段落在原始碼裡的樣子。Markdown 會把連續的空行併成一個，排版後完全不佔高度，所以在 Blog
@@ -202,6 +333,7 @@
   // 呼叫端拿它校正事先記下的行號。
   function finish() {
     if (!ed) return 0;
+    if (ed.wyg) return finishWyg();
     let text = ta.value;
     if (!unclosed(text)) text = text.replace(/\n+$/, '');   // 結尾多按的 Enter 不留
     if (text.trim() === '') text = '';
@@ -576,7 +708,7 @@
     if (el.classList.contains('blog-block-empty')) { startNew(-1); return; }
     const b = blocks[Number(el.getAttribute('data-i'))];
     if (!b) return;
-    const caret = caretFromPoint(el, blockText(b), e.clientX, e.clientY);
+    const caret = { x: e.clientX, y: e.clientY, offset: caretFromPoint(el, blockText(b), e.clientX, e.clientY) };
     if (!ed) { editAtLine(b.start, caret); return; }
     const at = ed.line0;
     const shift = finish();
@@ -598,7 +730,7 @@
   function onDocDown(e) {
     if (!ed || !scroller) return;
     const t = e.target;
-    if (scroller.contains(t) || (t.closest && t.closest('.ac-popup, .blog-fmt'))) return;
+    if (scroller.contains(t) || (t.closest && t.closest('.ac-popup, .blog-fmt, .wyg-slash, .wyg-fmt, .tg-menu'))) return;
     finish();
   }
 
@@ -983,6 +1115,7 @@
 
   // 打開一篇筆記（或切進這個模式）：丟掉之前的編輯狀態，整份重新排版。
   function show(text, ro) {
+    docToken++;   // 讓貼上上傳中的舊筆記，回來時發現自己已經不是這一篇了（見 wygPasteFiles）
     detach();
     readOnly = !!ro;
     src = String(text || '');
@@ -1006,7 +1139,8 @@
     const roChanged = ro != null && !!ro !== readOnly;
     if (ro != null) readOnly = !!ro;
     if (text === src && !roChanged) return;
-    if (!ed || readOnly) { detach(); src = text; render(); return; }
+    // WYSIWYG 區塊打的字每一下都已寫回原始碼，遠端更新時直接放下編輯重排即可，不會丟東西
+    if (!ed || readOnly || ed.wyg) { detach(); src = text; render(); return; }
     const caret = ta.selectionStart;
     const body = ta.value === '' ? [] : ed.prefix.concat(ta.value.split('\n'), ed.suffix);
     const at = findLines(splitLines(text), body, ed.line0 - 1);
