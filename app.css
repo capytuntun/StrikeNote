@@ -1264,6 +1264,65 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 /* 設過欄寬的表格是 table-layout: fixed，內容太長的欄要換行而不是撐破版面 */
 .markdown-body table[data-colw] td, .markdown-body table[data-colw] th { overflow-wrap: anywhere; }
 
+/* ---------- Obsidian 風格表格編輯（js/tablegrid.js，只在 Blog）---------- */
+/* 疊層本身不擋滑鼠，個別控制項才收；平常很淡，滑到表格上變明顯，滑到控制項上是 accent。 */
+.tg-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
+.tg-h {
+  position: absolute; display: flex; align-items: center; justify-content: center;
+  background: var(--border); color: var(--bg); cursor: pointer; pointer-events: auto;
+  opacity: .3; transition: opacity .1s, background .1s;
+}
+.blog-block:hover .tg-h { opacity: .55; }
+.tg-h:hover { opacity: 1; background: var(--accent); }
+.tg-h .ic-svg { width: 12px; height: 12px; }
+.tg-colh { height: 11px; margin-top: 1px; cursor: grab; }
+.tg-rowh { width: 11px; margin-left: 1px; cursor: grab; }
+.tg-h:active { cursor: grabbing; }
+
+.tg-add {
+  position: absolute; display: flex; align-items: center; justify-content: center;
+  color: var(--text-faint); background: transparent; cursor: pointer; pointer-events: auto;
+  opacity: 0; transition: opacity .1s, color .1s, background .1s;
+}
+.blog-block:hover .tg-add { opacity: .8; }
+.tg-add:hover { opacity: 1; color: var(--bg); background: var(--accent); }
+.tg-add .ic-svg { width: 14px; height: 14px; }
+.tg-add-col { width: 15px; }
+.tg-add-row { height: 15px; }
+
+/* 滑到把手上時，整欄／整列淡淡高亮 */
+.markdown-body .tg-hi { background: color-mix(in srgb, var(--accent) 12%, transparent) !important; }
+
+/* 拖曳搬欄／搬列時的落點指示線 */
+.tg-drop { position: absolute; z-index: 7; background: var(--accent); pointer-events: none; }
+.tg-drop-col { width: 2px; }
+.tg-drop-row { height: 2px; }
+body.tg-dragging { cursor: grabbing; user-select: none; }
+
+/* 就地編輯一格：蓋在那一格上的小編輯框，內距對齊儲存格（8px 12px + 1px 邊框） */
+.tg-cell-edit {
+  position: absolute; z-index: 8; box-sizing: border-box; margin: 0; resize: none; overflow: hidden;
+  padding: 8px 12px; border: 1px solid var(--accent); background: var(--bg); color: var(--text);
+  font: inherit; line-height: 1.5; caret-color: var(--accent); outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* 把手選單（body 子元素一律 fixed） */
+.tg-menu {
+  position: fixed; z-index: 1300; min-width: 168px; padding: 4px;
+  background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+}
+.tg-menu button {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 10px; border: 0;
+  background: transparent; color: var(--text); cursor: pointer; font: inherit; font-size: var(--fs-sm); text-align: left;
+}
+.tg-menu button:hover { background: var(--row-hover); }
+.tg-menu button.is-danger { color: var(--danger); }
+.tg-menu button .ic-svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--text-dim); }
+.tg-menu button.is-danger .ic-svg { color: var(--danger); }
+.tg-menu-sep { height: 1px; margin: 4px 2px; background: var(--border); }
+
 .pane-edit { flex-direction: column; overflow: hidden; }
 
 /* editor formatting toolbar — line icons, a few with a short label.

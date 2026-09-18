@@ -32,6 +32,7 @@
   let ed = null;
   let readOnly = false;
   let composing = false;
+  let gridFocus = null;   // 排版後要打開的表格儲存格 { idx, r, c, sel }（js/tablegrid.js）
 
   function splitLines(s) { return s === '' ? [] : s.split('\n'); }
 
@@ -42,6 +43,7 @@
   // ---- 排版 ----------------------------------------------------------------
   function render() {
     if (!root) return;
+    if (global.TableGrid) TableGrid.closeAll();   // 丟掉舊表格的疊層與就地編輯框，等一下重建
     const keep = scroller ? scroller.scrollTop : 0;
     const ls = splitLines(src);
     blocks = (global.LineSync && LineSync.sourceBlocks) ? LineSync.sourceBlocks(src) : [];
@@ -126,6 +128,7 @@
   function detach() {
     ed = null;
     hideBubble();
+    if (global.TableGrid) TableGrid.closeAll();
     if (ta && ta.parentNode) ta.parentNode.removeChild(ta);
   }
 
@@ -536,6 +539,7 @@
     const t = e.target;
     if (!t.closest || t === ta) return;
     if (t.closest('.blog-col-grip')) return;   // 拉表格欄寬，不是要編輯這個區塊
+    if (t.closest('table.tg')) return;         // Obsidian 風格表格：點格、把手都交給 TableGrid
     const task = t.closest('.task-check');
     if (task) { onTask(e, task); return; }
     const link = t.closest('.note-link');
@@ -815,7 +819,57 @@
     for (let i = 0; i < tables.length; i++) {
       if (widths && widths[i]) MD.setTableCols(tables[i], widths[i]);
       if (!readOnly) attachTableResize(tables[i], i);
+      if (!readOnly && global.TableGrid) attachGrid(tables[i], i);
     }
+    gridFocus = null;   // 這一輪要打開的格已經套用了，別讓之後不相關的排版又打開
+  }
+
+  // ---- Obsidian 風格表格編輯（js/tablegrid.js）------------------------------
+  // 只掛在「整塊就是一張表」的區塊（kind === 'table'）上；:::info 之類容器裡的表格不算，
+  // 那種當作一般區塊編原始碼。表格用它在整份 <table> 裡的順序 idx 定位（跟欄寬共用），
+  // 這個順序在加欄／加列時不變，所以排版後還是同一張表。
+  function tableBlockOf(table) {
+    const el = table.closest && table.closest('.blog-block[data-i]');
+    const b = el ? blocks[Number(el.getAttribute('data-i'))] : null;
+    return (b && b.kind === 'table') ? b : null;
+  }
+  function tableBlockByIdx(idx) {
+    const t = root.querySelectorAll('table')[idx];
+    return t ? tableBlockOf(t) : null;
+  }
+
+  // 把整張表的新 Markdown 寫回原始碼，只動這張表佔的那幾行。rerender 時重排並打開 focus 指的格；
+  // 打字（softWrite）不重排，讓就地編輯框留著。
+  function writeTable(idx, text, focus, rerender) {
+    const b = tableBlockByIdx(idx);
+    if (!b) return;
+    const ls = splitLines(src);
+    const old = b.end - b.start + 1;
+    const newLines = text.split('\n');
+    Array.prototype.splice.apply(ls, [b.start - 1, old].concat(newLines));
+    const next = ls.join('\n');
+    if (next !== src) {
+      const delta = newLines.length - old;
+      if (delta) {   // 不重排時後面區塊的行號要跟著位移（重排會整份重算，多算也無妨）
+        for (let k = 0; k < blocks.length; k++) if (blocks[k].start > b.start) { blocks[k].start += delta; blocks[k].end += delta; }
+        b.end += delta;
+      }
+      src = next;
+      if (opts.onChange) opts.onChange(src);
+    } else if (!rerender) return;
+    if (rerender) { gridFocus = focus ? { idx: idx, r: focus.r, c: focus.c, sel: focus.sel } : null; render(); }
+  }
+
+  function attachGrid(table, idx) {
+    const b = tableBlockOf(table);
+    if (!b) return;
+    TableGrid.attach(table, {
+      readOnly: readOnly,
+      source: blockText(b),
+      pendingFocus: (gridFocus && gridFocus.idx === idx) ? { r: gridFocus.r, c: gridFocus.c, sel: gridFocus.sel } : null,
+      softWrite: function (t) { writeTable(idx, t, null, false); },
+      commit: function (t, focus) { writeTable(idx, t, focus, true); }
+    });
   }
 
   // 目前每一欄佔整表寬度的百分比（沒設過欄寬的表格就是照內容量出來的當前比例）。
@@ -923,7 +977,7 @@
     global.addEventListener('resize', function () {
       if (ed) autosize();
       // 視窗變寬變窄，欄邊界的位置也變了，把每個表格的拉條重新擺一次
-      if (root) root.querySelectorAll('table').forEach(function (t) { if (t._gripLayout) t._gripLayout(); });
+      if (root) root.querySelectorAll('table').forEach(function (t) { if (t._gripLayout) t._gripLayout(); if (t.__tgLayout) t.__tgLayout(); });
     });
   }
 
@@ -937,8 +991,10 @@
     // 一致）：有內容就把游標放到第一個區塊的最前面，空白筆記就開一個空區塊。唯讀筆記（別人
     // 分享的）維持純閱讀，不進編輯。
     if (readOnly) return;
-    if (blocks.length) startEdit(0, 'start');
-    else startNew(-1);
+    // 第一個區塊是表格就不自動進區塊編輯——表格改用 Obsidian 風格（點格才編），
+    // 自動打開會變成整張表的原始碼框，不是我們要的。
+    if (blocks.length && blocks[0].kind !== 'table') startEdit(0, 'start');
+    else if (!blocks.length) startNew(-1);
   }
 
   // 離開這個模式：正在編輯的區塊收尾（可能清掉空區塊，會經 onChange 回報）。
