@@ -704,6 +704,23 @@
     if (perfWrapEl) perfWrapEl.hidden = true;
     closeBookView();
     closeTrashView();
+    closeRelMapView();
+  }
+
+  // ---- 關聯分析頁（#relmap-wrap）：整頁的畫布編輯器，見 js/relmap.js ----
+  // relmapView 是 RelMap.open() 回傳的把手；離開這一頃（切到任何其他檢視）時先
+  // close()，它會把還沒送出的改動 flush 掉再拆 DOM。
+  const relmapWrapEl = $('#relmap-wrap');
+  let relmapView = null;
+  function closeRelMapView() {
+    if (relmapView) { const v = relmapView; relmapView = null; v.close(); }
+    if (relmapWrapEl) relmapWrapEl.hidden = true;
+  }
+  function showRelMapPage() {
+    leaveOtherViews();
+    closeAreaViews();
+    relmapWrapEl.hidden = false;
+    setSidebarOpen(false);   // 畫布要整個寬度
   }
 
   function openArea(area) {
@@ -1151,6 +1168,7 @@
     closeBookView();
     closeTrashView();
     closeAreaViews();
+    closeRelMapView();
     if (window.Dashboard) {
       Dashboard.render(dashOpts());
     }
@@ -1201,6 +1219,7 @@
     if (perfWrapEl) perfWrapEl.hidden = true;
     closeBookView();
     closeAreaViews();
+    closeRelMapView();
     trashWrapEl.hidden = false;
     trashWrapEl.scrollTop = 0;
     setNavActive('trash-open-btn', true);
@@ -1224,6 +1243,7 @@
     if (perfWrapEl) perfWrapEl.hidden = true;
     closeTrashView();
     closeAreaViews();
+    closeRelMapView();
     bookWrapEl.hidden = false;
     setSidebarOpen(false);
     setHash('book/' + folderId);
@@ -1325,6 +1345,7 @@
       closeBookView();
       closeTrashView();
       closeAreaViews();
+      closeRelMapView();
       setSidebarOpen(false);   // 從抽屜點開筆記後收回，把整個寬度留給筆記
 
       // 儲存後同步樹狀標題 / 記憶體中的筆記（給步驟式與表格式編輯器共用）。
@@ -1693,8 +1714,26 @@
     });
   }
 
+  // 跟 replaceFenceBlock 同一個演算法，只是對一段文字而不是編輯器——關聯分析頁開著
+  // 的時候筆記本身是關著的，回寫要直接改伺服器上的內容。
+  function replaceFenceInText(text, fence, index, body) {
+    const lines = String(text || '').split('\n');
+    let seq = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const open = lines[i].match(new RegExp('^(\\s{0,3})(```+|~~~+)\\s*' + fence + '\\s*$'));
+      if (!open) continue;
+      let end = i + 1;
+      while (end < lines.length && !new RegExp('^\\s{0,3}' + open[2][0] + '{3,}\\s*$').test(lines[end])) end++;
+      if (++seq !== index) { i = end; continue; }
+      lines.splice(i + 1, end - i - 1, ...body.split('\n'));
+      return lines.join('\n');
+    }
+    return null;
+  }
+  // 一般筆記裡的 ```relmap 區塊按「全螢幕」：整頁的畫布編輯器（同一頁 #relmap-wrap），
+  // 筆記先存好關起來；按「返回」時把最後的 DSL 寫回那一個區塊，再把筆記打開。
   function openRelMapBlock(block) {
-    if (!block || !window.RelMap || !RelMap.open) return;
+    if (!block || !window.RelMap || !RelMap.open || !relmapWrapEl) return;
     if (state.current && state.current.perm === 'read') {
       toast('這篇筆記你只有唯讀權限');
       return;
@@ -1702,25 +1741,66 @@
     const all = previewEl.querySelectorAll('.relmap-block');
     const index = Array.prototype.indexOf.call(all, block);
     if (index < 0) return;
-    RelMap.open(block.getAttribute('data-relmap') || '', function (dsl) {
-      if (!replaceRelMapBlock(index, dsl)) toast('找不到對應的關聯分析區塊，請重試');
+    const noteId = state.currentId;
+    const dsl = block.getAttribute('data-relmap') || '';
+    showRelMapPage();
+    let latest = null;
+    const view = RelMap.open(dsl, {
+      container: relmapWrapEl,
+      onChange: function (d) { latest = d; },
+      onClose: function () {
+        const mine = relmapView === view;
+        relmapView = null;
+        relmapWrapEl.hidden = true;
+        const back = function () { if (mine) openNote(noteId); };
+        if (latest === null) { back(); return; }
+        // 使用者已經先把同一篇筆記點開了（從側邊欄）：直接改編輯器裡的那個區塊，走一般
+        // 的存檔路，不要再從伺服器繞一圈蓋回舊內容。
+        if (state.currentId === noteId && !wrapEl.hidden) {
+          if (!replaceRelMapBlock(index, latest)) toast('找不到對應的關聯分析區塊，這次的修改沒有寫回');
+          return;
+        }
+        Store.getNote(noteId).then(function (n) {
+          const t = n ? replaceFenceInText(n.content || '', 'relmap', index, latest) : null;
+          if (t === null) { toast('找不到對應的關聯分析區塊，這次的修改沒有寫回'); back(); return; }
+          return Store.updateNote(Object.assign({}, n, { content: t })).then(back);
+        }).catch(function (e) { toast('儲存失敗：' + (e && e.message || e)); back(); });
+      }
     });
+    relmapView = view;
   }
-  // 關聯分析是「多一種筆記」（meta.relMap）：整篇筆記就是一張圖，一打開就直接進
-  // 全螢幕編輯器，不用先在預覽裡點一下——跟資安院報告／成效報告一開筆記就是
-  // 專用編輯器同一個道理。刻意不動 state.currentId／不收起首頁：這是一個疊在
-  // 目前畫面上的工具（跟 關聯圖／檔案管理 同一種模式），取消或完成都只是把疊層
-  // 收掉，回到原本開著的那一頁，不需要另外處理「取消要回哪裡」。
+  // 關聯分析是「多一種筆記」（meta.relMap）：整篇筆記就是一張圖，打開就是整頁的畫布
+  // 編輯器（跟資安院報告／成效報告一開筆記就是專用編輯器同一個道理），每次改動自動
+  // 存檔，「返回」回首頁。標題在頁面頂列直接改。
   function openRelMapNote(note) {
-    RelMap.open(note.content || '', function (dsl) {
-      const updated = Object.assign({}, note, { content: '```relmap\n' + dsl + '\n```\n' });
-      Store.updateNote(updated).then(function (n) {
-        const idx = state.notes.findIndex(function (x) { return x.id === n.id; });
-        if (idx >= 0) { state.notes[idx].content = n.content; state.notes[idx].rev = n.rev; state.notes[idx].updatedAt = n.updatedAt; }
-        refreshViews(); // 首頁就在底下，更新時間／排序要跟著動
-        toast('已儲存');
-      }, function (e) { toast('儲存失敗：' + (e && e.message || e)); });
+    if (!relmapWrapEl) return;
+    showRelMapPage();
+    LS.set('lastNote', note.id);
+    setHash('note/' + note.id);
+    function syncState(n) {
+      const idx = state.notes.findIndex(function (x) { return x.id === n.id; });
+      if (idx >= 0) { state.notes[idx].title = n.title; state.notes[idx].content = n.content; state.notes[idx].rev = n.rev; state.notes[idx].updatedAt = n.updatedAt; }
+      note.title = n.title; note.content = n.content; note.rev = n.rev; note.updatedAt = n.updatedAt;
+    }
+    const view = RelMap.open(note.content || '', {
+      container: relmapWrapEl,
+      title: note.title === '未命名筆記' ? '' : (note.title || ''),
+      onTitle: function (t) {
+        Store.updateNote(Object.assign({}, note, { title: t || '未命名關聯分析' })).then(function (n) { syncState(n); renderTree(); },
+          function (e) { toast('改名失敗：' + (e && e.message || e)); });
+      },
+      onChange: function (dsl) {
+        Store.updateNote(Object.assign({}, note, { content: '```relmap\n' + dsl + '\n```\n' })).then(syncState,
+          function (e) { toast('儲存失敗：' + (e && e.message || e)); });
+      },
+      onClose: function () {
+        const mine = relmapView === view;
+        relmapView = null;
+        relmapWrapEl.hidden = true;
+        if (mine) { LS.set('lastNote', ''); showEmpty(); }
+      }
     });
+    relmapView = view;
   }
 
   // ---- Table of contents: beside the preview, and beside the Blog page ---

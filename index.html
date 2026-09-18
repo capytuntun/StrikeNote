@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=134">
+  <link rel="stylesheet" href="app.css?v=135">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -337,6 +337,9 @@
       <div id="quick-wrap" class="trash-wrap area-wrap" hidden>
         <div id="quick-page" class="quick-page"></div>
       </div>
+      <!-- 關聯分析（js/relmap.js）：整頁的畫布編輯器，不是浮在上面的視窗。一篇 meta.relMap
+           的筆記直接開在這裡；一般筆記裡的 ```relmap 區塊按「全螢幕」也是開到這裡，完成後回筆記。 -->
+      <div id="relmap-wrap" class="relmap-wrap" hidden></div>
     </main>
     </div><!-- /#app-body -->
   </div>
@@ -356,7 +359,7 @@
   <script src="js/icons.js?v=9"></script>
   <script src="js/merge.js?v=2"></script>
   <script src="js/mindmap.js?v=3"></script>
-  <script src="js/relmap.js?v=2"></script>
+  <script src="js/relmap.js?v=3"></script>
   <script src="js/graph.js?v=5"></script>
   <script src="js/store.js?v=56"></script>
   <script src="js/auth.js?v=48"></script>
@@ -388,6 +391,6 @@
   <script src="js/embedswitch.js?v=1"></script>
   <script src="js/blogwyg.js?v=2"></script>
   <script src="js/blogmode.js?v=10"></script>
-  <script src="js/app.js?v=100"></script>
+  <script src="js/app.js?v=101"></script>
 </body>
 </html>

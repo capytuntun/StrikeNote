@@ -149,6 +149,7 @@
   --rm-text-dim: #9aa4b5;
   --rm-lbg: #1c2331;
   --rm-border: #2a3242;
+  --rm-dot: rgba(255, 255, 255, .13);
   --ed-hr: #585b70;
   --ed-mark: #89b4c9;
   --ed-bold: #e8e9f4;
@@ -2861,24 +2862,80 @@ select.sec-info-input { cursor: pointer; }
 .rm-edge-lbg { fill: var(--rm-lbg); stroke: var(--rm-border); stroke-width: 1; }
 .rm-edge-lbl { fill: var(--rm-text-dim); font-size: 11px; font-weight: 600; }
 
-/* ---------- 編輯器（殼跟心智圖共用 .mm-overlay/.mm-editor/.mm-bar/.mm-canvas/.mm-stage）---------- */
-/* overflow hidden：平移是拖曳，不是捲動——留 auto 會多出兩條捲軸壓在深色畫布邊上。 */
-.rm-canvas { cursor: grab; background: var(--rm-bg); overflow: hidden; }
+/* ---------- 編輯器：整頁的畫布（#relmap-wrap，照 React Flow 的做法）---------- */
+.relmap-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--rm-bg); }
+.relmap-wrap.rm-own { position: fixed; inset: 0; z-index: 2000; }
+.rm-page .rm-bar {
+  display: flex; align-items: center; gap: 8px; flex: 0 0 auto;
+  padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-2);
+}
+.rm-bar-t { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: var(--fs-md); white-space: nowrap; }
+.rm-bar-t .ic-svg { width: 18px; height: 18px; color: var(--accent); }
+.rm-title {
+  flex: 0 1 320px; min-width: 120px; padding: 6px 10px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--text); font: inherit; font-size: var(--fs-md); font-weight: 600; outline: none;
+}
+.rm-title:hover { border-color: var(--border); }
+.rm-title:focus { border-color: var(--accent); background: var(--bg); }
+.rm-bar-sp { flex: 1 1 auto; }
+.rm-bar-sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; flex: 0 0 auto; }
+.rm-bar .btn { flex: 0 0 auto; }
+.rm-bar .btn:disabled { opacity: .45; cursor: default; }
+/* 畫布：深色 + 點狀網格（背景圖的位移／格距由 js 跟著平移縮放改），平移靠拖曳所以
+   overflow hidden，不留捲軸。 */
+.rm-canvas {
+  flex: 1 1 auto; position: relative; overflow: hidden; outline: none; cursor: grab;
+  background-color: var(--rm-bg);
+  background-image: radial-gradient(circle, var(--rm-dot) 1.1px, transparent 1.6px);
+  background-size: 24px 24px;
+}
 .rm-canvas.mm-dragging { cursor: grabbing; }
-.rm-stage { padding: 0; display: block; }
+.rm-canvas.rm-locked .rm-node { cursor: default; }
+.rm-canvas.rm-locked .rm-handle { display: none; }
+.rm-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; padding: 0; display: block; }
 .rm-node { cursor: grab; }
 .rm-node:active { cursor: grabbing; }
 .rm-edge { cursor: pointer; }
 .rm-node:hover .rm-disc { stroke-width: 3.5; }
-/* 連線把手：平常很淡，滑到節點才明顯；拖它開始拉線，不是移動節點 */
-/* 每個節點的 <g class="rm-node"> 後面緊接著自己的 <circle class="rm-handle">
-   （見 relmap.js 的 draw()），所以只用「緊鄰手足」+ 選到，不能用 ~（會連到後面
-   所有節點的把手）。 */
-.rm-handle { fill: var(--rm-lbg); stroke: var(--rm-text-dim); stroke-width: 1.5; opacity: 0; cursor: crosshair; transition: opacity .12s; }
-.rm-node:hover + .rm-handle, .rm-handle:hover { opacity: 1; }
-.rm-node.rm-sel + .rm-handle { opacity: 1; }
+/* 連線把手（React Flow 的 handle）：一直看得到但很淡，滑到節點／選到節點才亮；
+   拖它開始拉線，不是移動節點。每個節點的 <g class="rm-node"> 後面緊接著自己的
+   <circle class="rm-handle">（見 relmap.js 的 draw()），所以用「緊鄰手足」選到。 */
+.rm-handle { fill: var(--rm-lbg); stroke: var(--rm-text-dim); stroke-width: 1.5; opacity: .35; cursor: crosshair; transition: opacity .12s; }
+.rm-node:hover + .rm-handle, .rm-handle:hover, .rm-node.rm-sel + .rm-handle { opacity: 1; }
 .rm-handle:hover { fill: var(--accent); stroke: #fff; }
 .rm-rubberband { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 3; pointer-events: none; }
+/* React Flow 的 Controls（左下）跟 MiniMap（右下） */
+.rm-controls {
+  position: absolute; left: 14px; bottom: 14px; z-index: 2;
+  display: flex; flex-direction: column; background: var(--rm-lbg);
+  border: 1px solid var(--rm-border); box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+}
+.rm-ctrl-btn.on { color: var(--accent); background: rgba(255, 255, 255, .06); }
+.rm-minimap {
+  position: absolute; right: 14px; bottom: 14px; z-index: 2; width: 160px; height: 100px;
+  background: var(--rm-lbg); border: 1px solid var(--rm-border); box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+  cursor: pointer; overflow: hidden;
+}
+.rm-minimap svg { display: block; }
+.rm-mm-node { fill: #fff; stroke: #8b96a8; stroke-width: 1; }
+.rm-mm-view { fill: rgba(255, 255, 255, .06); stroke: var(--accent); stroke-width: 1; }
+.rm-drop {
+  position: absolute; inset: 12px; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  border: 2px dashed var(--accent); background: rgba(46, 108, 246, .12); color: var(--rm-text); font-weight: 600; pointer-events: none;
+}
+.rm-drop .ic-svg { width: 28px; height: 28px; }
+.rm-empty {
+  position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); text-align: center;
+  color: var(--rm-text-dim); pointer-events: none;
+}
+.rm-empty .ic-svg { width: 36px; height: 36px; margin-bottom: 8px; opacity: .6; }
+.rm-empty > div { font-weight: 600; }
+.rm-empty > .rm-empty-hint { font-weight: 400; font-size: var(--fs-sm); margin-top: 4px; }
+.rm-toast {
+  position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 4;
+  padding: 8px 14px; background: var(--rm-lbg); color: var(--rm-text); border: 1px solid var(--rm-border);
+  font-size: var(--fs-sm); box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+}
 /* 就地改文字的輸入框：placeInputAt 算的是視窗座標，所以是 fixed；之前只有
    text-align，沒有定位，left/top 根本沒作用，輸入框跑到對話框最底下。 */
 .rm-input {
@@ -2888,12 +2945,7 @@ select.sec-info-input { cursor: pointer; }
   outline: none; box-shadow: 0 4px 14px rgba(0, 0, 0, .4);
 }
 .rm-input-edge { font-weight: 400; font-size: var(--fs-sm); text-align: center; }
-/* 浮在畫布上的縮放群組（左上）跟重置鈕（右下）：深色，跟畫布一體 */
-.rm-zoom-ctrl {
-  position: absolute; top: 14px; left: 14px; z-index: 2;
-  display: flex; flex-direction: column; background: var(--rm-lbg);
-  border: 1px solid var(--rm-border); box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
-}
+/* Controls 裡的一顆鈕（＋／－／置中／鎖定） */
 .rm-ctrl-btn {
   display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
   border: 0; background: transparent; color: var(--rm-text-dim); cursor: pointer; padding: 0;
@@ -2901,13 +2953,6 @@ select.sec-info-input { cursor: pointer; }
 .rm-ctrl-btn + .rm-ctrl-btn { border-top: 1px solid var(--rm-border); }
 .rm-ctrl-btn:hover { background: rgba(255, 255, 255, .07); color: var(--rm-text); }
 .rm-ctrl-btn .ic-svg { width: 16px; height: 16px; }
-.rm-reset-btn {
-  position: absolute; right: 14px; bottom: 14px; z-index: 2;
-  padding: 7px 14px; font-size: var(--fs-sm); font-weight: 600;
-  background: var(--rm-lbg); border: 1px solid var(--rm-border); box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
-  color: var(--rm-text-dim); cursor: pointer; transition: color .12s, border-color .12s;
-}
-.rm-reset-btn:hover { color: var(--rm-text); border-color: var(--rm-text-dim); }
 
 /* 節點顏色選單（圓形色板，跟隨筆同一個做法；body 子元素一律 fixed）。「自動」那格是
    斜紋，表示交回 id 雜湊出來的顏色。 */

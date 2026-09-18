@@ -225,58 +225,235 @@
       markerDef('rm-arrow') + edgesSVG + nodesSVG + '</svg>';
   }
 
+
   // ---------------- 筆記種類（meta.relMap）------------------------------------
   function isRelNote(note) { return !!(note && note.meta && note.meta.relMap); }
   const TEMPLATE = 'node n1 "起點" x=40 y=80\nnode n2 "目標" x=320 y=80\nedge n1 n2 "利用"';
   function generate() { return '```relmap\n' + TEMPLATE + '\n```\n'; }
 
-  // ---------------- 編輯器：全螢幕疊層，跟 MindMap.open 同一種殼 --------------
+  // ---------------- CSV → 節點／連線 -------------------------------------------
+  // 一列一條關聯：source,target[,label]。第一列若是認得的欄名（source/target/label、
+  // from/to、起點/終點/關係…）就當標題列，否則整份都是資料。分隔符號自動看第一列
+  // 是逗號、tab 還是分號。引號內的逗號／換行照 CSV 規則保留。
+  function parseCSV(text) {
+    text = String(text || '').replace(/^﻿/, '');
+    const first = text.split(/\r?\n/)[0] || '';
+    const delim = (first.split('\t').length > first.split(',').length) ? '\t'
+      : (first.split(';').length > first.split(',').length ? ';' : ',');
+    const rows = []; let row = [], cell = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) {
+        if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+        else cell += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === delim) { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        row.push(cell); rows.push(row); row = []; cell = '';
+      } else cell += ch;
+    }
+    if (cell.length || row.length) { row.push(cell); rows.push(row); }
+    return rows.filter(function (r) { return r.some(function (c) { return c.trim(); }); });
+  }
+  const SRC_NAMES = ['source', 'src', 'from', 'a', '起點', '來源', '起始', '來源節點'];
+  const DST_NAMES = ['target', 'dst', 'to', 'b', '終點', '目標', '目的', '目標節點'];
+  const LBL_NAMES = ['label', 'relation', 'edge', 'type', '關係', '標籤', '說明', '關聯'];
+  function slugId(label, used) {
+    let base = 'c' + hash(label).toString(36);
+    let id = base, k = 1;
+    while (used[id]) id = base + '_' + (k++);
+    return id;
+  }
+  // 回傳新加進 model 的節點 id（沒有位置，交給 autoLayout），以及加了幾條連線。
+  function importCSV(model, text) {
+    const rows = parseCSV(text);
+    if (!rows.length) return { nodes: [], edges: 0 };
+    let si = 0, ti = 1, li = 2, start = 0;
+    const head = rows[0].map(function (c) { return c.trim().toLowerCase(); });
+    const find = function (names) { return head.findIndex(function (h) { return names.indexOf(h) >= 0; }); };
+    const s = find(SRC_NAMES), t = find(DST_NAMES), l = find(LBL_NAMES);
+    if (s >= 0 && t >= 0) { si = s; ti = t; li = l; start = 1; }
+    const byLabel = {}, used = {};
+    model.nodes.forEach(function (n) { byLabel[n.label.trim().toLowerCase()] = n; used[n.id] = true; });
+    const edgeKey = {};
+    model.edges.forEach(function (e) { edgeKey[e.from + ' ' + e.to] = true; });
+    const added = [];
+    let edges = 0;
+    function nodeFor(label) {
+      const key = label.trim().toLowerCase();
+      if (byLabel[key]) return byLabel[key];
+      const n = { id: slugId(label, used), label: label.trim(), x: NaN, y: NaN, color: '', shape: '' };
+      used[n.id] = true; byLabel[key] = n;
+      model.nodes.push(n); added.push(n.id);
+      return n;
+    }
+    for (let r = start; r < rows.length; r++) {
+      const row = rows[r];
+      const a = (row[si] || '').trim(), b = (row[ti] || '').trim();
+      if (!a) continue;
+      const na = nodeFor(a);
+      if (!b) continue;   // 只有一欄：單獨一個節點
+      const nb = nodeFor(b);
+      const label = li >= 0 ? (row[li] || '').trim() : '';
+      if (na.id === nb.id || edgeKey[na.id + ' ' + nb.id]) continue;
+      edgeKey[na.id + ' ' + nb.id] = true;
+      model.edges.push({ from: na.id, to: nb.id, label: label });
+      edges++;
+    }
+    return { nodes: added, edges: edges };
+  }
+
+  // ---------------- 自動排版：力導向（跟 graph.js 的關聯圖同一套物理）---------------
+  // 只動 onlyIds 裡的節點（CSV 匯進來的新節點），沒給就全部重排。同步跑固定回數，
+  // 起點是黃金角螺旋，所以同一份資料排出來每次都一樣。
+  const GOLDEN = 2.399963;
+  function autoLayout(model, onlyIds) {
+    const sized = sizedNodes(model);
+    if (!sized.length) return;
+    const movable = sized.map(function (n) { return !onlyIds || onlyIds.indexOf(n.id) >= 0; });
+    let cx0 = 0, cy0 = 0, fixedN = 0;
+    sized.forEach(function (n, i) {
+      if (!movable[i] && isFinite(n.x)) { cx0 += n.x + n.w / 2; cy0 += n.y + R; fixedN++; }
+    });
+    if (fixedN) { cx0 /= fixedN; cy0 /= fixedN; } else { cx0 = 400; cy0 = 300; }
+    let k = 0;
+    sized.forEach(function (n, i) {
+      if (movable[i] || !isFinite(n.x)) {
+        const r = 70 * Math.sqrt(k + 1), a = k * GOLDEN; k++;
+        n.cx = cx0 + r * Math.cos(a); n.cy = cy0 + r * Math.sin(a);
+        movable[i] = true;
+      } else { n.cx = n.x + n.w / 2; n.cy = n.y + R; }
+      n.vx = 0; n.vy = 0;
+    });
+    const idx = {}; sized.forEach(function (n, i) { idx[n.id] = i; });
+    const links = model.edges.map(function (e) { return [idx[e.from], idx[e.to]]; })
+      .filter(function (p) { return p[0] !== undefined && p[1] !== undefined; });
+    for (let it = 0; it < 320; it++) {
+      for (let i = 0; i < sized.length; i++) {
+        for (let j = i + 1; j < sized.length; j++) {
+          const a = sized[i], b = sized[j];
+          const dx = a.cx - b.cx, dy = a.cy - b.cy;
+          let d2 = dx * dx + dy * dy; if (d2 < 1) d2 = 1;
+          const f = 9000 / d2, d = Math.sqrt(d2);
+          const fx = dx / d * f, fy = dy / d * f;
+          if (movable[i]) { a.vx += fx; a.vy += fy; }
+          if (movable[j]) { b.vx -= fx; b.vy -= fy; }
+        }
+      }
+      links.forEach(function (p) {
+        const a = sized[p[0]], b = sized[p[1]];
+        const dx = b.cx - a.cx, dy = b.cy - a.cy;
+        const d = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+        const f = (d - 190) * 0.02, fx = dx / d * f, fy = dy / d * f;
+        if (movable[p[0]]) { a.vx += fx; a.vy += fy; }
+        if (movable[p[1]]) { b.vx -= fx; b.vy -= fy; }
+      });
+      sized.forEach(function (n, i) {
+        if (!movable[i]) return;
+        n.vx += (cx0 - n.cx) * 0.0016; n.vy += (cy0 - n.cy) * 0.0016;
+        n.vx *= 0.82; n.vy *= 0.82;
+        n.cx += n.vx; n.cy += n.vy;
+      });
+    }
+    sized.forEach(function (n, i) {
+      if (!movable[i]) return;
+      const m = model.nodes.find(function (x) { return x.id === n.id; });
+      if (m) { m.x = Math.round(n.cx - n.w / 2); m.y = Math.round(n.cy - R); }
+    });
+  }
+
+  // ---------------- 編輯器：整頁的畫布（照 React Flow 的做法）--------------------
+  //   RelMap.open(text, { container, title, onTitle, onChange, onClose })
+  // container 是 app.js 給的整頁容器（#relmap-wrap）；沒給就自己掛一個滿版的。
+  // 每一次改動（加點、連線、改字、換色、拖完、匯入、排版、還原）都會 debounce 後
+  // 呼叫 onChange(dsl)——像其他筆記一樣自動存檔，沒有「完成」鈕；「返回」只是回去。
+  //   - 雙擊改字／雙擊空白新增：自己用時間＋位移判斷（isDouble），不靠瀏覽器的
+  //     dblclick——第一下 mousedown 會重畫或換選取，第二下落在新的元素上，瀏覽器就
+  //     把點擊計數歸零，原生 dblclick 永遠不會來（之前「雙擊改不了」就是這個）。
+  //   - 選取只切 class（applySelection），不重畫整張 SVG。
+  //   - 左下角 Controls（＋／－／置中／鎖定）、右下角 MiniMap、點狀網格背景隨平移縮放
+  //     一起動：這三樣就是 React Flow 一眼認得出來的東西。
+  //   - 匯入 CSV：工具列按鈕或把 .csv 拖進畫布，新節點用 autoLayout 排開。
   const COLORS = ['', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple'];
   let uidSeq = 0;
   function newId() { return 'n' + (Date.now().toString(36)) + (uidSeq++); }
   function ic(name) { return (global.Icons && Icons.svg) ? Icons.svg(name) : ''; }
 
-  function open(text, onSave) {
+  function open(text, opts) {
     if (typeof document === 'undefined') return null;
+    if (typeof opts === 'function') opts = { onSave: opts };
+    opts = opts || {};
     let model = parse(text);
     let zoom = 1, panX = 40, panY = 40;
     let sel = null;   // { type: 'node'|'edge', i }
+    let locked = false;
     const undo = [], redo = [];
 
-    const overlay = document.createElement('div');
-    overlay.className = 'mm-overlay rm-overlay';
-    overlay.innerHTML =
-      '<div class="mm-editor rm-editor" role="dialog" aria-label="關聯分析編輯器">' +
-      '<header class="mm-bar">' +
-      '<span class="mm-bar-t">關聯分析</span>' +
-      '<span class="mm-bar-hint">拖曳節點移動 · 拖節點右側的圓點連到另一個節點 · 雙擊空白處新增節點 · 雙擊改文字 · Delete 刪除 · 滾輪縮放</span>' +
-      '<span class="mm-bar-sp"></span>' +
-      '<button class="btn btn-ghost rm-add" type="button" title="新增節點">' + ic('plus') + ' 節點</button>' +
+    let host = opts.container;
+    let ownHost = false;
+    if (!host) { host = document.createElement('div'); host.className = 'relmap-wrap rm-own'; document.body.appendChild(host); ownHost = true; }
+    host.classList.add('rm-page');
+    host.innerHTML =
+      '<header class="rm-bar">' +
+      '<span class="rm-bar-t">' + ic('network') + '<span>關聯分析</span></span>' +
+      (opts.title !== undefined ? '<input class="rm-title" type="text" placeholder="未命名關聯分析">' : '') +
+      '<span class="rm-bar-sp"></span>' +
+      '<button class="btn btn-ghost rm-undo" type="button" title="復原 (Ctrl+Z)">' + ic('undo') + '</button>' +
+      '<button class="btn btn-ghost rm-redo" type="button" title="重做 (Ctrl+Shift+Z)">' + ic('redo') + '</button>' +
+      '<span class="rm-bar-sep"></span>' +
+      '<button class="btn btn-ghost rm-add" type="button" title="在畫面中央新增一個節點">' + ic('plus') + ' 節點</button>' +
       '<button class="btn btn-ghost rm-color" type="button" title="選取一個節點後可以換它的顏色" disabled>' + ic('grid') + ' 顏色</button>' +
-      '<button class="btn mm-cancel" type="button">取消</button>' +
-      '<button class="btn btn-primary mm-save" type="button">完成</button>' +
+      '<button class="btn btn-ghost rm-csv" type="button" title="匯入 CSV（source,target,label 一列一條關聯；也可以直接把 .csv 拖進畫布）">' + ic('upload') + ' 匯入 CSV</button>' +
+      '<button class="btn btn-ghost rm-layout" type="button" title="用力導向把所有節點重新排開">' + ic('wand') + ' 自動排版</button>' +
+      '<button class="btn rm-back" type="button">' + ic('arrow-left') + ' 返回</button>' +
       '</header>' +
-      '<div class="mm-canvas rm-canvas" tabindex="0">' +
-      '<div class="mm-stage rm-stage"></div>' +
-      // 浮在畫布上的縮放群組（左上）跟重置鈕（右下），跟 graph.js 的關聯圖同一套
-      '<div class="rm-zoom-ctrl rm-ctrl">' +
-      '<button class="rm-ctrl-btn rm-zo" type="button" title="縮小">' + ic('minus') + '</button>' +
+      '<div class="rm-canvas" tabindex="0">' +
+      '<div class="rm-stage"></div>' +
+      '<div class="rm-controls rm-ctrl">' +
       '<button class="rm-ctrl-btn rm-zi" type="button" title="放大">' + ic('plus') + '</button>' +
+      '<button class="rm-ctrl-btn rm-zo" type="button" title="縮小">' + ic('minus') + '</button>' +
       '<button class="rm-ctrl-btn rm-zfit" type="button" title="縮放到剛好看見整張圖">' + ic('maximize') + '</button>' +
+      '<button class="rm-ctrl-btn rm-lock" type="button" title="鎖定：只能平移縮放，不能改圖">' + ic('lock') + '</button>' +
       '</div>' +
-      '<button class="rm-reset-btn rm-ctrl" type="button" title="回到 100%、原始位置">重置視圖</button>' +
-      '</div>' +
+      '<div class="rm-minimap rm-ctrl" title="縮圖：點一下把那裡移到畫面中央"><svg viewBox="0 0 160 100" width="160" height="100"></svg></div>' +
+      '<div class="rm-drop" hidden>' + ic('upload') + '<span>放開以匯入 CSV</span></div>' +
+      '<div class="rm-empty" hidden>' + ic('network') + '<div>還沒有節點</div><div class="rm-empty-hint">雙擊空白處新增節點，或匯入一份 CSV（source,target,label）</div></div>' +
       '</div>';
-    document.body.appendChild(overlay);
-    const canvas = overlay.querySelector('.rm-canvas');
-    const stage = overlay.querySelector('.rm-stage');
-    const colorBtn = overlay.querySelector('.rm-color');
+    const canvas = host.querySelector('.rm-canvas');
+    const stage = host.querySelector('.rm-stage');
+    const colorBtn = host.querySelector('.rm-color');
+    const mini = host.querySelector('.rm-minimap svg');
+    const titleEl = host.querySelector('.rm-title');
+    if (titleEl) {
+      titleEl.value = opts.title || '';
+      titleEl.addEventListener('change', function () { if (opts.onTitle) opts.onTitle(titleEl.value.trim()); });
+      titleEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); } e.stopPropagation(); });
+    }
     let input = null;
 
+    // ---- 存檔：每次改動 debounce 後回報 ----
+    let saveTimer = null, dirty = false;
+    function changed() {
+      dirty = true;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(flush, 600);
+    }
+    function flush() {
+      clearTimeout(saveTimer);
+      if (!dirty) return;
+      dirty = false;
+      if (opts.onChange) opts.onChange(serialize(model));
+    }
     function snapshot() {
       undo.push(serialize(model));
       if (undo.length > 100) undo.shift();
       redo.length = 0;
+      updateUndoBtns();
+    }
+    function updateUndoBtns() {
+      host.querySelector('.rm-undo').disabled = !undo.length;
+      host.querySelector('.rm-redo').disabled = !redo.length;
     }
     function nodesSized() { return sizedNodes(model); }
     function byId(id) { return model.nodes.find(function (n) { return n.id === id; }); }
@@ -284,6 +461,11 @@
 
     function applyTransform() {
       stage.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
+      // 點狀網格跟著畫布動：背景圖的位移＝平移量、格距＝24 × 縮放
+      const g = 24 * zoom;
+      canvas.style.backgroundSize = g + 'px ' + g + 'px';
+      canvas.style.backgroundPosition = panX + 'px ' + panY + 'px';
+      drawMinimap();
     }
     function draw() {
       closeInput();
@@ -303,15 +485,60 @@
       });
       const nodesSVG = sized.map(function (n, i) {
         const s = nodeSVG(n, ox, oy, i, sel && sel.type === 'node' && sel.i === i);
-        // 編輯器多一顆連線用的把手，貼在圓盤右側
         const c = center(n);
         return s + '<circle class="rm-handle" data-i="' + i + '" cx="' + (c.x + ox + R + 9) + '" cy="' + (c.y + oy) + '" r="6"></circle>';
       }).join('');
       stage.innerHTML = '<svg class="relmap-svg" width="' + W + '" height="' + H + '">' +
         markerDef('rm-arrow-ed') + edgesSVG + nodesSVG + '</svg>';
+      host.querySelector('.rm-empty').hidden = !!model.nodes.length;
       applyTransform();
-      colorBtn.disabled = !(sel && sel.type === 'node');
+      colorBtn.disabled = locked || !(sel && sel.type === 'node');
     }
+    function applySelection() {
+      Array.prototype.forEach.call(stage.querySelectorAll('.rm-node'), function (g) {
+        g.classList.toggle('rm-sel', !!(sel && sel.type === 'node' && +g.getAttribute('data-i') === sel.i));
+      });
+      Array.prototype.forEach.call(stage.querySelectorAll('.rm-edge'), function (g) {
+        g.classList.toggle('rm-sel', !!(sel && sel.type === 'edge' && +g.getAttribute('data-i') === sel.i));
+      });
+      colorBtn.disabled = locked || !(sel && sel.type === 'node');
+    }
+    function select(type, i) { sel = (type == null) ? null : { type: type, i: i }; applySelection(); }
+
+    // ---- 縮圖（MiniMap）：內容外框跟目前視窗都畫進去，點一下就把那點移到中央 ----
+    function drawMinimap() {
+      const sized = nodesSized();
+      const ox = +stage.dataset.ox || 0, oy = +stage.dataset.oy || 0;
+      const cw = canvas.clientWidth, ch = canvas.clientHeight;
+      // 視窗在舞台座標裡的範圍
+      const vx0 = -panX / zoom, vy0 = -panY / zoom, vx1 = (cw - panX) / zoom, vy1 = (ch - panY) / zoom;
+      let x0 = vx0, y0 = vy0, x1 = vx1, y1 = vy1;
+      sized.forEach(function (n) {
+        x0 = Math.min(x0, n.x + ox); y0 = Math.min(y0, n.y + oy);
+        x1 = Math.max(x1, n.x + n.w + ox); y1 = Math.max(y1, n.y + n.h + oy);
+      });
+      const pad = 20; x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+      const s = Math.min(160 / Math.max(1, x1 - x0), 100 / Math.max(1, y1 - y0));
+      const offX = (160 - (x1 - x0) * s) / 2, offY = (100 - (y1 - y0) * s) / 2;
+      mini._map = { x0: x0, y0: y0, s: s, offX: offX, offY: offY };
+      let out = '';
+      sized.forEach(function (n) {
+        const c = center(n);
+        out += '<circle class="rm-mm-node ' + nodeColorClass(n) + '" cx="' + ((c.x + ox - x0) * s + offX) + '" cy="' + ((c.y + oy - y0) * s + offY) + '" r="' + Math.max(1.5, R * s) + '"></circle>';
+      });
+      out += '<rect class="rm-mm-view" x="' + ((vx0 - x0) * s + offX) + '" y="' + ((vy0 - y0) * s + offY) +
+        '" width="' + ((vx1 - vx0) * s) + '" height="' + ((vy1 - vy0) * s) + '" rx="2"></rect>';
+      mini.innerHTML = out;
+    }
+    mini.parentElement.addEventListener('mousedown', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      const m = mini._map; if (!m) return;
+      const r = mini.getBoundingClientRect();
+      const sx = (e.clientX - r.left - m.offX) / m.s + m.x0, sy = (e.clientY - r.top - m.offY) / m.s + m.y0;
+      panX = canvas.clientWidth / 2 - sx * zoom;
+      panY = canvas.clientHeight / 2 - sy * zoom;
+      applyTransform();
+    });
 
     function toModelXY(clientX, clientY) {
       const r = canvas.getBoundingClientRect();
@@ -322,39 +549,36 @@
     }
 
     // ---- 縮放／視圖 ----
-    // 以畫布上某一點為錨縮放：那一點在畫面上不動，跟滾輪縮放的手感一致。
     function zoomAt(nz, ax, ay) {
-      nz = Math.max(0.3, Math.min(2.5, nz));
+      nz = Math.max(0.2, Math.min(3, nz));
       panX = ax - (ax - panX) * (nz / zoom);
       panY = ay - (ay - panY) * (nz / zoom);
       zoom = nz;
       draw();
     }
     function zoomStep(f) { zoomAt(zoom * f, canvas.clientWidth / 2, canvas.clientHeight / 2); }
-    // 縮放到剛好看見整張圖：對的是內容的外框（含邊距），不是 draw() 撐到畫布大的 SVG。
     function fitView() {
       const sized = nodesSized();
-      if (!sized.length) return;
+      if (!sized.length) { zoom = 1; panX = 40; panY = 40; draw(); return; }
       const box = bbox(sized);
       const PAD = 60;
       const W = box.maxX - box.minX + PAD * 2, H = box.maxY - box.minY + PAD * 2;
-      zoom = Math.max(0.3, Math.min(2.5, Math.min(canvas.clientWidth / W, canvas.clientHeight / H)));
+      zoom = Math.max(0.2, Math.min(2, Math.min(canvas.clientWidth / W, canvas.clientHeight / H)));
       panX = (canvas.clientWidth - W * zoom) / 2;
       panY = (canvas.clientHeight - H * zoom) / 2;
       draw();
     }
-    // 重置視圖只動鏡頭（100%、回到原點），不動節點——位置是使用者自己排的。
-    function resetView() { zoom = 1; panX = 40; panY = 40; draw(); }
     canvas.addEventListener('wheel', function (e) {
       e.preventDefault();
       const r = canvas.getBoundingClientRect();
       zoomAt(zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1), e.clientX - r.left, e.clientY - r.top);
     }, { passive: false });
+    const ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(function () { draw(); }) : null;
+    if (ro) ro.observe(canvas);
 
     // ---- 選取 / 刪除 ----
-    function select(type, i) { sel = (type == null) ? null : { type: type, i: i }; draw(); }
     function deleteSelected() {
-      if (!sel) return;
+      if (!sel || locked) return;
       snapshot();
       if (sel.type === 'node') {
         const id = model.nodes[sel.i].id;
@@ -364,7 +588,7 @@
         model.edges.splice(sel.i, 1);
       }
       sel = null;
-      draw();
+      draw(); changed();
     }
 
     // ---- 新增節點 ----
@@ -372,19 +596,38 @@
       snapshot();
       const n = { id: newId(), label: '新節點', x: x - R, y: y - R, color: '', shape: '' };
       model.nodes.push(n);
-      draw();
-      select('node', model.nodes.length - 1);
+      sel = { type: 'node', i: model.nodes.length - 1 };
+      draw(); changed();
       openInput(model.nodes.length - 1, true);
+    }
+
+    // ---- 雙擊：自己判斷（見檔頭說明）----
+    let lastDown = null;
+    function isDouble(e) {
+      const now = Date.now();
+      const d = !!lastDown && (now - lastDown.t < 400) && Math.hypot(e.clientX - lastDown.x, e.clientY - lastDown.y) < 6;
+      lastDown = d ? null : { t: now, x: e.clientX, y: e.clientY };
+      return d;
     }
 
     // ---- 拖曳：移動節點 / 平移畫布 / 拉線連接 ----
     function onCanvasDown(e) {
-      if (e.target.closest && e.target.closest('.rm-ctrl')) return;   // 浮動控制鈕自己處理
+      if (e.button !== 0) return;
+      if (e.target.closest && e.target.closest('.rm-ctrl')) return;
       const handle = e.target.closest && e.target.closest('.rm-handle');
       const nodeEl = e.target.closest && e.target.closest('.rm-node');
       const edgeEl = e.target.closest && e.target.closest('.rm-edge');
-      if (handle) { startConnect(e, +handle.getAttribute('data-i')); return; }
-      if (nodeEl) { startMoveNode(e, +nodeEl.getAttribute('data-i')); return; }
+      if (isDouble(e)) {
+        e.preventDefault();
+        if (locked) return;
+        if (nodeEl) { const i = +nodeEl.getAttribute('data-i'); select('node', i); openInput(i, true); return; }
+        if (edgeEl) { const i = +edgeEl.getAttribute('data-i'); select('edge', i); openEdgeInput(i); return; }
+        const p = toModelXY(e.clientX, e.clientY);
+        addNodeAt(p.x, p.y);
+        return;
+      }
+      if (handle && !locked) { startConnect(e, +handle.getAttribute('data-i')); return; }
+      if (nodeEl) { if (locked) { select('node', +nodeEl.getAttribute('data-i')); startPan(e); } else startMoveNode(e, +nodeEl.getAttribute('data-i')); return; }
       if (edgeEl) { select('edge', +edgeEl.getAttribute('data-i')); return; }
       select(null);
       startPan(e);
@@ -393,19 +636,20 @@
       e.preventDefault();
       select('node', i);
       const n = model.nodes[i];
-      snapshot();
+      const before = serialize(model);
       const sx = e.clientX, sy = e.clientY, ox0 = n.x, oy0 = n.y;
       let moved = false;
       function move(ev) {
         const dx = (ev.clientX - sx) / zoom, dy = (ev.clientY - sy) / zoom;
-        if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+        if (!moved && Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+        if (!moved) return;
         n.x = ox0 + dx; n.y = oy0 + dy;
         draw();
       }
       function up() {
         document.removeEventListener('mousemove', move);
         document.removeEventListener('mouseup', up);
-        if (!moved) { undo.pop(); }   // 只是點一下，不算真的移動，不留 undo 記錄
+        if (moved) { undo.push(before); if (undo.length > 100) undo.shift(); redo.length = 0; updateUndoBtns(); changed(); }
       }
       document.addEventListener('mousemove', move);
       document.addEventListener('mouseup', up);
@@ -448,10 +692,13 @@
         if (targetNodeEl) {
           const toIdx = +targetNodeEl.getAttribute('data-i');
           const toNode = model.nodes[toIdx];
-          if (toNode && toNode.id !== fromNode.id) {
+          if (toNode && toNode.id !== fromNode.id &&
+              !model.edges.some(function (x) { return x.from === fromNode.id && x.to === toNode.id; })) {
             snapshot();
             model.edges.push({ from: fromNode.id, to: toNode.id, label: '' });
-            select('edge', model.edges.length - 1);
+            sel = { type: 'edge', i: model.edges.length - 1 };
+            draw(); changed();
+            return;
           }
         }
         draw();
@@ -459,17 +706,46 @@
       document.addEventListener('mousemove', move);
       document.addEventListener('mouseup', up);
     }
-
     canvas.addEventListener('mousedown', onCanvasDown);
-    canvas.addEventListener('dblclick', function (e) {
-      if (e.target.closest && e.target.closest('.rm-ctrl')) return;
-      const nodeEl = e.target.closest && e.target.closest('.rm-node');
-      const edgeEl = e.target.closest && e.target.closest('.rm-edge');
-      if (nodeEl) { const i = +nodeEl.getAttribute('data-i'); select('node', i); openInput(i, true); return; }
-      if (edgeEl) { const i = +edgeEl.getAttribute('data-i'); select('edge', i); openEdgeInput(i); return; }
-      const p = toModelXY(e.clientX, e.clientY);
-      addNodeAt(p.x, p.y);
+
+    // ---- 拖 .csv 進畫布 ----
+    const dropHint = host.querySelector('.rm-drop');
+    canvas.addEventListener('dragover', function (e) {
+      if (locked) return;
+      if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) {
+        e.preventDefault(); dropHint.hidden = false;
+      }
     });
+    canvas.addEventListener('dragleave', function (e) { if (!canvas.contains(e.relatedTarget)) dropHint.hidden = true; });
+    canvas.addEventListener('drop', function (e) {
+      dropHint.hidden = true;
+      if (locked || !e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+      e.preventDefault();
+      readCSVFiles(e.dataTransfer.files);
+    });
+    function readCSVFiles(files) {
+      Array.prototype.forEach.call(files, function (f) {
+        const reader = new FileReader();
+        reader.onload = function () { doImport(String(reader.result || ''), f.name); };
+        reader.readAsText(f);
+      });
+    }
+    function doImport(text, name) {
+      snapshot();
+      const r = importCSV(model, text);
+      if (!r.nodes.length && !r.edges) { undo.pop(); updateUndoBtns(); notify('「' + (name || 'CSV') + '」裡沒有讀到任何關聯（要有 source,target 兩欄）'); return; }
+      if (r.nodes.length) autoLayout(model, r.nodes);
+      sel = null;
+      fitView(); changed();
+      notify('已匯入 ' + r.nodes.length + ' 個節點、' + r.edges + ' 條關聯');
+    }
+    function notify(msg) {
+      if (global.App && App.toast) { App.toast(msg); return; }
+      const t = document.createElement('div');
+      t.className = 'rm-toast'; t.textContent = msg;
+      host.appendChild(t);
+      setTimeout(function () { t.remove(); }, 2600);
+    }
 
     // ---- 就地改文字（節點）：輸入框蓋在圓盤下方的標籤上 ----
     function openInput(i, selectAll) {
@@ -480,7 +756,7 @@
       input = document.createElement('input');
       input.className = 'rm-input';
       input.value = n.label;
-      overlay.querySelector('.rm-editor').appendChild(input);
+      host.appendChild(input);
       const w = Math.max(120, s.w + 24);
       placeInputAt(c.x + ox - w / 2, c.y + oy + R + 3, w, 24);
       input.focus();
@@ -488,16 +764,15 @@
       function commit() {
         const v = input.value;
         closeInput();
-        if (v !== n.label) { snapshot(); n.label = v; draw(); }
+        if (v !== n.label) { snapshot(); n.label = v; draw(); changed(); }
       }
       input.addEventListener('keydown', function (e) {
         e.stopPropagation();
         if (e.key === 'Enter') { e.preventDefault(); commit(); }
-        else if (e.key === 'Escape') { e.preventDefault(); closeInput(); draw(); }
+        else if (e.key === 'Escape') { e.preventDefault(); closeInput(); }
       });
       input.addEventListener('blur', commit);
     }
-    // ---- 就地改文字（連線標籤）：放在曲線中點 ----
     function openEdgeInput(i) {
       closeInput();
       const e = model.edges[i];
@@ -509,14 +784,14 @@
       input.className = 'rm-input rm-input-edge';
       input.placeholder = '連線文字…';
       input.value = e.label || '';
-      overlay.querySelector('.rm-editor').appendChild(input);
+      host.appendChild(input);
       placeInputAt(g.mid.x + ox - 70, g.mid.y + oy - 12, 140, 24);
       input.focus();
       input.select();
       function commit() {
         const v = input.value;
         closeInput();
-        if (v !== e.label) { snapshot(); e.label = v; draw(); }
+        if (v !== e.label) { snapshot(); e.label = v; draw(); changed(); }
       }
       input.addEventListener('keydown', function (ev) {
         ev.stopPropagation();
@@ -533,11 +808,11 @@
       input.style.height = (h * zoom) + 'px';
       input.style.fontSize = Math.max(11, 13 * zoom) + 'px';
     }
-    function closeInput() { if (input) { input.remove(); input = null; } }
+    function closeInput() { if (input) { const el = input; input = null; el.remove(); } }
 
     // ---- 顏色（選取節點後按工具列的「顏色」，圓形色板出現在圓盤下方）----
     function colorMenu() {
-      if (!sel || sel.type !== 'node') return;
+      if (!sel || sel.type !== 'node' || locked) return;
       closeColorMenu();
       const n = model.nodes[sel.i];
       const pop = document.createElement('div');
@@ -548,10 +823,10 @@
         b.className = 'rm-swatch' + (c ? ' rm-' + c : ' rm-none') + (n.color === c ? ' on' : '');
         b.title = c || '自動';
         b.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
-        b.addEventListener('click', function () { snapshot(); n.color = c; draw(); closeColorMenu(); });
+        b.addEventListener('click', function () { snapshot(); n.color = c; draw(); changed(); closeColorMenu(); });
         pop.appendChild(b);
       });
-      overlay.querySelector('.rm-editor').appendChild(pop);
+      host.appendChild(pop);
       const disc = stage.querySelector('.rm-node[data-i="' + sel.i + '"] .rm-disc');
       const r = disc ? disc.getBoundingClientRect() : colorBtn.getBoundingClientRect();
       pop.style.left = Math.max(8, Math.min(r.left + r.width / 2 - 74, window.innerWidth - 160)) + 'px';
@@ -560,47 +835,82 @@
     }
     function onColorOutside(e) { if (!e.target.closest('.rm-colors')) closeColorMenu(); }
     function closeColorMenu() {
-      const p = overlay.querySelector('.rm-colors');
+      const p = host.querySelector('.rm-colors');
       if (p) p.remove();
       document.removeEventListener('mousedown', onColorOutside, true);
     }
 
-    // ---- 鍵盤 ----
+    // ---- 鍵盤（畫布有焦點時）----
+    function doUndo() { if (!undo.length) return; redo.push(serialize(model)); model = parse(undo.pop()); sel = null; draw(); changed(); updateUndoBtns(); }
+    function doRedo() { if (!redo.length) return; undo.push(serialize(model)); model = parse(redo.pop()); sel = null; draw(); changed(); updateUndoBtns(); }
     function onKey(e) {
-      if (input) return;   // 就地編輯中，交給那個 input 自己的 keydown
+      if (input || e.target === titleEl) return;
       if ((e.key === 'Delete' || e.key === 'Backspace') && sel) { e.preventDefault(); deleteSelected(); return; }
-      if (e.key === 'F2' && sel && sel.type === 'node') { e.preventDefault(); openInput(sel.i, true); return; }
-      if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
+      if (e.key === 'F2' && sel && sel.type === 'node' && !locked) { e.preventDefault(); openInput(sel.i, true); return; }
+      if (e.key === 'Escape') { if (sel) { e.preventDefault(); select(null); } return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
-        if (e.shiftKey) { if (redo.length) { undo.push(serialize(model)); model = parse(redo.pop()); sel = null; draw(); } }
-        else if (undo.length) { redo.push(serialize(model)); model = parse(undo.pop()); sel = null; draw(); }
+        if (e.shiftKey) doRedo(); else doUndo();
       }
     }
-    overlay.addEventListener('keydown', onKey);
+    host.addEventListener('keydown', onKey);
 
-    // ---- 工具列 / 浮動控制 ----
-    overlay.querySelector('.rm-add').addEventListener('click', function () {
+    // ---- 工具列 / Controls ----
+    host.querySelector('.rm-add').addEventListener('click', function () {
+      if (locked) return;
       const r = canvas.getBoundingClientRect();
       const p = toModelXY(r.left + canvas.clientWidth / 2, r.top + canvas.clientHeight / 2);
       addNodeAt(p.x, p.y);
     });
     colorBtn.addEventListener('click', colorMenu);
-    overlay.querySelector('.rm-zi').addEventListener('click', function () { zoomStep(1.25); });
-    overlay.querySelector('.rm-zo').addEventListener('click', function () { zoomStep(1 / 1.25); });
-    overlay.querySelector('.rm-zfit').addEventListener('click', fitView);
-    overlay.querySelector('.rm-reset-btn').addEventListener('click', resetView);
+    host.querySelector('.rm-undo').addEventListener('click', doUndo);
+    host.querySelector('.rm-redo').addEventListener('click', doRedo);
+    host.querySelector('.rm-layout').addEventListener('click', function () {
+      if (locked || !model.nodes.length) return;
+      snapshot(); autoLayout(model, null); fitView(); changed();
+    });
+    host.querySelector('.rm-csv').addEventListener('click', function () {
+      if (locked) return;
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = '.csv,.tsv,.txt,text/csv,text/plain'; inp.multiple = true; inp.hidden = true;
+      document.body.appendChild(inp);
+      inp.addEventListener('change', function () { readCSVFiles(inp.files); inp.remove(); });
+      inp.click();
+    });
+    host.querySelector('.rm-zi').addEventListener('click', function () { zoomStep(1.25); });
+    host.querySelector('.rm-zo').addEventListener('click', function () { zoomStep(1 / 1.25); });
+    host.querySelector('.rm-zfit').addEventListener('click', fitView);
+    const lockBtn = host.querySelector('.rm-lock');
+    lockBtn.addEventListener('click', function () {
+      locked = !locked;
+      lockBtn.classList.toggle('on', locked);
+      lockBtn.title = locked ? '解除鎖定' : '鎖定：只能平移縮放，不能改圖';
+      canvas.classList.toggle('rm-locked', locked);
+      ['.rm-add', '.rm-csv', '.rm-layout'].forEach(function (s) { host.querySelector(s).disabled = locked; });
+      applySelection();
+    });
 
-    function close() { closeColorMenu(); overlay.remove(); }
-    function cancel() { close(); }
-    function save() { close(); if (onSave) onSave(serialize(model)); }
-    overlay.querySelector('.mm-cancel').addEventListener('click', cancel);
-    overlay.querySelector('.mm-save').addEventListener('click', save);
-    overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) cancel(); });
+    let closed = false;
+    function close() {
+      if (closed) return;
+      closed = true;
+      flush();
+      closeInput(); closeColorMenu();
+      if (ro) ro.disconnect();
+      host.removeEventListener('keydown', onKey);
+      host.classList.remove('rm-page');
+      host.innerHTML = '';
+      if (ownHost) host.remove();
+      if (opts.onSave) opts.onSave(serialize(model));
+      if (opts.onClose) opts.onClose();
+    }
+    host.querySelector('.rm-back').addEventListener('click', close);
 
+    updateUndoBtns();
     draw();
+    if (model.nodes.length) fitView();
     canvas.focus();
-    return { close: close, save: save };
+    return { close: close, flush: flush, importCSV: function (t) { doImport(t); } };
   }
 
   global.RelMap = {
@@ -609,6 +919,8 @@
     renderSVG: renderSVG,
     open: open,
     isRelNote: isRelNote,
-    generate: generate
+    generate: generate,
+    importCSV: importCSV,
+    autoLayout: autoLayout
   };
 })(window);
