@@ -141,6 +141,14 @@
   --ed-head: #cba6f7;
   --ed-quote: #7f88a8;
   --ed-code: #9aa0bf;
+  /* 關聯分析畫布（js/relmap.js）：跟編輯器一樣是「畫布類」表面，不分主題一律深色
+     ——白色圓盤、彩色圓環、虛線關聯網要在深底上才成立（參考圖就是這樣）。列印
+     時 pdf.js 用自己的樣式表換白底，這裡同樣沒有 per-theme 覆寫。 */
+  --rm-bg: #0f131a;
+  --rm-text: #e8ecf3;
+  --rm-text-dim: #9aa4b5;
+  --rm-lbg: #1c2331;
+  --rm-border: #2a3242;
   --ed-hr: #585b70;
   --ed-mark: #89b4c9;
   --ed-bold: #e8e9f4;
@@ -2792,73 +2800,129 @@ select.sec-info-input { cursor: pointer; }
 }
 
 /* ---------- 關聯分析（js/relmap.js）：自由畫布節點／連線圖 ---------- */
-/* 唯讀渲染（預覽／PDF）：跟心智圖的 .mindmap-block 同一個殼 */
+/* 唯讀渲染（預覽／PDF／電子書）：深色畫布（--rm-* 不分主題，見 :root），跟心智圖
+   的 .mindmap-block 同一個殼。 */
 .relmap-block {
-  position: relative; margin: 0 0 14px; border: 1px solid var(--border);
-  background: var(--bg-2); padding: 12px; overflow-x: auto;
+  position: relative; margin: 0 0 14px; border: 1px solid var(--rm-border);
+  background: var(--rm-bg); padding: 12px; overflow-x: auto;
 }
 .relmap-block .rm-edit-btn {
-  position: absolute; top: 6px; right: 6px; z-index: 1;
+  position: absolute; top: 8px; right: 8px; z-index: 1;
   display: inline-flex; align-items: center; gap: 5px;
   padding: 4px 9px; font-size: var(--fs-xs); font-weight: 600;
-  border: 1px solid var(--border); background: var(--bg); color: var(--text-dim);
+  border: 1px solid var(--rm-border); background: var(--rm-lbg); color: var(--rm-text-dim);
   cursor: pointer;
 }
-.relmap-block .rm-edit-btn:hover { background: var(--row-hover); color: var(--text); }
+.relmap-block .rm-edit-btn:hover { color: var(--rm-text); border-color: var(--rm-text-dim); }
 .relmap-block .rm-edit-btn .ic-svg { width: 14px; height: 14px; }
 .relmap-svg { display: block; max-width: 100%; height: auto; font-family: var(--sans); }
 
-/* 節點底色／字色走 CSS class（跟心智圖同一個理由：pdf.js 才能用自己的列印樣式
-   表覆寫同一批 class，不用管 SVG 裡的 inline 顏色），只有選取色是唯一的例外。 */
-.rm-node rect { fill: var(--bg); stroke: var(--border-strong); stroke-width: 1.5; }
-.rm-node text { fill: var(--text); font-size: 13px; font-weight: 600; }
-.rm-node.rm-sel rect { stroke: var(--accent); stroke-width: 2.5; }
-.rm-edge line { stroke: var(--text-faint); stroke-width: 1.5; }
-.rm-edge.rm-sel line { stroke: var(--accent); stroke-width: 2.5; }
-.rm-edge-lbg { fill: var(--bg-2); }
-.rm-edge-lbl { fill: var(--text-dim); font-size: 11px; }
-.rm-arrowhead { fill: var(--text-faint); }
-.rm-edge.rm-sel .rm-arrowhead { fill: var(--accent); }
-/* 節點顏色（新增節點時可選，跟隨筆卡片同一組色名但用邊框／文字著色，不是整塊底色，
-   保持表格式圖表一貫的白底黑字觀感） */
-.rm-node.rm-red rect { stroke: #d6293e; } .rm-node.rm-red text { fill: #d6293e; }
-.rm-node.rm-orange rect { stroke: #c9701c; } .rm-node.rm-orange text { fill: #c9701c; }
-.rm-node.rm-yellow rect { stroke: #a68a00; } .rm-node.rm-yellow text { fill: #a68a00; }
-.rm-node.rm-green rect { stroke: #1f8a3d; } .rm-node.rm-green text { fill: #1f8a3d; }
-.rm-node.rm-teal rect { stroke: #128a80; } .rm-node.rm-teal text { fill: #128a80; }
-.rm-node.rm-blue rect { stroke: #1c64d1; } .rm-node.rm-blue text { fill: #1c64d1; }
-.rm-node.rm-purple rect { stroke: #7c3aed; } .rm-node.rm-purple text { fill: #7c3aed; }
+/* 節點 = 白色圓盤 + 彩色圓環 + 盤裡標籤首字（.rm-mono）+ 盤下完整標籤（.rm-lbl，
+   帶一圈畫布色描邊，壓在線上也讀得出來）。顏色一律走 class——使用者選的 .rm-<色名>，
+   沒選就是 id 雜湊出來的 .rm-auto-k——沒有 inline，pdf.js 才能用列印樣式表整批覆寫。 */
+.rm-node .rm-disc { fill: #fff; stroke: #8b96a8; stroke-width: 2.5; transition: stroke-width .12s; }
+.rm-node .rm-mono { fill: #8b96a8; font-size: 15px; font-weight: 700; pointer-events: none; }
+.rm-node .rm-lbl {
+  fill: var(--rm-text); font-size: 12px; font-weight: 600;
+  paint-order: stroke; stroke: var(--rm-bg); stroke-width: 3px; stroke-linejoin: round;
+}
+.rm-node.rm-red .rm-disc { stroke: #e5484d; } .rm-node.rm-red .rm-mono { fill: #e5484d; }
+.rm-node.rm-orange .rm-disc { stroke: #e08a3c; } .rm-node.rm-orange .rm-mono { fill: #e08a3c; }
+.rm-node.rm-yellow .rm-disc { stroke: #d9b840; } .rm-node.rm-yellow .rm-mono { fill: #b8961f; }
+.rm-node.rm-green .rm-disc { stroke: #3fb950; } .rm-node.rm-green .rm-mono { fill: #2f9a40; }
+.rm-node.rm-teal .rm-disc { stroke: #2fb8ad; } .rm-node.rm-teal .rm-mono { fill: #1f9a90; }
+.rm-node.rm-blue .rm-disc { stroke: #4c8dff; } .rm-node.rm-blue .rm-mono { fill: #3a78e0; }
+.rm-node.rm-purple .rm-disc { stroke: #a371f7; } .rm-node.rm-purple .rm-mono { fill: #8b5cf6; }
+.rm-node.rm-auto-0 .rm-disc { stroke: #e0c674; } .rm-node.rm-auto-0 .rm-mono { fill: #b89a3a; }
+.rm-node.rm-auto-1 .rm-disc { stroke: #6fa8dc; } .rm-node.rm-auto-1 .rm-mono { fill: #4a86c0; }
+.rm-node.rm-auto-2 .rm-disc { stroke: #e08a52; } .rm-node.rm-auto-2 .rm-mono { fill: #c46f38; }
+.rm-node.rm-auto-3 .rm-disc { stroke: #5fb88a; } .rm-node.rm-auto-3 .rm-mono { fill: #3f9a6c; }
+.rm-node.rm-auto-4 .rm-disc { stroke: #d97a9c; } .rm-node.rm-auto-4 .rm-mono { fill: #b95a7c; }
+.rm-node.rm-auto-5 .rm-disc { stroke: #9a86d6; } .rm-node.rm-auto-5 .rm-mono { fill: #7b67ba; }
+.rm-node.rm-auto-6 .rm-disc { stroke: #5cc2c2; } .rm-node.rm-auto-6 .rm-mono { fill: #3aa0a0; }
+.rm-node.rm-auto-7 .rm-disc { stroke: #d66a6a; } .rm-node.rm-auto-7 .rm-mono { fill: #b94e4e; }
+/* 選取色排在所有顏色 class 之後，同特定度靠來源順序贏，不用 !important */
+.rm-node.rm-sel .rm-disc { stroke: var(--accent); stroke-width: 4; }
+
+/* 連線：彎的虛線，橘棕為主（.rm-e0～e4）、零星藍紅紫青（.rm-e5～e8），箭頭跟著線的
+   顏色（context-stroke；不支援的瀏覽器退回 .rm-arrowhead 的屬性色）。.rm-hit 是一條
+   看不見的粗底線，讓細虛線好點選。 */
+.rm-edge .rm-hit { fill: none; stroke: transparent; stroke-width: 12; }
+.rm-edge .rm-line { fill: none; stroke: #c9822a; stroke-width: 1.6; stroke-dasharray: 6 4; stroke-linecap: round; opacity: .9; }
+.rm-edge.rm-e0 .rm-line, .rm-edge.rm-e1 .rm-line, .rm-edge.rm-e2 .rm-line { stroke: #c9822a; }
+.rm-edge.rm-e3 .rm-line { stroke: #b8702a; }
+.rm-edge.rm-e4 .rm-line { stroke: #a86a2c; }
+.rm-edge.rm-e5 .rm-line { stroke: #4f8fd6; }
+.rm-edge.rm-e6 .rm-line { stroke: #d65f6b; }
+.rm-edge.rm-e7 .rm-line { stroke: #8e6fd6; }
+.rm-edge.rm-e8 .rm-line { stroke: #4fb0a8; }
+.rm-edge.rm-sel .rm-line { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: none; opacity: 1; }
+.rm-arrowhead { fill: context-stroke; }
+.rm-edge-lbg { fill: var(--rm-lbg); stroke: var(--rm-border); stroke-width: 1; }
+.rm-edge-lbl { fill: var(--rm-text-dim); font-size: 11px; font-weight: 600; }
 
 /* ---------- 編輯器（殼跟心智圖共用 .mm-overlay/.mm-editor/.mm-bar/.mm-canvas/.mm-stage）---------- */
-.rm-canvas { cursor: grab; }
-.rm-canvas:active { cursor: grabbing; }
+/* overflow hidden：平移是拖曳，不是捲動——留 auto 會多出兩條捲軸壓在深色畫布邊上。 */
+.rm-canvas { cursor: grab; background: var(--rm-bg); overflow: hidden; }
+.rm-canvas.mm-dragging { cursor: grabbing; }
 .rm-stage { padding: 0; display: block; }
 .rm-node { cursor: grab; }
 .rm-node:active { cursor: grabbing; }
 .rm-edge { cursor: pointer; }
+.rm-node:hover .rm-disc { stroke-width: 3.5; }
 /* 連線把手：平常很淡，滑到節點才明顯；拖它開始拉線，不是移動節點 */
 /* 每個節點的 <g class="rm-node"> 後面緊接著自己的 <circle class="rm-handle">
    （見 relmap.js 的 draw()），所以只用「緊鄰手足」+ 選到，不能用 ~（會連到後面
    所有節點的把手）。 */
-.rm-handle { fill: var(--bg); stroke: var(--border-strong); stroke-width: 1.5; opacity: 0; cursor: crosshair; }
+.rm-handle { fill: var(--rm-lbg); stroke: var(--rm-text-dim); stroke-width: 1.5; opacity: 0; cursor: crosshair; transition: opacity .12s; }
 .rm-node:hover + .rm-handle, .rm-handle:hover { opacity: 1; }
 .rm-node.rm-sel + .rm-handle { opacity: 1; }
+.rm-handle:hover { fill: var(--accent); stroke: #fff; }
 .rm-rubberband { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 3; pointer-events: none; }
-.rm-input { text-align: left; }
-.rm-input-edge { font-weight: 400; font-size: var(--fs-sm); text-align: center; }
-
-/* 節點顏色選單（跟隨筆的調色盤同一個做法，body 子元素一律 fixed） */
-.rm-colors {
-  position: fixed; z-index: 2100; display: flex; flex-wrap: wrap; gap: 6px; width: 148px;
-  padding: 8px; background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+/* 就地改文字的輸入框：placeInputAt 算的是視窗座標，所以是 fixed；之前只有
+   text-align，沒有定位，left/top 根本沒作用，輸入框跑到對話框最底下。 */
+.rm-input {
+  position: fixed; z-index: 2100; box-sizing: border-box;
+  padding: 0 8px; text-align: center; font-family: var(--sans); font-weight: 600;
+  border: 2px solid var(--accent); border-radius: 4px; background: var(--rm-lbg); color: var(--rm-text);
+  outline: none; box-shadow: 0 4px 14px rgba(0, 0, 0, .4);
 }
-.rm-swatch { width: 24px; height: 24px; border: 1px solid var(--border); cursor: pointer; padding: 0; background: var(--bg); }
-.rm-swatch.on { outline: 2px solid var(--accent); outline-offset: 1px; }
-.rm-swatch.rm-none { background: repeating-linear-gradient(45deg, var(--bg-2), var(--bg-2) 4px, var(--bg) 4px, var(--bg) 8px); }
-.rm-swatch.rm-red { background: #d6293e; } .rm-swatch.rm-orange { background: #c9701c; }
-.rm-swatch.rm-yellow { background: #a68a00; } .rm-swatch.rm-green { background: #1f8a3d; }
-.rm-swatch.rm-teal { background: #128a80; } .rm-swatch.rm-blue { background: #1c64d1; }
-.rm-swatch.rm-purple { background: #7c3aed; }
+.rm-input-edge { font-weight: 400; font-size: var(--fs-sm); text-align: center; }
+/* 浮在畫布上的縮放群組（左上）跟重置鈕（右下）：深色，跟畫布一體 */
+.rm-zoom-ctrl {
+  position: absolute; top: 14px; left: 14px; z-index: 2;
+  display: flex; flex-direction: column; background: var(--rm-lbg);
+  border: 1px solid var(--rm-border); box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+}
+.rm-ctrl-btn {
+  display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  border: 0; background: transparent; color: var(--rm-text-dim); cursor: pointer; padding: 0;
+}
+.rm-ctrl-btn + .rm-ctrl-btn { border-top: 1px solid var(--rm-border); }
+.rm-ctrl-btn:hover { background: rgba(255, 255, 255, .07); color: var(--rm-text); }
+.rm-ctrl-btn .ic-svg { width: 16px; height: 16px; }
+.rm-reset-btn {
+  position: absolute; right: 14px; bottom: 14px; z-index: 2;
+  padding: 7px 14px; font-size: var(--fs-sm); font-weight: 600;
+  background: var(--rm-lbg); border: 1px solid var(--rm-border); box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+  color: var(--rm-text-dim); cursor: pointer; transition: color .12s, border-color .12s;
+}
+.rm-reset-btn:hover { color: var(--rm-text); border-color: var(--rm-text-dim); }
+
+/* 節點顏色選單（圓形色板，跟隨筆同一個做法；body 子元素一律 fixed）。「自動」那格是
+   斜紋，表示交回 id 雜湊出來的顏色。 */
+.rm-colors {
+  position: fixed; z-index: 2100; display: flex; flex-wrap: wrap; gap: 7px; width: 148px;
+  padding: 8px; background: var(--rm-lbg); border: 1px solid var(--rm-border); box-shadow: 0 6px 20px rgba(0, 0, 0, .4);
+}
+.rm-swatch { width: 24px; height: 24px; border: 2px solid transparent; border-radius: 50%; cursor: pointer; padding: 0; background: #fff; transition: transform .1s; }
+.rm-swatch:hover { transform: scale(1.12); }
+.rm-swatch.on { border-color: #fff; outline: 2px solid var(--accent); }
+.rm-swatch.rm-none { background: repeating-linear-gradient(45deg, #7d8797, #7d8797 3px, #b4bcc8 3px, #b4bcc8 6px); }
+.rm-swatch.rm-red { background: #e5484d; } .rm-swatch.rm-orange { background: #e08a3c; }
+.rm-swatch.rm-yellow { background: #d9b840; } .rm-swatch.rm-green { background: #3fb950; }
+.rm-swatch.rm-teal { background: #2fb8ad; } .rm-swatch.rm-blue { background: #4c8dff; }
+.rm-swatch.rm-purple { background: #a371f7; }
 
 /* ---------- 關聯圖（反向連結＋標籤，Obsidian 風格的力導向圖） ---------- */
 .graph-overlay {
