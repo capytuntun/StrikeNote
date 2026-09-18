@@ -31,9 +31,29 @@
     return Math.abs(h);
   }
   const NODE_COLORS = ['#e0c674', '#6fa8dc', '#e08a52', '#5fb88a', '#d97a9c', '#9a86d6', '#5cc2c2', '#d66a6a'];
-  const EDGE_COLORS = ['#c9822a', '#4f8fd6', '#4fb0a8', '#d65f6b', '#8e6fd6', '#5fae5f', '#d6a23f', '#4fa0d6'];
+  // 邊的配色刻意偏重橘棕：參考圖裡絕大多數的線是橘棕色虛線，只有少數幾條是藍／紅／
+  // 紫／青的重點線——調色盤裡橘棕多放幾份，雜湊出來的分布才會是「一片暖色底、
+  // 零星幾條彩色」，不是每種顏色平均分配的彩虹。
+  const EDGE_COLORS = ['#c9822a', '#c9822a', '#c9822a', '#b8702a', '#a86a2c', '#4f8fd6', '#d65f6b', '#8e6fd6', '#4fb0a8'];
   function nodeColor(n) { return n.kind === 'tag' ? null : NODE_COLORS[hash(n.id) % NODE_COLORS.length]; }
   function edgeColor(e) { return EDGE_COLORS[hash(e.a + '|' + e.b) % EDGE_COLORS.length]; }
+
+  // 節點裡的小圖示：參考圖的節點是「白色圓底、彩色圓環、中間一個小 icon」（那邊是
+  // 網站的 favicon），這裡沒有 favicon，就用 icons.js 現成的線條圖示——筆記是
+  // file-text、標籤是 hash。Icons.el() 給的是一個完整的 <svg>，但 .ic-svg 的全站
+  // CSS 會把它的寬高鎖在 16px，所以不是把 <svg> 塞進去，而是把裡面的 <path> 搬進一個
+  // 自己的 <g>，用 transform 從 24×24 的座標縮到節點需要的大小；stroke 走
+  // currentColor，筆記節點在 JS 上 inline 指定 color，標籤節點交給 CSS 的 --folder。
+  function iconGroup(name, size) {
+    const src = (global.Icons && Icons.el) ? Icons.el(name) : null;
+    const g = svgEl('g', {
+      class: 'graph-node-ic', fill: 'none', stroke: 'currentColor', 'stroke-width': 2.4,
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      transform: 'translate(' + (-size / 2) + ',' + (-size / 2) + ') scale(' + (size / 24) + ')'
+    });
+    if (src) while (src.firstChild) g.appendChild(src.firstChild);
+    return g;
+  }
   // 二次貝茲曲線：控制點從邊的中點沿垂直方向偏移，偏移量隨線長縮放、方向照雜湊
   // 奇偶交替（有的往左彎有的往右彎），整張圖才會有機、不會每條線都彎同一邊。
   function curvePath(ax, ay, bx, by, seed) {
@@ -112,7 +132,7 @@
       '<span class="graph-bar-hint">拖曳調整位置・滾輪縮放・點筆記開啟・點標籤篩選</span>' +
       '<label class="graph-tag-toggle"><input type="checkbox" class="graph-tags-cb" checked> 顯示標籤</label>' +
       '<span class="graph-bar-sp"></span>' +
-      '<span class="graph-legend"><i class="graph-dot graph-dot-note"></i>筆記<i class="graph-dot graph-dot-tag"></i>標籤</span>' +
+      '<span class="graph-legend">' + (global.Icons ? Icons.svg('file-text') : '') + '筆記' + (global.Icons ? Icons.svg('hash') : '') + '標籤</span>' +
       '<button class="btn graph-close" type="button">關閉</button>' +
       '</header>' +
       '<div class="graph-canvas" tabindex="0">' +
@@ -182,17 +202,19 @@
       const vn = visibleNodes();
       const avgDeg = vn.length ? vn.reduce(function (s, n) { return s + n.deg; }, 0) / vn.length : 0;
       vn.forEach(function (n) {
-        const r = n.kind === 'tag' ? 5 : (7 + Math.min(n.deg * 1.6, 14));
+        // 節點比之前大一號：白底圓盤裡要放得下一個看得出來的小圖示。
+        const r = n.kind === 'tag' ? 8 : (10 + Math.min(n.deg * 1.6, 12));
         const major = n.deg > avgDeg;
         const g = svgEl('g', { class: 'graph-node graph-node-' + n.kind + (major ? '' : ' is-minor'), 'data-id': n.id });
         const c = svgEl('circle', { r: r, class: 'graph-node-dot' });
-        const fill = nodeColor(n);
-        if (fill) c.style.fill = fill;
-        const t = svgEl('text', { class: 'graph-node-label', x: 0, y: -(r + 6) });
+        const ring = nodeColor(n);
+        if (ring) { c.style.stroke = ring; g.style.color = ring; }
+        const ic = iconGroup(n.kind === 'tag' ? 'hash' : 'file-text', r * 1.15);
+        const t = svgEl('text', { class: 'graph-node-label', x: 0, y: r + 14 });
         t.textContent = n.label.length > 40 ? n.label.slice(0, 39) + '…' : n.label;
         const title = svgEl('title', {});
         title.textContent = n.label;
-        g.appendChild(c); g.appendChild(t); g.appendChild(title);
+        g.appendChild(c); g.appendChild(ic); g.appendChild(t); g.appendChild(title);
         nodeLayer.appendChild(g);
         n.r = r;
         nodeEls[n.id] = { el: g, dot: c, node: n };

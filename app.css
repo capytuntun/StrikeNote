@@ -2890,13 +2890,8 @@ select.sec-info-input { cursor: pointer; }
   display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto;
   font-size: var(--fs-xs); color: var(--text-faint);
 }
-.graph-dot {
-  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-  margin-left: 10px; margin-right: 2px;
-}
-.graph-legend .graph-dot:first-child { margin-left: 0; }
-.graph-dot-note { background: var(--accent); }
-.graph-dot-tag { background: var(--folder); }
+.graph-legend .ic-svg { width: 13px; height: 13px; margin-left: 10px; margin-right: 3px; color: var(--text-dim); }
+.graph-legend .ic-svg:first-child { margin-left: 0; }
 .graph-canvas {
   flex: 1 1 auto; position: relative; overflow: hidden;
   background: var(--bg-2); outline: none; cursor: grab;
@@ -2931,27 +2926,36 @@ select.sec-info-input { cursor: pointer; }
 /* 邊是彎的 <path>，一定要 fill:none，不然 SVG 預設把曲線圍成的區域塗黑實心。
    顏色是每條邊自己的 inline stroke（js 依 id 雜湊出來），這裡只留粗細、線頭
    跟一般連結／標籤連結的虛實線之分。 */
-.graph-edge { fill: none; stroke: var(--border-strong); stroke-width: 1.4; stroke-linecap: round; transition: opacity .12s; }
-.graph-edge-tag { stroke-dasharray: 3 3; }
-.graph-edge.is-dim { opacity: .12; }
+/* 參考圖的線幾乎全是虛線：一般連結是長虛線、標籤連結是點線，兩種還分得出來，
+   但整張圖的質感一致是「虛線網」。 */
+.graph-edge { fill: none; stroke: var(--border-strong); stroke-width: 1.3; stroke-linecap: round; opacity: .85; transition: opacity .12s; }
+.graph-edge-link { stroke-dasharray: 7 5; }
+.graph-edge-tag { stroke-dasharray: 2 4; }
+.graph-edge.is-dim { opacity: .1; }
 .graph-node { cursor: pointer; }
+/* 節點＝白色圓盤＋彩色圓環＋中間小圖示（參考圖裡那是網站 favicon）。圓盤固定白色、
+   不跟主題走：暗色底上白盤最像參考圖，亮色底上有彩色圓環撐著也看得清楚。筆記的
+   圓環顏色由 js inline 指定（雜湊），標籤固定 --folder，跟圖例的兩個 icon 對得上。 */
 .graph-node-dot {
-  fill: var(--accent); stroke: var(--bg-2); stroke-width: 2;
-  transition: opacity .12s, r .12s;
+  fill: #fff; stroke: var(--folder); stroke-width: 2.5;
+  transition: opacity .12s, stroke-width .12s;
 }
-.graph-node-tag .graph-node-dot { fill: var(--folder); }
+.graph-node-tag { color: var(--folder); }
+.graph-node-ic { pointer-events: none; transition: opacity .12s; }
 .graph-node-label {
-  text-anchor: middle; fill: var(--text-dim); font-family: var(--sans);
+  text-anchor: middle; fill: var(--text); font-family: var(--sans); font-weight: 600;
   font-size: 11px; pointer-events: none; user-select: none; transition: opacity .12s;
+  paint-order: stroke; stroke: var(--bg-2); stroke-width: 3px; stroke-linejoin: round;
 }
 /* 只有度數高於平均的節點預設就有標籤——其餘的標籤還在 DOM 裡，只是透明，滑過
    （既有的 is-hover）才現形，這樣一張連結很多的圖才不會滿版文字看不出結構。 */
-.graph-node.is-minor .graph-node-label { opacity: 0; }
-.graph-node.is-minor.is-hover .graph-node-label { opacity: 1; }
+/* :not(.is-hover) 拉高特定度，讓這條贏過後面的 .is-dim 規則——不然滑過別的節點時，
+   被調暗的次要節點會以 .18 透明度浮出一片「未命名筆記」的鬼影標籤。 */
+.graph-node.is-minor:not(.is-hover) .graph-node-label { opacity: 0; }
 .graph-node.is-dim .graph-node-dot,
+.graph-node.is-dim .graph-node-ic,
 .graph-node.is-dim .graph-node-label { opacity: .18; }
-.graph-node.is-hover .graph-node-dot { stroke: var(--accent); }
-.graph-node.is-hover .graph-node-label { fill: var(--text); font-weight: 600; }
+.graph-node.is-hover .graph-node-dot { stroke-width: 4; }
 
 /* ---------- 版本紀錄 ---------- */
 .modal.ver-modal {

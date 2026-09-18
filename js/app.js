@@ -1700,6 +1700,7 @@
       Store.updateNote(updated).then(function (n) {
         const idx = state.notes.findIndex(function (x) { return x.id === n.id; });
         if (idx >= 0) { state.notes[idx].content = n.content; state.notes[idx].rev = n.rev; state.notes[idx].updatedAt = n.updatedAt; }
+        refreshViews(); // 首頁就在底下，更新時間／排序要跟著動
         toast('已儲存');
       }, function (e) { toast('儲存失敗：' + (e && e.message || e)); });
     });
@@ -3682,12 +3683,15 @@
 
     // 關聯分析：新建立就帶一組起點範例，一開就直接進全螢幕編輯器（見 openNote 裡
     // 的 RelMap.isRelNote 分支），不用像其他範本一樣再等 openNote 跑完一般流程。
+    // refreshViews() 而不是只 renderTree()：其他範本的 openNote 會離開首頁，回來時首頁
+    // 本來就會重畫；關聯分析卻是「浮在首頁上面」開啟，首頁一直留在底下不會重畫，
+    // 只更新側邊欄的話，新筆記在關掉編輯器後的 未歸類筆記 裡就是看不到。
     const relBtn = $('#rel-map');
     if (relBtn && window.RelMap) relBtn.addEventListener('click', function () {
       Store.createNote('未命名關聯分析', currentFolderId(), { meta: { relMap: true }, content: RelMap.generate() })
         .then(function (n) {
           state.notes.push(n);
-          renderTree();
+          refreshViews();
           openNote(n.id);
         }, function (e) { toast('新增失敗：' + (e && e.message || e)); });
     });
@@ -3768,7 +3772,10 @@
     const graphBtn = $('#graph-open-btn');
     if (graphBtn) graphBtn.addEventListener('click', function () {
       if (!window.Graph) return;
-      Graph.open(state.notes, {
+      // 隨筆沒有標題、彼此也不會互連，進圖只是一堆「未命名筆記」的孤點；小說是
+      // 刻意隔開的區域，也不該混進一般筆記的關聯圖。證照課程／知識區是有標題、
+      // 會互相 [[連結]] 的正經筆記，留著。
+      Graph.open(state.notes.filter(function (n) { return n.area !== 'quick' && n.area !== 'novel'; }), {
         onOpenNote: function (note) { openNote(note.id); },
         onOpenTag: function (tag) { browseTag(tag); }
       });
