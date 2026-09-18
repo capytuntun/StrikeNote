@@ -3631,22 +3631,46 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 }
 .qn-composer-input::placeholder { color: var(--text-faint); }
 .qn-composer-actions[hidden] { display: none; }
+.qn-composer-actions { display: flex; align-items: center; gap: 6px; }
 .qn-composer-actions .btn { flex: 0 0 auto; padding: 6px 16px; font-size: var(--fs-sm); border-radius: 999px; }
+.qn-composer-close {
+  display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
+  border: 0; background: transparent; color: var(--text-faint); cursor: pointer; padding: 0; border-radius: 50%;
+}
+.qn-composer-close:hover { background: var(--row-hover); color: var(--text); }
+.qn-composer-close .ic-svg { width: 16px; height: 16px; }
 
 .qn-section-head { margin: 4px 0 12px; }
 
-/* 卡片牆：CSS 多欄排出的錯落效果，不需要量測版面的 JS */
-.qn-grid { column-width: 250px; column-gap: 16px; margin-bottom: 30px; }
+/* 卡片牆：平衡欄佈局（js 依欄高即時分配，見 quicknotes.js 的 layoutMasonry），
+   不是 CSS column-width——那種多欄排版由上到下排滿一欄才換下一欄，跟卡片本身
+   的順序（釘選／更新時間）對不起來，Keep 是照最短欄放。 */
+.qn-grid { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 30px; }
+.qn-col { display: flex; flex-direction: column; gap: 16px; flex: 1 1 0; min-width: 0; }
 .qn-card {
-  display: inline-block; width: 100%; break-inside: avoid; margin-bottom: 16px;
+  width: 100%; position: relative;
   background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
   border-radius: 10px; overflow: hidden;
   cursor: text; transition: box-shadow .15s, border-color .15s, transform .15s;
 }
 .qn-card:hover { box-shadow: var(--shadow); border-color: var(--border-strong); transform: translateY(-1px); }
 .qn-card:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); transform: none; }
-.qn-title { padding: 14px 16px 0; font-weight: 700; font-size: var(--fs-md); line-height: 1.4; word-break: break-word; }
+/* Keep 的圖釘是卡片右上角單獨一顆，跟底下的顏色／封存／刪除分開；右邊留出的
+   空間讓標題／內文第一行不會被蓋到。 */
+.qn-pin-corner {
+  position: absolute; top: 6px; right: 6px; z-index: 1;
+  display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+  border: 0; background: transparent; color: var(--text-faint); cursor: pointer; padding: 0;
+  border-radius: 50%; opacity: 0; transition: opacity .12s, background .12s, color .12s;
+}
+.qn-card:hover .qn-pin-corner, .qn-card:focus-within .qn-pin-corner, .qn-pin-corner.on { opacity: 1; }
+.qn-pin-corner:hover { background: rgba(0, 0, 0, .06); color: var(--text); }
+:root[data-theme="dark"] .qn-pin-corner:hover { background: rgba(255, 255, 255, .1); }
+.qn-pin-corner.on { color: var(--accent); }
+.qn-pin-corner .ic-svg { width: 15px; height: 15px; }
+.qn-title { padding: 14px 36px 0 16px; font-weight: 700; font-size: var(--fs-md); line-height: 1.4; word-break: break-word; }
 .qn-body { padding: 14px 16px; font-size: var(--fs-sm); line-height: 1.65; word-break: break-word; max-height: 320px; overflow: hidden; }
+.qn-card > .qn-body:first-child { padding-right: 36px; }
 .qn-title + .qn-body { padding-top: 6px; }
 .qn-body:empty::before { content: '空白的隨筆'; color: var(--text-faint); font-style: italic; }
 .qn-body p:first-child { margin-top: 0; }
@@ -3672,7 +3696,7 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 :root[data-theme="dark"] .qn-card.qn-c-purple { background: var(--qn-purple-dark, #2a2440); border-color: #40365f; }
 :root[data-theme="dark"] .qn-card.qn-c-pink { background: var(--qn-pink-dark, #3a2231); border-color: #5a344c; }
 
-/* 卡片底部的釘選／顏色／封存／刪除，平常很淡，滑過卡片才明顯 */
+/* 卡片底部的顏色／封存／刪除（釘選在右上角，見 .qn-pin-corner），平常很淡，滑過卡片才明顯 */
 .qn-toolbar { display: flex; align-items: center; gap: 2px; padding: 6px 10px 10px; opacity: 0; transition: opacity .12s; }
 .qn-card:hover .qn-toolbar, .qn-card:focus-within .qn-toolbar { opacity: 1; }
 .qn-tbtn {
