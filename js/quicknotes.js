@@ -381,13 +381,23 @@
   // （釘選／更新時間）對不起來，Keep 是照最短欄放。欄數看容器寬度即時算，用
   // ResizeObserver 而不是 window resize：側邊欄抽屜開合只是改 .quick-page 的 padding，
   // 不會觸發 window 的 resize 事件，但容器寬度確實變了。
-  const COL_WIDTH = 236;
+  const COL_WIDTH = 240;   // Keep 的卡片寬
   let roList = [];
+  // 可用寬度量的是整頁（.quick-page 的內容框），不是牆本身——牆包在 fit-content 的
+  // .qn-section 裡，自己的寬度是由欄數反推出來的，量它會是循環。
+  function pageOf(grid) { return grid.closest('.quick-page') || grid.parentElement; }
+  function availWidth(grid) {
+    const host = pageOf(grid);
+    const cs = getComputedStyle(host);
+    return host.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+  }
   function layoutMasonry(grid, cardEls) {
     grid.innerHTML = '';
-    const width = grid.clientWidth || COL_WIDTH;
+    const width = availWidth(grid) || COL_WIDTH;
     const gap = 16;
     const cols = Math.max(1, Math.min(6, Math.floor((width + gap) / (COL_WIDTH + gap))));
+    // 牆的寬度＝欄數決定，整段（含小標）靠 .qn-section 的 fit-content 置中
+    grid.style.width = (cols * COL_WIDTH + (cols - 1) * gap) + "px";
     const colEls = [];
     for (let i = 0; i < cols; i++) {
       const c = el('div', 'qn-col');
@@ -406,8 +416,13 @@
     const grid = el('div', 'qn-grid');
     container.appendChild(grid); // 先插進文件，量寬度才準
     layoutMasonry(grid, cardEls);
-    const ro = new ResizeObserver(function () { layoutMasonry(grid, cardEls); });
-    ro.observe(grid);
+    // 觀察整頁的內容框：視窗縮放、側邊欄抽屜開合（只改 padding）都會讓它變寬變窄
+    let last = availWidth(grid);
+    const ro = new ResizeObserver(function () {
+      const w = availWidth(grid);
+      if (w !== last) { last = w; layoutMasonry(grid, cardEls); }
+    });
+    ro.observe(pageOf(grid));
     roList.push(ro);
     return grid;
   }
@@ -418,10 +433,11 @@
     roList = [];
     container.innerHTML = '';
 
+    // Keep 沒有大標題：頂上只有一個小小的定位字跟「封存」切換，第一眼看到的是輸入列
     const head = el('div', 'qn-head');
-    head.appendChild(el('h1', 'qn-title-h', ic('pin') + '<span>隨筆</span>'));
+    head.appendChild(el('div', 'qn-title-h', ic(showArchived ? 'folder' : 'pin') + '<span>' + (showArchived ? '封存' : '隨筆') + '</span>'));
     const toggle = el('button', 'qn-archive-toggle' + (showArchived ? ' on' : ''),
-      ic(showArchived ? 'folder-open' : 'folder') + '<span>' + (showArchived ? '回到筆記' : '封存') + '</span>');
+      ic(showArchived ? 'arrow-left' : 'folder') + '<span>' + (showArchived ? '回到隨筆' : '封存') + '</span>');
     toggle.type = 'button';
     toggle.addEventListener('click', function () { showArchived = !showArchived; render(container, opts); });
     head.appendChild(toggle);
@@ -431,7 +447,7 @@
 
     const notes = opts.notes.filter(function (n) { return isArchived(n) === showArchived; });
     if (!notes.length) {
-      container.appendChild(el('div', 'dash-empty', ic(showArchived ? 'folder' : 'pin') + '<span>' + (showArchived ? '封存的隨筆會顯示在這裡。' : '還沒有隨筆，在上面記點什麼開始。') + '</span>'));
+      container.appendChild(el('div', 'qn-empty', ic(showArchived ? 'folder' : 'pin') + '<span>' + (showArchived ? '封存的隨筆會顯示在這裡。' : '你新增的隨筆會顯示在這裡。') + '</span>'));
       return;
     }
     const pinned = notes.filter(isPinned);
@@ -439,14 +455,15 @@
     function sortByTime(a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }
     pinned.sort(sortByTime); rest.sort(sortByTime);
 
-    if (pinned.length) {
-      container.appendChild(el('div', 'dash-section-head qn-section-head', '<span>已釘選</span>'));
-      buildGrid(container, pinned.map(function (n) { return makeCard(n, opts); }));
+    // 每一段（小標＋牆）包成 .qn-section：fit-content 置中，小標就貼齊牆的左緣
+    function section(label, list) {
+      const sec = el('div', 'qn-section');
+      if (label) sec.appendChild(el('div', 'qn-section-head', esc(label)));
+      container.appendChild(sec);
+      buildGrid(sec, list.map(function (n) { return makeCard(n, opts); }));
     }
-    if (rest.length) {
-      if (pinned.length) container.appendChild(el('div', 'dash-section-head qn-section-head', '<span>其他</span>'));
-      buildGrid(container, rest.map(function (n) { return makeCard(n, opts); }));
-    }
+    if (pinned.length) section('已釘選', pinned);
+    if (rest.length) section(pinned.length ? '其他' : '', rest);
   }
 
   global.QuickNotes = {

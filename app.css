@@ -3703,197 +3703,193 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 .imglib-upload { flex: 0 0 auto; padding: 5px 10px; margin-right: 6px; font-size: var(--fs-sm); }
 
 /* ---------- 四個獨立區域：證照／課程筆記、知識區、小說（js/areabrowser.js）用
-   跟首頁一樣的 .dash-* class，不需要另外的 CSS；隨筆（js/quicknotes.js）是自己
-   的 Keep 風格卡片牆，以下才是它專用的樣式。
-   直角是全站規則（--r* 全部是 0，見 :root），但 Keep 的辨識度本來就建立在圓角
-   卡片、圓形色板、圓形工具鈕上——照著全站直角做只會變成一排彩色方塊，不是
-   便利貼。這裡是繼登入畫面的陰影之後，第二個刻意脫離設計系統的例外，只在
-   .qn-* 範圍內生效。 ---------- */
-/* 跟 .dashboard／.trash-page 同一條規則：抽屜是浮動的、不擠壓版面，這裡要自己
-   讓出左邊的寬度，不然標題、輸入列會被蓋住一截——這是這個頁面原本最難看的
-   主因，不是配色問題。 */
-.quick-page { max-width: 1180px; margin: 0; padding: 28px 32px 40vh; transition: padding-left .2s cubic-bezier(.2, .7, .2, 1); }
+   跟首頁一樣的 .dash-* class，不需要另外的 CSS；隨筆（js/quicknotes.js）是照著
+   Google Keep 做的卡片牆，以下是它專用的樣式——顏色、陰影、圓角、字級全部取 Keep
+   實際的值（--kp-*），不是拿全站的 token 湊：全站是直角深藍的「工具」風格，Keep 是
+   白底、淡灰邊、8px 圓角、只在滑過時浮起來的「便利貼」風格，混在一起就是之前
+   「怎麼看都不像 Keep」的原因。這是繼登入畫面的陰影之後，第二個刻意脫離設計系統
+   的例外，只在 #quick-wrap 裡生效。 ---------- */
+:root {
+  --kp-bg: #ffffff; --kp-page: #ffffff; --kp-border: #e0e0e0; --kp-text: #202124; --kp-text-2: #5f6368;
+  --kp-hover: rgba(95, 99, 104, .157);
+  --kp-shadow: 0 1px 2px 0 rgba(60, 64, 67, .302), 0 2px 6px 2px rgba(60, 64, 67, .149);
+  --kp-shadow-sm: 0 1px 2px 0 rgba(60, 64, 67, .302), 0 1px 3px 1px rgba(60, 64, 67, .149);
+  --kp-red: #f28b82; --kp-orange: #fbbc04; --kp-yellow: #fff475; --kp-green: #ccff90;
+  --kp-teal: #a7ffeb; --kp-blue: #cbf0f8; --kp-purple: #d7aefb; --kp-pink: #fdcfe8;
+}
+:root[data-theme="dark"] {
+  --kp-bg: #202124; --kp-page: #202124; --kp-border: #5f6368; --kp-text: #e8eaed; --kp-text-2: #9aa0a6;
+  --kp-hover: rgba(232, 234, 237, .157);
+  --kp-shadow: 0 1px 2px 0 rgba(0, 0, 0, .6), 0 2px 6px 2px rgba(0, 0, 0, .302);
+  --kp-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, .6), 0 1px 3px 1px rgba(0, 0, 0, .302);
+  --kp-red: #5c2b29; --kp-orange: #614a19; --kp-yellow: #635d19; --kp-green: #345920;
+  --kp-teal: #16504b; --kp-blue: #2d555e; --kp-purple: #42275e; --kp-pink: #5b2245;
+}
+#quick-wrap { background: var(--kp-page); color: var(--kp-text); }
+/* 跟 .dashboard／.trash-page 同一條規則：抽屜是浮動的、不擠壓版面，這裡要自己讓出左邊
+   的寬度；「記點什麼…」跟卡片牆都在剩下的寬度裡置中，抽屜開合時會跟著重新置中。 */
+.quick-page { margin: 0; padding: 20px 32px 40vh; transition: padding-left .2s cubic-bezier(.2, .7, .2, 1); }
 #app.sidebar-open .quick-page { padding-left: calc(var(--sidebar-w) + 32px); }
 
-.qn-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
-.qn-title-h { display: flex; align-items: center; gap: 10px; margin: 0; font-size: var(--fs-xxl, 26px); font-weight: 700; letter-spacing: -.01em; }
-.qn-title-h .ic-svg { width: 22px; height: 22px; color: var(--accent); }
-/* 獨立的 class，不是 .btn——.btn 預設 flex:1，是它先前被撐滿整排的原因 */
+/* 頂上一排：左邊只有一個小小的「隨筆／封存」定位字，右邊是切到封存的鈕——Keep 沒有
+   大標題，頁面第一眼看到的是輸入列跟卡片。 */
+.qn-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 auto 8px; max-width: 1100px; }
+.qn-title-h { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; font-weight: 500; color: var(--kp-text-2); }
+.qn-title-h .ic-svg { width: 16px; height: 16px; color: var(--kp-text-2); }
 .qn-archive-toggle {
-  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px;
-  border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer;
-  font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; border-radius: 999px;
-  transition: border-color .12s, background .12s, color .12s;
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 10px;
+  border: 1px solid var(--kp-border); background: var(--kp-bg); color: var(--kp-text-2); cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; border-radius: 999px;
+  transition: background .12s, color .12s;
 }
-.qn-archive-toggle:hover { background: var(--row-hover); border-color: var(--border-strong); color: var(--text); }
-.qn-archive-toggle.on { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); }
-.qn-archive-toggle .ic-svg { width: 14px; height: 14px; }
+.qn-archive-toggle:hover { background: var(--kp-hover); color: var(--kp-text); }
+.qn-archive-toggle.on { color: var(--kp-text); }
+.qn-archive-toggle .ic-svg { width: 16px; height: 16px; }
 
-/* Keep 的「記點什麼…」：收合是一行（右邊兩顆「新清單」「新增圖片」捷徑），聚焦就
-   展開成一張完整的輸入卡——圖釘、標題、內文、底下一排工具＋「關閉」。沒有「新增」
-   鈕：關閉／Esc／點外面就是存檔。顏色套同一組 .qn-c-* 底色。 */
+/* Keep 的「記點什麼…」：600px 置中的白卡，只有陰影沒有邊框（深色主題才加一圈邊）；
+   收合是一行＋右邊「新清單」「新增圖片」，聚焦就展開成圖釘、標題、內文、工具列＋
+   「關閉」。沒有「新增」鈕，關閉／Esc／點外面就是存檔。 */
 .qn-composer {
-  position: relative; margin: 0 auto 28px; max-width: 600px;
-  background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow-sm);
-  border-radius: 10px; transition: box-shadow .12s;
+  position: relative; margin: 32px auto 32px; max-width: 600px;
+  background: var(--kp-bg); color: var(--kp-text); border-radius: 8px; box-shadow: var(--kp-shadow);
+  border: 1px solid transparent;
 }
-.qn-composer.is-open { box-shadow: var(--shadow); }
-.qn-composer-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; }
+:root[data-theme="dark"] .qn-composer { border-color: var(--kp-border); }
+.qn-composer-bar { display: flex; align-items: center; gap: 4px; padding: 10px 12px 10px 16px; }
 .qn-composer-input {
-  flex: 1; min-height: 24px; max-height: 320px; resize: none; overflow-y: auto;
-  border: 0; outline: none; background: transparent; color: var(--text);
-  font: inherit; font-size: var(--fs-md); line-height: 1.55;
+  flex: 1; min-height: 26px; max-height: 360px; resize: none; overflow-y: auto;
+  border: 0; outline: none; background: transparent; color: var(--kp-text);
+  font: inherit; font-size: 16px; font-weight: 500; line-height: 1.5;
 }
-.qn-composer-input::placeholder { color: var(--text-faint); }
-.qn-composer-quick { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
-.qn-composer-quick .qn-tbtn { width: 34px; height: 34px; color: var(--text-dim); }
-.qn-composer-quick .qn-tbtn .ic-svg { width: 18px; height: 18px; }
+.qn-composer-input::placeholder { color: var(--kp-text-2); font-weight: 500; }
+.qn-composer-quick { display: flex; align-items: center; gap: 0; flex: 0 0 auto; }
+.qn-composer-quick .qn-tbtn { width: 40px; height: 40px; color: var(--kp-text-2); }
+.qn-composer-quick .qn-tbtn .ic-svg { width: 20px; height: 20px; }
 .qn-composer .qn-pin-corner, .qn-composer-title, .qn-composer-foot { display: none; }
 .qn-composer.is-open .qn-pin-corner { display: inline-flex; opacity: 1; }
 .qn-composer.is-open .qn-composer-quick { display: none; }
 .qn-composer.is-open .qn-composer-title {
-  display: block; width: 100%; padding: 14px 44px 0 16px; border: 0; outline: none; background: transparent;
-  color: var(--text); font: inherit; font-size: var(--fs-md); font-weight: 700;
+  display: block; width: 100%; padding: 14px 52px 0 16px; border: 0; outline: none; background: transparent;
+  color: var(--kp-text); font: inherit; font-size: 16px; font-weight: 500;
 }
-.qn-composer.is-open .qn-composer-bar { padding-top: 8px; }
-.qn-composer.is-open .qn-composer-input { font-size: var(--fs-sm); min-height: 48px; }
-.qn-composer.is-open .qn-composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 8px 6px 6px; }
+.qn-composer.is-open .qn-composer-bar { padding: 8px 16px 6px; }
+.qn-composer.is-open .qn-composer-input { font-size: 14px; font-weight: 400; min-height: 46px; }
+.qn-composer.is-open .qn-composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 4px 4px; }
 .qn-composer.is-open .qn-toolbar { opacity: 1; padding: 0; }
-.qn-composer-title::placeholder { color: var(--text-faint); }
-/* Keep 的「關閉」是一顆純文字鈕 */
+.qn-composer-title::placeholder { color: var(--kp-text-2); }
+/* Keep 的「關閉」：純文字鈕 */
 .qn-close-btn {
-  flex: 0 0 auto; padding: 7px 18px; border: 0; border-radius: 6px; background: transparent;
-  color: var(--text); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+  flex: 0 0 auto; padding: 8px 24px; border: 0; border-radius: 4px; background: transparent;
+  color: var(--kp-text); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
 }
-.qn-close-btn:hover { background: rgba(0, 0, 0, .06); }
-:root[data-theme="dark"] .qn-close-btn:hover { background: rgba(255, 255, 255, .1); }
+.qn-close-btn:hover { background: var(--kp-hover); }
 
-/* 點卡片放大成對話框（Keep 的開啟方式）：同一組卡片底色，中間偏上，內文自動長高 */
-.qn-modal-overlay {
-  position: fixed; inset: 0; z-index: 1250; background: rgba(17, 20, 26, .5);
-  display: flex; align-items: flex-start; justify-content: center; padding: 8vh 16px 16px; overflow-y: auto;
-}
-.qn-modal.qn-card {
-  width: min(600px, 100%); max-height: 84vh; display: flex; flex-direction: column;
-  border-radius: 10px; box-shadow: var(--shadow); cursor: default; transform: none;
-}
-.qn-modal.qn-card:hover { transform: none; box-shadow: var(--shadow); }
-.qn-modal .qn-pin-corner { opacity: 1; top: 10px; right: 10px; }
-.qn-modal-title {
-  flex: 0 0 auto; width: 100%; padding: 16px 48px 0 20px; border: 0; outline: none; background: transparent;
-  color: var(--text); font: inherit; font-size: var(--fs-lg, 18px); font-weight: 700;
-}
-.qn-modal-title::placeholder { color: var(--text-faint); }
-.qn-modal-body {
-  flex: 1 1 auto; width: 100%; min-height: 120px; padding: 12px 20px; border: 0; outline: none; resize: none;
-  background: transparent; color: var(--text); font: inherit; font-size: var(--fs-sm); line-height: 1.65;
-  overflow-y: auto;
-}
-.qn-modal-body::placeholder { color: var(--text-faint); }
-.qn-modal-meta { flex: 0 0 auto; padding: 0 20px 4px; text-align: right; font-size: var(--fs-xs); color: var(--text-faint); }
-.qn-modal-foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 10px 8px 8px; }
-.qn-modal-foot .qn-toolbar { opacity: 1; padding: 0; }
+/* 區段：「已釘選」／「其他」是 11px 的小標，貼齊卡片牆左緣（整段 fit-content 置中，
+   卡片牆的寬度由 js 依欄數設定，小標自然對齊第一欄） */
+.qn-section { width: fit-content; margin: 0 auto 24px; }
+.qn-section-head { margin: 0 0 8px 12px; font-size: 11px; font-weight: 500; letter-spacing: .07em; color: var(--kp-text-2); }
+.qn-section-head .ic-svg { display: none; }
 
-/* ⋮ 更多選單（刪除／建立副本／顯示勾選框） */
-.qn-menu {
-  position: fixed; z-index: 1300; min-width: 160px; padding: 6px; background: var(--bg);
-  border: 1px solid var(--border-strong); box-shadow: var(--shadow); border-radius: 10px;
-}
-.qn-menu-item {
-  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border: 0; border-radius: 6px;
-  background: transparent; color: var(--text); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer;
-}
-.qn-menu-item:hover { background: var(--row-hover); }
-.qn-menu-item.danger { color: var(--danger, #d6293e); }
-.qn-menu-item .ic-svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--text-dim); }
-.qn-menu-item.danger .ic-svg { color: inherit; }
-
-.qn-section-head { margin: 4px 0 12px; }
-
-/* 卡片牆：平衡欄佈局（js 依欄高即時分配，見 quicknotes.js 的 layoutMasonry），
-   不是 CSS column-width——那種多欄排版由上到下排滿一欄才換下一欄，跟卡片本身
-   的順序（釘選／更新時間）對不起來，Keep 是照最短欄放。 */
-.qn-grid { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 30px; }
-.qn-col { display: flex; flex-direction: column; gap: 16px; flex: 1 1 0; min-width: 0; }
+/* 卡片牆：Keep 的固定寬欄（240px）＋平衡欄配置（js 的 layoutMasonry 把每張卡放進
+   當下最短的欄），整牆置中。 */
+.qn-grid { display: flex; align-items: flex-start; justify-content: center; gap: 16px; } /* flex-start：欄不能被拉成等高，不然「最短的欄」永遠打平 */
+.qn-col { display: flex; flex-direction: column; gap: 16px; flex: 0 0 240px; width: 240px; min-width: 0; }
 .qn-card {
   width: 100%; position: relative;
-  background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
-  border-radius: 10px; overflow: hidden;
-  cursor: text; transition: box-shadow .15s, border-color .15s, transform .15s;
+  background: var(--kp-bg); color: var(--kp-text); border: 1px solid var(--kp-border);
+  border-radius: 8px; overflow: hidden; cursor: default;
+  transition: box-shadow .15s;
 }
-.qn-card:hover { box-shadow: var(--shadow); border-color: var(--border-strong); transform: translateY(-1px); }
-.qn-card:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); transform: none; }
-/* Keep 的圖釘是卡片右上角單獨一顆，跟底下的顏色／封存／刪除分開；右邊留出的
-   空間讓標題／內文第一行不會被蓋到。 */
+.qn-card:hover { box-shadow: var(--kp-shadow-sm); }
+.qn-card:focus-within { box-shadow: var(--kp-shadow-sm); }
+/* Keep 的圖釘在卡片右上角，跟底下的顏色／圖片／封存／⋮ 分開 */
 .qn-pin-corner {
-  position: absolute; top: 6px; right: 6px; z-index: 1;
-  display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
-  border: 0; background: transparent; color: var(--text-faint); cursor: pointer; padding: 0;
+  position: absolute; top: 4px; right: 4px; z-index: 1;
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  border: 0; background: transparent; color: var(--kp-text-2); cursor: pointer; padding: 0;
   border-radius: 50%; opacity: 0; transition: opacity .12s, background .12s, color .12s;
 }
 .qn-card:hover .qn-pin-corner, .qn-card:focus-within .qn-pin-corner, .qn-pin-corner.on { opacity: 1; }
-.qn-pin-corner:hover { background: rgba(0, 0, 0, .06); color: var(--text); }
-:root[data-theme="dark"] .qn-pin-corner:hover { background: rgba(255, 255, 255, .1); }
-.qn-pin-corner.on { color: var(--accent); }
-.qn-pin-corner .ic-svg { width: 15px; height: 15px; }
-.qn-title { padding: 14px 36px 0 16px; font-weight: 700; font-size: var(--fs-md); line-height: 1.4; word-break: break-word; }
-.qn-body { padding: 14px 16px; font-size: var(--fs-sm); line-height: 1.65; word-break: break-word; max-height: 320px; overflow: hidden; }
-.qn-pin-corner + .qn-body { padding-right: 36px; }
-.qn-title + .qn-body { padding-top: 6px; }
-.qn-body:empty::before { content: '空白的隨筆'; color: var(--text-faint); font-style: italic; }
+.qn-pin-corner:hover { background: var(--kp-hover); color: var(--kp-text); }
+.qn-pin-corner.on { color: var(--kp-text); }
+.qn-pin-corner .ic-svg { width: 18px; height: 18px; }
+.qn-title { padding: 12px 44px 0 16px; font-size: 16px; font-weight: 500; line-height: 1.5; word-break: break-word; }
+.qn-body { padding: 12px 16px; font-size: 14px; line-height: 1.5; word-break: break-word; max-height: 360px; overflow: hidden; color: var(--kp-text); }
+.qn-pin-corner + .qn-body { padding-right: 44px; }
+.qn-title + .qn-body { padding-top: 4px; }
+.qn-body:empty::before { content: '空白的隨筆'; color: var(--kp-text-2); font-style: italic; }
 .qn-body p:first-child { margin-top: 0; }
 .qn-body p:last-child { margin-bottom: 0; }
+.qn-body img { border-radius: 8px 8px 0 0; }
 .qn-body .task-check { cursor: pointer; }
+.qn-body li.task-item.task-done > *:not(.task-check) { color: var(--kp-text-2); }
+/* Keep 的顏色：底色跟邊框同色（看起來沒有邊框），字色不變 */
+.qn-card.qn-c-red, .qn-composer.qn-c-red { background: var(--kp-red); border-color: var(--kp-red); }
+.qn-card.qn-c-orange, .qn-composer.qn-c-orange { background: var(--kp-orange); border-color: var(--kp-orange); }
+.qn-card.qn-c-yellow, .qn-composer.qn-c-yellow { background: var(--kp-yellow); border-color: var(--kp-yellow); }
+.qn-card.qn-c-green, .qn-composer.qn-c-green { background: var(--kp-green); border-color: var(--kp-green); }
+.qn-card.qn-c-teal, .qn-composer.qn-c-teal { background: var(--kp-teal); border-color: var(--kp-teal); }
+.qn-card.qn-c-blue, .qn-composer.qn-c-blue { background: var(--kp-blue); border-color: var(--kp-blue); }
+.qn-card.qn-c-purple, .qn-composer.qn-c-purple { background: var(--kp-purple); border-color: var(--kp-purple); }
+.qn-card.qn-c-pink, .qn-composer.qn-c-pink { background: var(--kp-pink); border-color: var(--kp-pink); }
 
-/* 顏色（meta.color）：淡色底，跟看板卡片一樣只染背景，字色不動；邊框跟著淡淡地
-   染一點同色，卡片牆一眼掃過去顏色才夠明顯，不會被白色邊框吃掉。 */
-.qn-card.qn-c-red, .qn-composer.qn-c-red { background: var(--qn-red, #fdeceb); border-color: #f3c6c2; }
-.qn-card.qn-c-orange, .qn-composer.qn-c-orange { background: var(--qn-orange, #fdf1e2); border-color: #f0d3a8; }
-.qn-card.qn-c-yellow, .qn-composer.qn-c-yellow { background: var(--qn-yellow, #fdf7dc); border-color: #ecdf9e; }
-.qn-card.qn-c-green, .qn-composer.qn-c-green { background: var(--qn-green, #e9f6ea); border-color: #b9e0bc; }
-.qn-card.qn-c-teal, .qn-composer.qn-c-teal { background: var(--qn-teal, #e3f4f2); border-color: #a9dcd6; }
-.qn-card.qn-c-blue, .qn-composer.qn-c-blue { background: var(--qn-blue, #e8f1fb); border-color: #b7d3f2; }
-.qn-card.qn-c-purple, .qn-composer.qn-c-purple { background: var(--qn-purple, #f1ecfa); border-color: #d3c4ef; }
-.qn-card.qn-c-pink, .qn-composer.qn-c-pink { background: var(--qn-pink, #fbebf3); border-color: #f0c3dc; }
-:root[data-theme="dark"] .qn-card.qn-c-red, :root[data-theme="dark"] .qn-composer.qn-c-red { background: var(--qn-red-dark, #3a2321); border-color: #5c332f; }
-:root[data-theme="dark"] .qn-card.qn-c-orange, :root[data-theme="dark"] .qn-composer.qn-c-orange { background: var(--qn-orange-dark, #3a2c1c); border-color: #5c4527; }
-:root[data-theme="dark"] .qn-card.qn-c-yellow, :root[data-theme="dark"] .qn-composer.qn-c-yellow { background: var(--qn-yellow-dark, #383219); border-color: #574e26; }
-:root[data-theme="dark"] .qn-card.qn-c-green, :root[data-theme="dark"] .qn-composer.qn-c-green { background: var(--qn-green-dark, #1f3220); border-color: #2f4f31; }
-:root[data-theme="dark"] .qn-card.qn-c-teal, :root[data-theme="dark"] .qn-composer.qn-c-teal { background: var(--qn-teal-dark, #1a3230); border-color: #274d49; }
-:root[data-theme="dark"] .qn-card.qn-c-blue, :root[data-theme="dark"] .qn-composer.qn-c-blue { background: var(--qn-blue-dark, #1c2c3f); border-color: #2a4361; }
-:root[data-theme="dark"] .qn-card.qn-c-purple, :root[data-theme="dark"] .qn-composer.qn-c-purple { background: var(--qn-purple-dark, #2a2440); border-color: #40365f; }
-:root[data-theme="dark"] .qn-card.qn-c-pink, :root[data-theme="dark"] .qn-composer.qn-c-pink { background: var(--qn-pink-dark, #3a2231); border-color: #5a344c; }
-
-/* 卡片底部的顏色／封存／刪除（釘選在右上角，見 .qn-pin-corner），平常很淡，滑過卡片才明顯 */
-.qn-toolbar { display: flex; align-items: center; gap: 2px; padding: 6px 10px 10px; opacity: 0; transition: opacity .12s; }
+/* 卡片底部的顏色／圖片／封存／⋮：32px 圓形點擊區，平常隱形，滑過卡片才出現 */
+.qn-toolbar { display: flex; align-items: center; gap: 0; padding: 4px 8px 4px; min-height: 40px; opacity: 0; transition: opacity .12s; }
 .qn-card:hover .qn-toolbar, .qn-card:focus-within .qn-toolbar { opacity: 1; }
 .qn-tbtn {
-  display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
-  border: 0; background: transparent; color: var(--text-faint); cursor: pointer; padding: 0;
-  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  border: 0; background: transparent; color: var(--kp-text-2); cursor: pointer; padding: 0;
+  border-radius: 50%; transition: background .12s, color .12s;
 }
-.qn-tbtn:hover { background: rgba(0, 0, 0, .06); color: var(--text); }
-:root[data-theme="dark"] .qn-tbtn:hover { background: rgba(255, 255, 255, .1); }
-.qn-tbtn.on { color: var(--accent); }
-.qn-tbtn .ic-svg { width: 16px; height: 16px; }
+.qn-tbtn:hover { background: var(--kp-hover); color: var(--kp-text); }
+.qn-tbtn .ic-svg { width: 18px; height: 18px; }
 
-/* 就地編輯：textarea 蓋住卡片內文那塊，字級跟排版後的樣子接近 */
-.qn-edit {
-  display: block; width: 100%; min-height: 60px; padding: 14px 16px; margin: 0; border: 0; outline: none;
-  resize: none; overflow: hidden; background: transparent; color: var(--text); caret-color: var(--accent);
-  font: inherit; font-size: var(--fs-sm); line-height: 1.65; white-space: pre-wrap;
+/* 點卡片放大成對話框（Keep 的開啟方式）：同一張卡的樣式，600px、置中偏上 */
+.qn-modal-overlay {
+  position: fixed; inset: 0; z-index: 1250; background: rgba(0, 0, 0, .6);
+  display: flex; align-items: flex-start; justify-content: center; padding: 8vh 16px 16px; overflow-y: auto;
 }
+.qn-modal.qn-card { width: min(600px, 100%); max-height: 84vh; display: flex; flex-direction: column; box-shadow: var(--kp-shadow); }
+.qn-modal .qn-pin-corner { opacity: 1; top: 8px; right: 8px; }
+.qn-modal-title {
+  flex: 0 0 auto; width: 100%; padding: 16px 56px 0 20px; border: 0; outline: none; background: transparent;
+  color: var(--kp-text); font: inherit; font-size: 22px; font-weight: 500;
+}
+.qn-modal-title::placeholder { color: var(--kp-text-2); }
+.qn-modal-body {
+  flex: 1 1 auto; width: 100%; min-height: 120px; padding: 12px 20px; border: 0; outline: none; resize: none;
+  background: transparent; color: var(--kp-text); font: inherit; font-size: 14px; line-height: 1.5; overflow-y: auto;
+}
+.qn-modal-body::placeholder { color: var(--kp-text-2); }
+.qn-modal-meta { flex: 0 0 auto; padding: 0 20px 4px; text-align: right; font-size: 12px; color: var(--kp-text-2); }
+.qn-modal-foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 4px 8px; }
+.qn-modal-foot .qn-toolbar { opacity: 1; padding: 0; }
 
-/* 顏色選單（body 子元素一律 fixed） */
-.qn-palette { position: fixed; z-index: 1300; display: flex; flex-wrap: wrap; gap: 7px; width: 172px; padding: 10px; background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow); border-radius: 12px; }
-.qn-swatch { width: 28px; height: 28px; border: 1px solid var(--border); cursor: pointer; padding: 0; background: var(--bg); border-radius: 50%; transition: transform .1s; }
-.qn-swatch:hover { transform: scale(1.1); }
-.qn-swatch.on { outline: 2px solid var(--accent); outline-offset: 1px; }
-.qn-swatch.qn-c-red { background: var(--qn-red, #fdeceb); }
-.qn-swatch.qn-c-orange { background: var(--qn-orange, #fdf1e2); }
-.qn-swatch.qn-c-yellow { background: var(--qn-yellow, #fdf7dc); }
-.qn-swatch.qn-c-green { background: var(--qn-green, #e9f6ea); }
-.qn-swatch.qn-c-teal { background: var(--qn-teal, #e3f4f2); }
-.qn-swatch.qn-c-blue { background: var(--qn-blue, #e8f1fb); }
-.qn-swatch.qn-c-purple { background: var(--qn-purple, #f1ecfa); }
-.qn-swatch.qn-c-pink { background: var(--qn-pink, #fbebf3); }
+/* ⋮ 選單（刪除／建立副本／顯示勾選框）跟顏色盤：Keep 的白底浮層 */
+.qn-menu {
+  position: fixed; z-index: 1300; min-width: 180px; padding: 6px 0; background: var(--kp-bg);
+  border: 1px solid var(--kp-border); box-shadow: var(--kp-shadow); border-radius: 4px;
+}
+.qn-menu-item {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 16px; border: 0;
+  background: transparent; color: var(--kp-text); font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+}
+.qn-menu-item:hover { background: var(--kp-hover); }
+.qn-menu-item.danger { color: var(--kp-text); }
+.qn-menu-item .ic-svg { width: 18px; height: 18px; flex: 0 0 auto; color: var(--kp-text-2); }
+.qn-palette {
+  position: fixed; z-index: 1300; display: flex; flex-wrap: wrap; gap: 6px; width: 176px; padding: 8px;
+  background: var(--kp-bg); border: 1px solid var(--kp-border); box-shadow: var(--kp-shadow); border-radius: 8px;
+}
+.qn-swatch { width: 32px; height: 32px; border: 2px solid transparent; border-radius: 50%; cursor: pointer; padding: 0; background: var(--kp-bg); transition: border-color .1s; }
+.qn-swatch:hover { border-color: var(--kp-text); }
+.qn-swatch.on { border-color: var(--kp-text); outline: 0; }
+.qn-swatch.qn-c-none { border-color: var(--kp-border); }
+.qn-swatch.qn-c-none:hover, .qn-swatch.qn-c-none.on { border-color: var(--kp-text); }
+.qn-swatch.qn-c-red { background: var(--kp-red); } .qn-swatch.qn-c-orange { background: var(--kp-orange); }
+.qn-swatch.qn-c-yellow { background: var(--kp-yellow); } .qn-swatch.qn-c-green { background: var(--kp-green); }
+.qn-swatch.qn-c-teal { background: var(--kp-teal); } .qn-swatch.qn-c-blue { background: var(--kp-blue); }
+.qn-swatch.qn-c-purple { background: var(--kp-purple); } .qn-swatch.qn-c-pink { background: var(--kp-pink); }
+/* 沒有卡片時：Keep 那種一個大大淡淡的圖示＋一句話 */
+.qn-empty { display: flex; flex-direction: column; align-items: center; gap: 14px; margin: 72px auto 0; color: var(--kp-text-2); font-size: 15px; }
+.qn-empty .ic-svg { width: 96px; height: 96px; opacity: .22; }
