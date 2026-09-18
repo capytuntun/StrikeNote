@@ -736,7 +736,7 @@
     info.wrap.hidden = false;
     info.wrap.scrollTop = 0;
     setNavActive(area + '-open-btn', true);
-    setSidebarOpen(true);
+    autoOpenSidebar();
     setHash(area);
     AreaBrowser.render(info.page, areaOpts(area));
     renderTree();
@@ -748,7 +748,7 @@
     quickWrapEl.hidden = false;
     quickWrapEl.scrollTop = 0;
     setNavActive('quick-open-btn', true);
-    setSidebarOpen(true);
+    autoOpenSidebar();
     setHash('quick');
     QuickNotes.render(quickPageEl, quickOpts());
     renderTree();
@@ -1172,7 +1172,7 @@
     if (window.Dashboard) {
       Dashboard.render(dashOpts());
     }
-    setSidebarOpen(true);    // 首頁預設打開抽屜；開啟筆記時才收回
+    autoOpenSidebar();    // 首頁預設打開抽屜；開啟筆記時才收回
   }
 
   // ---- 電子書模式 ---------------------------------------------------------
@@ -1223,7 +1223,7 @@
     trashWrapEl.hidden = false;
     trashWrapEl.scrollTop = 0;
     setNavActive('trash-open-btn', true);
-    setSidebarOpen(true);    // 跟首頁一樣開著抽屜，點頁面內容也不會收回
+    autoOpenSidebar();    // 跟首頁一樣開著抽屜，點頁面內容也不會收回
     setHash('trash');
     Trash.render(trashPageEl, trashOpts());
     renderTree();
@@ -3591,6 +3591,9 @@
     const app = $('#app');
     return !!(app && app.classList.contains('sidebar-open'));
   }
+  // 首頁／垃圾桶／四個區域頁預設把抽屜打開——但只在桌面：窄螢幕的抽屜是整片蓋在
+  // 內容上的，一進頁面就開等於什麼都看不到，要靠 ☰ 自己拉。
+  function autoOpenSidebar() { setSidebarOpen(window.innerWidth > 900); }
   function setSidebarOpen(v) {
     const app = $('#app');
     if (!app) return;
@@ -3609,6 +3612,12 @@
     document.addEventListener('mousedown', function (e) {
       if (!isSidebarOpen()) return;
       if (toggleBtn && toggleBtn.contains(e.target)) return;
+      // 窄螢幕：抽屜蓋在內容上，點到內容就收，不分哪一頁
+      if (window.innerWidth <= 900) {
+        const m0 = $('#main'), t0 = $('#topbar');
+        if ((m0 && m0.contains(e.target)) || (t0 && t0.contains(e.target))) setSidebarOpen(false);
+        return;
+      }
       // 首頁、垃圾桶頁跟四個獨立區域頁面預設開著抽屜：點頁面內容不收回，
       // 只有 ☰、Esc 或開啟筆記才會收
       if (!emptyEl.hidden || (trashWrapEl && !trashWrapEl.hidden) ||

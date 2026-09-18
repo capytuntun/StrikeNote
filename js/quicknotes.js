@@ -391,16 +391,19 @@
     const cs = getComputedStyle(host);
     return host.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
   }
-  function layoutMasonry(grid, cardEls) {
+  function layoutMasonry(grid, cardEls, width) {
     grid.innerHTML = '';
-    const width = availWidth(grid) || COL_WIDTH;
+    width = width || availWidth(grid) || COL_WIDTH;
     const gap = 16;
     const cols = Math.max(1, Math.min(6, Math.floor((width + gap) / (COL_WIDTH + gap))));
+    // 手機（放不下兩欄）：單欄吃滿可用寬度（最多 600，跟輸入列一樣寬）；其餘照 Keep 的 240
+    const colW = cols === 1 ? Math.max(200, Math.min(width, 600)) : COL_WIDTH;
     // 牆的寬度＝欄數決定，整段（含小標）靠 .qn-section 的 fit-content 置中
-    grid.style.width = (cols * COL_WIDTH + (cols - 1) * gap) + "px";
+    grid.style.width = (cols * colW + (cols - 1) * gap) + 'px';
     const colEls = [];
     for (let i = 0; i < cols; i++) {
       const c = el('div', 'qn-col');
+      c.style.flexBasis = c.style.width = colW + 'px';
       grid.appendChild(c);
       colEls.push(c);
     }
@@ -412,26 +415,43 @@
       shortest.appendChild(card);
     });
   }
+  // 這一次 render 的所有牆（已釘選＋其他）一起重排：兩牆各自量寬的話，第一牆排完
+  // 內容變高、捲軸出現、可用寬度少了 14px，第二牆量到的就跟第一牆不一樣，兩段卡片
+  // 一寬一窄還撐出橫向捲軸。一支 ResizeObserver 觀察整頁的內容框（視窗縮放、抽屜
+  // 開合、捲軸出現都會改它），寬度變了就全部重排。
+  let grids = [];
+  // 量一次寬度、所有牆用同一個數字：牆在清空重排的瞬間會讓捲軸出現或消失，各自量會量到
+  // 不一樣的值。
+  function relayoutAll() {
+    if (!grids.length) return;
+    const w = availWidth(grids[0].grid);
+    grids.forEach(function (g) { layoutMasonry(g.grid, g.cards, w); });
+  }
   function buildGrid(container, cardEls) {
     const grid = el('div', 'qn-grid');
     container.appendChild(grid); // 先插進文件，量寬度才準
+    grids.push({ grid: grid, cards: cardEls });
     layoutMasonry(grid, cardEls);
-    // 觀察整頁的內容框：視窗縮放、側邊欄抽屜開合（只改 padding）都會讓它變寬變窄
-    let last = availWidth(grid);
-    const ro = new ResizeObserver(function () {
-      const w = availWidth(grid);
-      if (w !== last) { last = w; layoutMasonry(grid, cardEls); }
-    });
-    ro.observe(pageOf(grid));
-    roList.push(ro);
     return grid;
+  }
+  function watchPage(page) {
+    let last = -1;
+    const ro = new ResizeObserver(function () {
+      const cs = getComputedStyle(page);
+      const w = page.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+      if (w !== last) { last = w; relayoutAll(); }
+    });
+    ro.observe(page);
+    roList.push(ro);
   }
 
   function render(container, opts) {
     lastOpts = { container: container, opts: opts };
     roList.forEach(function (ro) { ro.disconnect(); });
     roList = [];
+    grids = [];
     container.innerHTML = '';
+    watchPage(container);
 
     // Keep 沒有大標題：頂上只有一個小小的定位字跟「封存」切換，第一眼看到的是輸入列
     const head = el('div', 'qn-head');

@@ -2893,6 +2893,9 @@ select.sec-info-input { cursor: pointer; }
 .rm-canvas.rm-locked .rm-node { cursor: default; }
 .rm-canvas.rm-locked .rm-handle { display: none; }
 .rm-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; padding: 0; display: block; }
+/* 舞台裡的 SVG 用自己的 width/height 屬性（舞台座標），不能吃到唯讀區塊那條
+   max-width:100%——被壓到畫布寬再等比縮，右邊的節點就整片被切掉。 */
+.rm-stage .relmap-svg { max-width: none; width: auto; height: auto; }
 .rm-node { cursor: grab; }
 .rm-node:active { cursor: grabbing; }
 .rm-edge { cursor: pointer; }
@@ -3725,7 +3728,8 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
   --kp-red: #5c2b29; --kp-orange: #614a19; --kp-yellow: #635d19; --kp-green: #345920;
   --kp-teal: #16504b; --kp-blue: #2d555e; --kp-purple: #42275e; --kp-pink: #5b2245;
 }
-#quick-wrap { background: var(--kp-page); color: var(--kp-text); }
+/* scrollbar-gutter stable：捲軸出現與否不改變內容寬，js 量牆寬才不會前後不一 */
+#quick-wrap { background: var(--kp-page); color: var(--kp-text); scrollbar-gutter: stable; }
 /* 跟 .dashboard／.trash-page 同一條規則：抽屜是浮動的、不擠壓版面，這裡要自己讓出左邊
    的寬度；「記點什麼…」跟卡片牆都在剩下的寬度裡置中，抽屜開合時會跟著重新置中。 */
 .quick-page { margin: 0; padding: 20px 32px 40vh; transition: padding-left .2s cubic-bezier(.2, .7, .2, 1); }
@@ -3893,3 +3897,76 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 /* 沒有卡片時：Keep 那種一個大大淡淡的圖示＋一句話 */
 .qn-empty { display: flex; flex-direction: column; align-items: center; gap: 14px; margin: 72px auto 0; color: var(--kp-text-2); font-size: 15px; }
 .qn-empty .ic-svg { width: 96px; height: 96px; opacity: .22; }
+
+/* ======================================================================
+   RWD：整站的響應式規則集中在這裡（斷點 900px＝平板／窄視窗、640px＝手機）。
+   原則：桌面的版面一律不動，只在窄螢幕「疊」規則上去；抽屜在窄螢幕是整片蓋在
+   內容上的（不再把內容往右推），分割檢視改成上下堆疊，對話框跟全螢幕編輯器
+   吃滿整個視窗，格線都退成單欄。100dvh 是給手機瀏覽器網址列會縮放的情況。
+   ====================================================================== */
+#app { height: 100dvh; }
+
+@media (max-width: 900px) {
+  /* 抽屜蓋在內容上，不推內容——窄螢幕推了就只剩一條 */
+  #app.sidebar-open .dashboard,
+  #app.sidebar-open .trash-page,
+  #app.sidebar-open .quick-page { padding-left: 24px; }
+  /* 分割檢視：上下堆疊，各一半；分隔把手沒有意義了 */
+  .panes.mode-split { flex-direction: column; }
+  .panes.mode-split .pane-edit { flex: 0 0 50%; min-height: 0; }
+  .panes.mode-split .pane-preview { flex: 1 1 50%; min-height: 0; }
+  .panes.mode-split .divider { display: none; }
+  /* 預覽旁的目錄欄跟 Blog 的目錄欄：窄螢幕沒地方放 */
+  .preview-toc, #blog-toc, .pane-preview .toc-show, .pane-blog .toc-show { display: none !important; }
+  .pane-preview.toc-hidden .preview-toc { display: none; }
+  /* 編輯器工具列：不折行，改成可以左右捲 */
+  .edit-toolbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+  .edit-toolbar button { flex: 0 0 auto; }
+  /* 電子書：右側大綱先收 */
+  .book-outline { display: none; }
+  /* 關聯分析：工具列可以折行、縮圖縮小 */
+  .rm-page .rm-bar { flex-wrap: wrap; row-gap: 6px; }
+  .rm-title { flex: 1 1 160px; }
+  .rm-minimap { width: 120px; height: 76px; }
+  .rm-minimap svg { width: 120px; height: 76px; }
+  /* 全螢幕類的對話框直接吃滿 */
+  .graph-overlay, .mm-overlay { padding: 8px; }
+  .graph-editor, .mm-editor { width: 100%; height: 100%; }
+  .modal.imglib-modal { width: 100%; height: 100%; }
+}
+
+@media (max-width: 640px) {
+  :root { --sidebar-w: min(320px, 86vw); }
+  /* 內容邊距縮小 */
+  .dashboard { padding: 16px 16px 80px; }
+  #app.sidebar-open .dashboard, #app.sidebar-open .trash-page, #app.sidebar-open .quick-page { padding-left: 16px; }
+  .trash-page, .area-wrap .dashboard { padding: 16px 16px 80px; }
+  .quick-page { padding: 8px 12px 30vh; }
+  .dash-head { flex-wrap: wrap; gap: 8px; }
+  .dash-head-right { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .dash-folder-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .dash-row-time { display: none; }
+  /* 隨筆：輸入列貼邊、卡片單欄（欄寬由 js 依可用寬度設） */
+  .qn-composer { margin: 8px auto 20px; }
+  .qn-head { margin-bottom: 4px; }
+  .qn-modal-overlay { padding: 12px 8px; }
+  /* 一般對話框：接近全寬，內容可捲 */
+  .modal { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 18px 16px 16px; }
+  .modal-actions { flex-wrap: wrap; }
+  .graph-overlay, .mm-overlay { padding: 0; }
+  .graph-editor, .mm-editor { border: 0; }
+  .graph-bar, .mm-bar { flex-wrap: wrap; row-gap: 6px; }
+  .graph-bar-hint, .mm-bar-hint { display: none; }
+  /* 電子書：左側章節列也收起來，靠上一頁／下一頁走 */
+  .book-nav { display: none; }
+  .book-page { padding: 20px 16px 60px; }
+  /* 關聯分析：縮圖太佔位，先收；Controls 靠左下不動 */
+  .rm-minimap { display: none; }
+  .rm-bar .btn { padding: 6px 8px; }
+  /* Markdown 表格在窄螢幕可以左右捲，不要把整頁撐寬 */
+  .markdown-body table { display: block; max-width: 100%; overflow-x: auto; }
+  /* iOS：小於 16px 的輸入框一聚焦就放大整頁，這幾個輸入框拉到 16px */
+  .qn-modal-body, .qn-modal-title, .qn-composer-title, .modal-input, .auth-field input, .rm-title { font-size: 16px; }
+  /* 頂列：帳號名字、主題鈕的間距收一點 */
+  .topbar-right { gap: 2px; }
+}
