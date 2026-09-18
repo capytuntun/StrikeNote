@@ -427,6 +427,10 @@ async function handleApi(req, res, url) {
   if ((m = p.match(/^\/api\/notes\/([\w.-]+)\/access$/)) && method === 'PUT') {
     return send(await api.setAccess(user, m[1], await readJSON(req)));
   }
+  // 所有筆記／證照課程筆記／知識區 之間搬一篇筆記（js/app.js moveNoteToArea）。
+  if ((m = p.match(/^\/api\/notes\/([\w.-]+)\/area$/)) && method === 'PUT') {
+    return send(await api.moveNoteArea(user, m[1], await readJSON(req)));
+  }
   // Live caret relay for collaborative editing (transient, never stored).
   if ((m = p.match(/^\/api\/notes\/([\w.-]+)\/cursor$/)) && method === 'POST') {
     return send(await api.broadcastCursor(user, m[1], await readJSON(req)));

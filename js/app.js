@@ -612,6 +612,8 @@
           }, function (e) { toast('移動失敗：' + (e && e.message || e)); return false; });
         });
       },
+      // 換到 所有筆記／另一個區域——不是在同一個區域內搬資料夾，見 moveNoteToArea。
+      onMoveArea: function (note, x, y) { moveNoteToArea(note, x, y); },
       onMoveFolder: function (folder) {
         return showFolderPicker('移動「' + (folder.name || '資料夾') + '」', { folders: areaFolders(area).filter(function (f) { return f.id !== folder.id; }) }).then(function (r) {
           if (!r) return false;
@@ -2724,10 +2726,48 @@
     const actions = [
       { icon: 'link', label: '複製連結', fn: function () { copyNoteLink(note); } },
       { icon: 'users', label: '分享…', fn: function () { showShareDialog(note); } },
-      { icon: 'copy', label: '複製筆記', fn: function () { duplicateNote(note); } },
-      { icon: 'trash', label: '移至垃圾桶', fn: function () { deleteNote(note); }, danger: true }
+      { icon: 'copy', label: '複製筆記', fn: function () { duplicateNote(note); } }
     ];
+    if (MOVABLE_AREAS.indexOf(note.area || null) >= 0) {
+      actions.push({ icon: 'layout-grid', label: '換區域…', fn: function () { moveNoteToArea(note, r.right, r.bottom + 4); } });
+    }
+    actions.push({ icon: 'trash', label: '移至垃圾桶', fn: function () { deleteNote(note); }, danger: true });
     openMenuAt(r.right, r.bottom + 4, actions, { alignRight: true });
+  }
+
+  // 所有筆記／證照課程筆記／知識區 之間搬一篇筆記——novel／quick 兩邊都不給碰
+  // （伺服器那邊也會擋，這裡先不讓選單長出這個選項）。開一個小選單選目標區域，
+  // 選了再跳資料夾選擇（沿用既有的 showFolderPicker，已支援 o.folders 覆寫）。
+  const MOVABLE_AREAS = [null, 'course', 'knowledge'];
+  function areaLabel(a) { return a === 'course' ? '證照／課程筆記' : a === 'knowledge' ? '知識區' : '所有筆記'; }
+  function moveNoteToArea(note, x, y) {
+    const cur = note.area || null;
+    const items = [
+      { key: null, label: '所有筆記', icon: 'layout-grid' },
+      { key: 'course', label: '證照／課程筆記', icon: 'award' },
+      { key: 'knowledge', label: '知識區', icon: 'book-open' }
+    ].map(function (o) {
+      return {
+        icon: o.key === cur ? 'check' : o.icon, current: o.key === cur, label: o.label,
+        fn: function () { if (o.key !== cur) doMoveNoteArea(note, o.key); }
+      };
+    });
+    openMenuAt(x, y, items);
+  }
+  function doMoveNoteArea(note, targetArea) {
+    const folders = targetArea === null
+      ? state.folders.filter(function (f) { return !f.area; })
+      : areaFolders(targetArea);
+    showFolderPicker('搬到「' + areaLabel(targetArea) + '」的哪個資料夾？', { folders: folders, ok: '搬移' }).then(function (r) {
+      if (!r) return;
+      Store.moveNoteArea(note.id, targetArea, r.folderId).then(function (n) {
+        const idx = state.notes.findIndex(function (x) { return x.id === n.id; });
+        if (idx >= 0) { state.notes[idx].area = n.area; state.notes[idx].folderId = n.folderId; state.notes[idx].position = n.position; }
+        if (state.current && state.current.id === n.id) { state.current.area = n.area; state.current.folderId = n.folderId; }
+        refreshViews();
+        toast('已搬到「' + areaLabel(targetArea) + '」');
+      }, function (e) { toast('搬移失敗：' + (e && e.message || e)); });
+    });
   }
   // 資料夾方框右上的「⋮」
   function showFolderMenu(folder, anchor) {
@@ -2820,6 +2860,9 @@
       actions.push({ icon: 'users', label: '分享…', fn: function () { showShareDialog(item); } });
       actions.push({ icon: 'pencil', label: '重新命名', fn: function () { renameNote(item); } });
       actions.push({ icon: 'copy', label: '複製', fn: function () { duplicateNote(item); } });
+      if (MOVABLE_AREAS.indexOf(item.area || null) >= 0) {
+        actions.push({ icon: 'layout-grid', label: '換區域…', fn: function () { moveNoteToArea(item, e.clientX, e.clientY); } });
+      }
       actions.push({ icon: 'trash', label: '移至垃圾桶', fn: function () { deleteNote(item); }, danger: true });
     }
     openMenuAt(e.clientX, e.clientY, actions);

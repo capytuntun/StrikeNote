@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=127">
+  <link rel="stylesheet" href="app.css?v=128">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -151,6 +151,17 @@
         </div>
         <button id="new-folder" class="btn" data-icon="folder-plus">資料夾</button>
       </div>
+      <!-- 四個獨立區域，各自的筆記跟資料夾都跟一般筆記分開放（server/api.js AREAS）：
+           證照課程筆記、隨筆（Keep 風格）、知識區都是普通筆記只是分頁；小說多一關
+           密碼（js/app.js promptNovelPassword），連筆記列表都要解鎖後才會送到瀏覽器。
+           特意放在「新增」下面、筆記樹上面，跟底下的關聯圖／檔案管理／垃圾桶那排「工具」
+           分開——這是切換去哪個區域的導覽，不是工具。 -->
+      <nav class="sidebar-nav sidebar-areas" aria-label="區域">
+        <button id="course-open-btn" class="sidebar-nav-item" type="button" title="證照與課程筆記，跟一般筆記分開放" data-icon="award">證照／課程筆記</button>
+        <button id="quick-open-btn" class="sidebar-nav-item" type="button" title="隨手記一下，像 Google Keep 一樣的卡片牆" data-icon="pin">隨筆</button>
+        <button id="knowledge-open-btn" class="sidebar-nav-item" type="button" title="自己整理彙整出來的筆記" data-icon="book-open">知識區</button>
+        <button id="novel-open-btn" class="sidebar-nav-item" type="button" title="需要再輸入一次密碼才能進入" data-icon="lock">小說</button>
+      </nav>
       <div class="search-row">
         <div class="search-box">
           <input id="search-input" type="text" placeholder="搜尋筆記…（Ctrl+K）"
@@ -174,15 +185,6 @@
       <!-- 左下角工具，一顆一列、跟側邊欄等寬：關聯圖（反向連結＋標籤的力導向圖）、
            檔案管理（上傳過的圖片／PDF／其他檔案與它們用在哪些筆記）、垃圾桶（刪除的筆記保留期內可復原）。
            id 沿用原本頂端按鈕的，app.js 裡的 click 處理不用改。 -->
-      <!-- 四個獨立區域，各自的筆記跟資料夾都跟一般筆記分開放（js/areas.js AREAS）：
-           證照課程筆記、隨筆（Keep 風格）、知識區都是普通筆記只是分頁；小說多一關
-           密碼（js/novel.js），連筆記列表都要解鎖後才會送到瀏覽器。 -->
-      <nav class="sidebar-nav sidebar-areas" aria-label="區域">
-        <button id="course-open-btn" class="sidebar-nav-item" type="button" title="證照與課程筆記，跟一般筆記分開放" data-icon="award">證照／課程筆記</button>
-        <button id="quick-open-btn" class="sidebar-nav-item" type="button" title="隨手記一下，像 Google Keep 一樣的卡片牆" data-icon="pin">隨筆</button>
-        <button id="knowledge-open-btn" class="sidebar-nav-item" type="button" title="自己整理彙整出來的筆記" data-icon="book-open">知識區</button>
-        <button id="novel-open-btn" class="sidebar-nav-item" type="button" title="需要再輸入一次密碼才能進入" data-icon="lock">小說</button>
-      </nav>
       <nav class="sidebar-nav" aria-label="工具">
         <button id="graph-open-btn" class="sidebar-nav-item" type="button" title="用力導向圖看所有筆記的反向連結跟標籤關聯" data-icon="graph">關聯圖</button>
         <button id="images-open-btn" class="sidebar-nav-item" type="button" title="上傳過的圖片、PDF 與其他檔案：看每個用在哪些筆記，清掉沒有筆記在用的" data-icon="files">檔案管理</button>
@@ -374,8 +376,8 @@
   <script src="js/perfreport.js?v=43"></script>
   <script src="js/sorting.js?v=1"></script>
   <script src="js/dashboard.js?v=62"></script>
-  <script src="js/areabrowser.js?v=1"></script>
-  <script src="js/quicknotes.js?v=1"></script>
+  <script src="js/areabrowser.js?v=2"></script>
+  <script src="js/quicknotes.js?v=2"></script>
   <script src="js/annotate.js?v=42"></script>
   <script src="js/pdf.js?v=49"></script>
   <script src="js/book.js?v=6"></script>
@@ -386,6 +388,6 @@
   <script src="js/embedswitch.js?v=1"></script>
   <script src="js/blogwyg.js?v=2"></script>
   <script src="js/blogmode.js?v=10"></script>
-  <script src="js/app.js?v=97"></script>
+  <script src="js/app.js?v=98"></script>
 </body>
 </html>

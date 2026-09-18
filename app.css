@@ -3564,80 +3564,104 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 /* ---------- 四個獨立區域：證照／課程筆記、知識區、小說（js/areabrowser.js）用
    跟首頁一樣的 .dash-* class，不需要另外的 CSS；隨筆（js/quicknotes.js）是自己
    的 Keep 風格卡片牆，以下才是它專用的樣式。 ---------- */
-.quick-page { max-width: 1100px; margin: 0 auto; padding: 28px 32px 40vh; }
-.qn-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
-.qn-title-h { display: flex; align-items: center; gap: 9px; margin: 0; font-size: var(--fs-xl); font-weight: 700; }
-.qn-title-h .ic-svg { width: 20px; height: 20px; color: var(--accent); }
+/* 跟 .dashboard／.trash-page 同一條規則：抽屜是浮動的、不擠壓版面，這裡要自己
+   讓出左邊的寬度，不然標題、輸入列會被蓋住一截——這是這個頁面原本最難看的
+   主因，不是配色問題。 */
+.quick-page { max-width: 1180px; margin: 0; padding: 28px 32px 40vh; transition: padding-left .2s cubic-bezier(.2, .7, .2, 1); }
+#app.sidebar-open .quick-page { padding-left: calc(var(--sidebar-w) + 32px); }
 
-/* 常駐在牆頂端的「記點什麼…」輸入列 */
-.qn-composer {
-  display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; margin-bottom: 22px;
-  background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+.qn-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.qn-title-h { display: flex; align-items: center; gap: 10px; margin: 0; font-size: var(--fs-xxl, 26px); font-weight: 700; letter-spacing: -.01em; }
+.qn-title-h .ic-svg { width: 22px; height: 22px; color: var(--accent); }
+/* 獨立的 class，不是 .btn——.btn 預設 flex:1，是它先前被撐滿整排的原因 */
+.qn-archive-toggle {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer;
+  font-size: var(--fs-sm); font-weight: 600; white-space: nowrap;
+  transition: border-color .12s, background .12s, color .12s;
 }
+.qn-archive-toggle:hover { background: var(--row-hover); border-color: var(--border-strong); color: var(--text); }
+.qn-archive-toggle.on { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); }
+.qn-archive-toggle .ic-svg { width: 14px; height: 14px; }
+
+/* 常駐在牆頂端的「記點什麼…」輸入列——刻意做得比卡片顯眼一點（粗一點的邊框、
+   focus 時亮邊框＋外環），這是整頁唯一常駐的輸入口，要一眼看出可以點下去打字。 */
+.qn-composer {
+  display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; margin-bottom: 28px;
+  max-width: 620px; background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow-sm);
+  transition: border-color .12s, box-shadow .12s;
+}
+.qn-composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .qn-composer-input {
   flex: 1; min-height: 24px; max-height: 260px; resize: none; overflow-y: auto;
   border: 0; outline: none; background: transparent; color: var(--text);
   font: inherit; font-size: var(--fs-md); line-height: 1.55;
 }
+.qn-composer-input::placeholder { color: var(--text-faint); }
 .qn-composer-actions[hidden] { display: none; }
-.qn-composer-actions .btn { padding: 6px 16px; font-size: var(--fs-sm); }
+.qn-composer-actions .btn { flex: 0 0 auto; padding: 6px 16px; font-size: var(--fs-sm); }
 
-.qn-section-head { margin: 4px 0 10px; }
+.qn-section-head { margin: 4px 0 12px; }
 
 /* 卡片牆：CSS 多欄排出的錯落效果，不需要量測版面的 JS */
-.qn-grid { column-width: 230px; column-gap: 14px; margin-bottom: 26px; }
+.qn-grid { column-width: 250px; column-gap: 16px; margin-bottom: 30px; }
 .qn-card {
-  display: inline-block; width: 100%; break-inside: avoid; margin-bottom: 14px;
+  display: inline-block; width: 100%; break-inside: avoid; margin-bottom: 16px;
   background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
-  cursor: text; transition: box-shadow .12s;
+  cursor: text; transition: box-shadow .15s, border-color .15s, transform .15s;
 }
-.qn-card:hover { box-shadow: var(--shadow); }
-.qn-title { padding: 12px 14px 0; font-weight: 700; font-size: var(--fs-md); word-break: break-word; }
-.qn-body { padding: 12px 14px; font-size: var(--fs-sm); line-height: 1.6; word-break: break-word; max-height: 320px; overflow: hidden; }
+.qn-card:hover { box-shadow: var(--shadow); border-color: var(--border-strong); transform: translateY(-1px); }
+.qn-card:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); transform: none; }
+.qn-title { padding: 14px 16px 0; font-weight: 700; font-size: var(--fs-md); line-height: 1.4; word-break: break-word; }
+.qn-body { padding: 14px 16px; font-size: var(--fs-sm); line-height: 1.65; word-break: break-word; max-height: 320px; overflow: hidden; }
+.qn-title + .qn-body { padding-top: 6px; }
 .qn-body:empty::before { content: '空白的隨筆'; color: var(--text-faint); font-style: italic; }
 .qn-body p:first-child { margin-top: 0; }
 .qn-body p:last-child { margin-bottom: 0; }
 .qn-body .task-check { cursor: not-allowed; }
 
-/* 顏色（meta.color）：淡色底，跟看板卡片一樣只染背景，字色不動 */
-.qn-card.qn-c-red { background: var(--qn-red, #fdeceb); }
-.qn-card.qn-c-orange { background: var(--qn-orange, #fdf1e2); }
-.qn-card.qn-c-yellow { background: var(--qn-yellow, #fdf7dc); }
-.qn-card.qn-c-green { background: var(--qn-green, #e9f6ea); }
-.qn-card.qn-c-teal { background: var(--qn-teal, #e3f4f2); }
-.qn-card.qn-c-blue { background: var(--qn-blue, #e8f1fb); }
-.qn-card.qn-c-purple { background: var(--qn-purple, #f1ecfa); }
-.qn-card.qn-c-pink { background: var(--qn-pink, #fbebf3); }
-:root[data-theme="dark"] .qn-card.qn-c-red { background: var(--qn-red-dark, #3a2321); }
-:root[data-theme="dark"] .qn-card.qn-c-orange { background: var(--qn-orange-dark, #3a2c1c); }
-:root[data-theme="dark"] .qn-card.qn-c-yellow { background: var(--qn-yellow-dark, #383219); }
-:root[data-theme="dark"] .qn-card.qn-c-green { background: var(--qn-green-dark, #1f3220); }
-:root[data-theme="dark"] .qn-card.qn-c-teal { background: var(--qn-teal-dark, #1a3230); }
-:root[data-theme="dark"] .qn-card.qn-c-blue { background: var(--qn-blue-dark, #1c2c3f); }
-:root[data-theme="dark"] .qn-card.qn-c-purple { background: var(--qn-purple-dark, #2a2440); }
-:root[data-theme="dark"] .qn-card.qn-c-pink { background: var(--qn-pink-dark, #3a2231); }
+/* 顏色（meta.color）：淡色底，跟看板卡片一樣只染背景，字色不動；邊框跟著淡淡地
+   染一點同色，卡片牆一眼掃過去顏色才夠明顯，不會被白色邊框吃掉。 */
+.qn-card.qn-c-red { background: var(--qn-red, #fdeceb); border-color: #f3c6c2; }
+.qn-card.qn-c-orange { background: var(--qn-orange, #fdf1e2); border-color: #f0d3a8; }
+.qn-card.qn-c-yellow { background: var(--qn-yellow, #fdf7dc); border-color: #ecdf9e; }
+.qn-card.qn-c-green { background: var(--qn-green, #e9f6ea); border-color: #b9e0bc; }
+.qn-card.qn-c-teal { background: var(--qn-teal, #e3f4f2); border-color: #a9dcd6; }
+.qn-card.qn-c-blue { background: var(--qn-blue, #e8f1fb); border-color: #b7d3f2; }
+.qn-card.qn-c-purple { background: var(--qn-purple, #f1ecfa); border-color: #d3c4ef; }
+.qn-card.qn-c-pink { background: var(--qn-pink, #fbebf3); border-color: #f0c3dc; }
+:root[data-theme="dark"] .qn-card.qn-c-red { background: var(--qn-red-dark, #3a2321); border-color: #5c332f; }
+:root[data-theme="dark"] .qn-card.qn-c-orange { background: var(--qn-orange-dark, #3a2c1c); border-color: #5c4527; }
+:root[data-theme="dark"] .qn-card.qn-c-yellow { background: var(--qn-yellow-dark, #383219); border-color: #574e26; }
+:root[data-theme="dark"] .qn-card.qn-c-green { background: var(--qn-green-dark, #1f3220); border-color: #2f4f31; }
+:root[data-theme="dark"] .qn-card.qn-c-teal { background: var(--qn-teal-dark, #1a3230); border-color: #274d49; }
+:root[data-theme="dark"] .qn-card.qn-c-blue { background: var(--qn-blue-dark, #1c2c3f); border-color: #2a4361; }
+:root[data-theme="dark"] .qn-card.qn-c-purple { background: var(--qn-purple-dark, #2a2440); border-color: #40365f; }
+:root[data-theme="dark"] .qn-card.qn-c-pink { background: var(--qn-pink-dark, #3a2231); border-color: #5a344c; }
 
 /* 卡片底部的釘選／顏色／封存／刪除，平常很淡，滑過卡片才明顯 */
-.qn-toolbar { display: flex; align-items: center; gap: 2px; padding: 4px 8px 6px; opacity: 0; transition: opacity .12s; }
+.qn-toolbar { display: flex; align-items: center; gap: 2px; padding: 6px 10px 10px; opacity: 0; transition: opacity .12s; }
 .qn-card:hover .qn-toolbar, .qn-card:focus-within .qn-toolbar { opacity: 1; }
 .qn-tbtn {
-  display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
   border: 0; background: transparent; color: var(--text-faint); cursor: pointer; padding: 0;
 }
-.qn-tbtn:hover { background: var(--row-hover); color: var(--text); }
+.qn-tbtn:hover { background: rgba(0, 0, 0, .06); color: var(--text); }
+:root[data-theme="dark"] .qn-tbtn:hover { background: rgba(255, 255, 255, .1); }
 .qn-tbtn.on { color: var(--accent); }
-.qn-tbtn .ic-svg { width: 15px; height: 15px; }
+.qn-tbtn .ic-svg { width: 16px; height: 16px; }
 
 /* 就地編輯：textarea 蓋住卡片內文那塊，字級跟排版後的樣子接近 */
 .qn-edit {
-  display: block; width: 100%; min-height: 60px; padding: 12px 14px; margin: 0; border: 0; outline: none;
+  display: block; width: 100%; min-height: 60px; padding: 14px 16px; margin: 0; border: 0; outline: none;
   resize: none; overflow: hidden; background: transparent; color: var(--text); caret-color: var(--accent);
-  font: inherit; font-size: var(--fs-sm); line-height: 1.6; white-space: pre-wrap;
+  font: inherit; font-size: var(--fs-sm); line-height: 1.65; white-space: pre-wrap;
 }
 
 /* 顏色選單（body 子元素一律 fixed） */
-.qn-palette { position: fixed; z-index: 1300; display: flex; flex-wrap: wrap; gap: 6px; width: 160px; padding: 8px; background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow); }
-.qn-swatch { width: 26px; height: 26px; border: 1px solid var(--border); cursor: pointer; padding: 0; background: var(--bg); }
+.qn-palette { position: fixed; z-index: 1300; display: flex; flex-wrap: wrap; gap: 7px; width: 172px; padding: 10px; background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow); }
+.qn-swatch { width: 28px; height: 28px; border: 1px solid var(--border); cursor: pointer; padding: 0; background: var(--bg); transition: transform .1s; }
+.qn-swatch:hover { transform: scale(1.1); }
 .qn-swatch.on { outline: 2px solid var(--accent); outline-offset: 1px; }
 .qn-swatch.qn-c-red { background: var(--qn-red, #fdeceb); }
 .qn-swatch.qn-c-orange { background: var(--qn-orange, #fdf1e2); }

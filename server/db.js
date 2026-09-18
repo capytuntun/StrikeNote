@@ -537,6 +537,12 @@ const q = {
   orderNote: stmt(
     'UPDATE notes SET folder_id = ?, position = ? WHERE id = ? AND owner_id = ? AND deleted_at IS NULL'),
   orderFolder: stmt('UPDATE folders SET parent_id = ?, position = ? WHERE id = ? AND owner_id = ?'),
+  // The one deliberate exception to "a note's area never changes" (api.js
+  // moveNoteArea): reclassifying a note between 所有筆記／證照課程筆記／知識區.
+  // Resets position to NULL — a manual order position made sense in the old
+  // area's level, not this one, and NULL sorts predictably (see sorting.js).
+  setNoteArea: stmt(
+    'UPDATE notes SET area = ?, folder_id = ?, position = NULL WHERE id = ? AND owner_id = ? AND deleted_at IS NULL'),
 
   // backup / restore (server/backup.js). Export walks ids and fetches rows one at
   // a time so a big site never has every note body in memory at once; the full

@@ -179,7 +179,8 @@
 
     const head = el('div', 'qn-head');
     head.appendChild(el('h1', 'qn-title-h', ic('pin') + '<span>隨筆</span>'));
-    const toggle = el('button', 'btn' + (showArchived ? ' btn-primary' : ''), showArchived ? '顯示未封存' : '顯示已封存');
+    const toggle = el('button', 'qn-archive-toggle' + (showArchived ? ' on' : ''),
+      ic(showArchived ? 'folder-open' : 'folder') + '<span>' + (showArchived ? '顯示未封存' : '顯示已封存') + '</span>');
     toggle.type = 'button';
     toggle.addEventListener('click', function () { showArchived = !showArchived; render(container, opts); });
     head.appendChild(toggle);

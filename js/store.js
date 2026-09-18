@@ -143,6 +143,12 @@
       });
     },
     deleteNote: function (id) { return req('DELETE', '/api/notes/' + id); },
+    // 所有筆記／證照課程筆記／知識區 之間搬一篇筆記（js/app.js moveNoteToArea）；
+    // area 是 null 或 'course'/'knowledge' ——novel／quick 不走這條，伺服器會拒絕。
+    moveNoteArea: function (id, area, folderId) {
+      return req('PUT', '/api/notes/' + id + '/area', { area: area || null, folderId: folderId || null })
+        .then(function (r) { return r.note; });
+    },
 
     // Trash. deleteNote above only moves a note into it; these are the way back
     // out (restore) or all the way out (purge). getTrash resolves to

@@ -27,13 +27,18 @@ function uid(prefix) {
 
 // ---------------- areas ----------------
 // A note's or folder's home: undefined/null = 一般 (the dashboard/tree exactly as
-// before this feature), or one of these four, set once at creation — updateNote's
-// SQL has no area column, so an existing row's area can never change afterwards.
-// A folder's area must match every note and sub-folder placed inside it (checked
-// in folderAreaOf below, not a DB constraint: MariaDB has no portable "check
-// against a joined row").
+// before this feature), or one of these four, set at creation — updateNote's SQL
+// has no area column, so a normal save can never change it; the one deliberate
+// exception is moveNoteArea() below, a dedicated, narrowly-validated endpoint for
+// reclassifying a note between the three non-gated areas. A folder's area must
+// match every note and sub-folder placed inside it (checked in folderAreaOf
+// below, not a DB constraint: MariaDB has no portable "check against a joined
+// row").
 const AREAS = ['course', 'knowledge', 'quick', 'novel'];
 function normalizeArea(a) { return AREAS.indexOf(a) >= 0 ? a : null; }
+// 所有筆記／證照課程筆記／知識區 之間可以互相搬——novel 有解鎖的安全考量、quick
+// 沒有資料夾概念，兩個都刻意不讓這個功能碰，維持它們原本各自的規則。
+const MOVABLE_AREAS = [null, 'course', 'knowledge'];
 
 // 小說 (novel): the one area with a second gate. POST /api/novel/unlock (server/
 // auth.js) sets sessions.novel_unlocked_at after the caller re-types their own
@@ -151,6 +156,29 @@ async function createNote(user, body) {
     String(body.title || '未命名筆記'), String(body.content || ''),
     body.meta ? JSON.stringify(body.meta) : null, now, now, area);
   return shapeNote(await q.noteById.get(id), 'owner');
+}
+
+// 在 所有筆記／證照課程筆記／知識區 之間搬一篇筆記——這三個都是一般的資料夾式
+// 區域，跟建立筆記一樣的規則：目標資料夾（如果有指定）必須屬於目標區域。只有
+// 擁有者可以做，而且來源、目標都得是 MOVABLE_AREAS 之一（novel/quick 兩邊都不
+// 給碰，見 MOVABLE_AREAS 的說明）。手動排序的 position 重置成 NULL——它在舊區域
+// 那個層級才有意義，帶到新區域只會讓它莫名其妙排到最前面。
+async function moveNoteArea(user, id, body) {
+  const row = await q.noteById.get(id);
+  if (!row || row.owner_id !== user.id) return { status: 404 };
+  if (MOVABLE_AREAS.indexOf(row.area || null) < 0) return { status: 400, error: '這篇筆記不能用這個方式換區域' };
+  const raw = body.area || null;
+  if (raw !== null && AREAS.indexOf(raw) < 0) return { status: 400, error: '區域名稱不正確' };
+  if (MOVABLE_AREAS.indexOf(raw) < 0) return { status: 400, error: '不能換到這個區域' };
+  let folderId = body.folderId || null;
+  if (folderId) {
+    const folder = await q.folderById.get(folderId);
+    if (!folder || folder.owner_id !== user.id || (folder.area || null) !== raw) {
+      return { status: 400, error: '資料夾不在目標區域裡' };
+    }
+  }
+  await q.setNoteArea.run(raw, folderId, id, user.id);
+  return { note: shapeNote(await q.noteById.get(id), 'owner') };
 }
 
 // ---------------- note version history ----------------
@@ -1039,7 +1067,7 @@ async function adminStorage() {
 
 module.exports = {
   adminListUsers, adminSetDisabled, adminSetRole, adminDeleteUser, adminStorage, storageSummary,
-  listNotes, getNote, createNote, updateNote, deleteNote, broadcastCursor, setAccess,
+  listNotes, getNote, createNote, updateNote, deleteNote, broadcastCursor, setAccess, moveNoteArea,
   listTrash, restoreNote, purgeNote, emptyTrash, purgeExpiredTrash,
   listVersions, getVersion, createVersion, renameVersion, deleteVersion, restoreVersion,
   listBookVersions, createBookVersion, getBookVersion, getBookVersionChapter,

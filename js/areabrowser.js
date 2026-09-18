@@ -222,6 +222,12 @@
         o.onMoveNote(note).then(function (ok) { if (ok) render(o, true); });
       }));
     }
+    if (o.onMoveArea) {
+      acts.appendChild(actBtn('layout-grid', '換到其他區域', function (btn) {
+        const r = btn.getBoundingClientRect();
+        o.onMoveArea(note, r.right, r.bottom + 4);
+      }));
+    }
     if (o.onDeleteNote) {
       acts.appendChild(actBtn('trash', '移到垃圾桶', function () {
         o.onDeleteNote(note).then(function (ok) {
@@ -250,7 +256,8 @@
     const b = el('button', 'dash-row-act', ic(icon));
     b.type = 'button';
     b.title = title;
-    b.addEventListener('click', function (e) { e.stopPropagation(); fn(); });
+    // fn 拿到按鈕本身，換區域選單要貼著它的位置開（其餘呼叫端都不需要，忽略即可）
+    b.addEventListener('click', function (e) { e.stopPropagation(); fn(b); });
     return b;
   }
 
