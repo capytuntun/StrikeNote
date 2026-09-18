@@ -1,23 +1,26 @@
 /* quicknotes.js — 隨筆區：照著 Google Keep 實際的操作方式做，不是自己發明的近似物。
  *
  * 跟其他筆記一樣是一篇 note（area:'quick'，永遠在最上層、沒有資料夾），只是瀏覽／
- * 編輯方式完全不同：點一張卡片就地把內文換成 textarea 編輯（跟 Blog 模式點一個
- * 區塊變成 textarea 是同一個想法，只是這裡整篇筆記只有一個「區塊」），離開卡片
- * 自動存檔。上方常駐一個「記點什麼…」輸入列，打字就新增一張卡片。
+ * 編輯方式完全不同。照 Keep 做的部分，一項一項對：
  *
- * 幾個直接照 Keep 做、不是憑印象簡化的地方：
- *   - 卡片牆是「平衡欄」佈局（layoutMasonry），不是 CSS column-width——CSS 多欄
- *     會先把整欄由上到下排滿才換下一欄，讀起來的順序是「欄1由上到下、再欄2…」，
- *     Keep 是每張新卡片放進當下最短的那一欄，順序才會照卡片本身的順序左右流動。
- *   - 釘選是卡片右上角一顆單獨的圖釘（.qn-pin-corner），跟底部工具列是分開的兩
- *     個東西——Keep 也是這樣放，不是工具列裡的一顆按鈕。
- *   - 上方輸入列在「聚焦」（不是「打字」）那一刻就展開工具列，並且多一顆關閉鈕，
- *     跟 Keep 點進去立刻看到完整輸入框、工具列，而不是要先打字才看得到一樣。
+ *   - 上方「記點什麼…」平常是一行；點進去（聚焦，不用先打字）就展開成一張完整的
+ *     卡片：標題欄、內文、右上角圖釘、底下一排工具（顏色／圖片／封存／更多）跟
+ *     「關閉」——沒有「新增」鈕，Keep 也沒有：按關閉、按 Esc、或點卡片外面就是存檔
+ *     （有內容才建立，空的直接丟掉）。收合狀態右邊還有「新清單」「新增圖片」兩顆
+ *     捷徑，跟 Keep 一樣。
+ *   - 點一張卡片是在畫面中央放大成一個對話框編輯（標題、內文、右下角「編輯於 …」、
+ *     同一排工具、關閉），不是在原位換成輸入框；關閉／Esc／點外面一律存檔。
+ *   - 每張卡片滑過去右上角出現圖釘，底下出現 顏色／圖片／封存／⋮更多（刪除、建立
+ *     副本、顯示或隱藏勾選框），跟 Keep 卡片的那一排一樣（沒有提醒跟協作者——這
+ *     個系統沒有那兩樣東西）。
+ *   - 卡片上的勾選框可以直接勾：點第 N 個框就把內文裡第 N 個「- [ ]」翻過來存回去，
+ *     不用點進卡片，Keep 就是這樣。
+ *   - 卡片牆是「平衡欄」佈局（layoutMasonry）：每張新卡片放進當下最短的那一欄，
+ *     順序照卡片本身的順序左右流動；不是 CSS column-width 那種先排滿一欄再換欄。
  *
  * 顏色（meta.color）、釘選（meta.pinned，沿用既有欄位）、封存（meta.archived）都
- * 存在筆記的 meta 裡；卡片內文仍是 Markdown，用 MD.render() 顯示——待辦清單
- * 「- [ ]」因此原生就能顯示成勾選框，但這裡是唯讀的（跟 pdf.js／book.js 的匯出
- * 畫面一樣停用），要打勾就點進卡片直接改原始碼，不在這裡另外接一條寫回路徑。
+ * 存在筆記的 meta 裡；內文仍是 Markdown，用 MD.render() 顯示——圖片是
+ * `![…](img:id)`（透過 app.js 既有的上傳流程），清單是「- [ ]」。
  */
 (function (global) {
   'use strict';
@@ -34,6 +37,12 @@
     });
   }
   function ic(name) { return (global.Icons && Icons.svg) ? Icons.svg(name) : ''; }
+  function iconBtn(cls, name, title) {
+    const b = el('button', cls, ic(name));
+    b.type = 'button'; b.title = title;
+    b.addEventListener('mousedown', function (e) { e.preventDefault(); }); // 不搶走輸入框焦點
+    return b;
+  }
 
   const COLORS = [
     { key: '', name: '預設' },
@@ -41,6 +50,7 @@
     { key: 'green', name: '綠' }, { key: 'teal', name: '青' }, { key: 'blue', name: '藍' },
     { key: 'purple', name: '紫' }, { key: 'pink', name: '粉' }
   ];
+  const NO_TITLE = '未命名筆記';   // 伺服器的預設標題，不算「真的有標題」
 
   let showArchived = false;
   let lastOpts = null;
@@ -48,164 +58,329 @@
   function isPinned(n) { return !!(n.meta && n.meta.pinned); }
   function isArchived(n) { return !!(n.meta && n.meta.archived); }
   function colorOf(n) { return (n.meta && n.meta.color) || ''; }
+  function realTitle(n) { return (n.title && n.title !== NO_TITLE) ? n.title : ''; }
+  function timeLabel(ts) {
+    if (!ts) return '';
+    const d = new Date(ts), now = new Date();
+    const hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    if (d.toDateString() === now.toDateString()) return '編輯於 ' + hm;
+    return '編輯於 ' + (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm;
+  }
 
-  // ---- 一張卡片 ---------------------------------------------------------------
+  // ---- 勾選框：Markdown 待辦清單的翻轉／整段加上或拿掉 ----
+  const TASK_RE = /^(\s*[-*+]\s+\[)( |x|X)(\])/;
+  function hasTasks(text) { return String(text || '').split('\n').some(function (l) { return TASK_RE.test(l); }); }
+  function toggleTaskLine(text, n) {
+    let k = -1;
+    return String(text || '').split('\n').map(function (l) {
+      const m = TASK_RE.exec(l);
+      if (!m) return l;
+      k++;
+      if (k !== n) return l;
+      return l.replace(TASK_RE, function (_, a, mark, c) { return a + (mark === ' ' ? 'x' : ' ') + c; });
+    }).join('\n');
+  }
+  // Keep 的「顯示勾選框」：每一行變成一個項目；「隱藏勾選框」：把記號拿掉留文字
+  function toggleChecklist(text) {
+    const lines = String(text || '').split('\n');
+    if (hasTasks(text)) {
+      return lines.map(function (l) { return l.replace(/^(\s*)[-*+]\s+\[( |x|X)\]\s?/, '$1'); }).join('\n');
+    }
+    return lines.map(function (l) { return l.trim() ? '- [ ] ' + l.replace(/^\s*[-*+]\s+/, '') : l; }).join('\n');
+  }
+
+  // ---- 浮動小面板（顏色盤、⋮ 選單）：body 子元素一律 fixed，點外面關掉 ----
+  function popupAt(anchor, cls) {
+    document.querySelectorAll('.qn-palette, .qn-menu').forEach(function (p) { p.remove(); });
+    const pop = el('div', cls);
+    document.body.appendChild(pop);
+    function place() {
+      const r = anchor.getBoundingClientRect();
+      pop.style.left = Math.max(6, Math.min(r.left, global.innerWidth - pop.offsetWidth - 8)) + 'px';
+      pop.style.top = Math.min(r.bottom + 4, global.innerHeight - pop.offsetHeight - 8) + 'px';
+    }
+    setTimeout(function () {
+      document.addEventListener('mousedown', function out(e) {
+        if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('mousedown', out, true); }
+      }, true);
+    }, 0);
+    return { el: pop, place: place };
+  }
+  function openPalette(anchor, current, onPick) {
+    const pop = popupAt(anchor, 'qn-palette');
+    COLORS.forEach(function (c) {
+      const b = el('button', 'qn-swatch qn-c-' + (c.key || 'none') + (current === c.key ? ' on' : ''));
+      b.type = 'button'; b.title = c.name;
+      b.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      b.addEventListener('click', function (e) { e.stopPropagation(); pop.el.remove(); onPick(c.key); });
+      pop.el.appendChild(b);
+    });
+    pop.place();
+  }
+  function openMenu(anchor, items) {
+    const pop = popupAt(anchor, 'qn-menu');
+    items.forEach(function (it) {
+      const b = el('button', 'qn-menu-item' + (it.danger ? ' danger' : ''), ic(it.icon) + '<span>' + esc(it.label) + '</span>');
+      b.type = 'button';
+      b.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      b.addEventListener('click', function (e) { e.stopPropagation(); pop.el.remove(); it.fn(); });
+      pop.el.appendChild(b);
+    });
+    pop.place();
+  }
+  function pickFiles(onFiles) {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*,.pdf'; inp.multiple = true; inp.hidden = true;
+    document.body.appendChild(inp);
+    inp.addEventListener('change', function () { const fs = Array.prototype.slice.call(inp.files || []); inp.remove(); if (fs.length) onFiles(fs); });
+    inp.click();
+  }
+  function prependMedia(content, mds) {
+    if (!mds || !mds.length) return content;
+    // Keep 把圖片放在卡片最上面，內文在圖下面
+    return mds.join('\n') + '\n' + (content ? '\n' + content : '');
+  }
+
+  // ---- 共用的「一排工具」：顏色／圖片／封存／⋮更多 ----------------------------
+  // ctx = { color(), setColor(k), archived(), toggleArchive(), addMedia(files), more: [{icon,label,fn,danger}] }
+  function makeToolbar(ctx) {
+    const bar = el('div', 'qn-toolbar');
+    const pal = iconBtn('qn-tbtn', 'grid', '背景顏色');
+    pal.addEventListener('click', function (e) { e.stopPropagation(); openPalette(pal, ctx.color(), ctx.setColor); });
+    bar.appendChild(pal);
+    if (ctx.addMedia) {
+      const img = iconBtn('qn-tbtn', 'image', '新增圖片');
+      img.addEventListener('click', function (e) { e.stopPropagation(); pickFiles(ctx.addMedia); });
+      bar.appendChild(img);
+    }
+    const arc = iconBtn('qn-tbtn', ctx.archived() ? 'folder-open' : 'folder', ctx.archived() ? '取消封存' : '封存');
+    arc.addEventListener('click', function (e) { e.stopPropagation(); ctx.toggleArchive(); });
+    bar.appendChild(arc);
+    if (ctx.more && ctx.more.length) {
+      const more = iconBtn('qn-tbtn', 'more-vertical', '更多');
+      more.addEventListener('click', function (e) { e.stopPropagation(); openMenu(more, ctx.more); });
+      bar.appendChild(more);
+    }
+    return bar;
+  }
+  function makePin(pinned, onToggle) {
+    const pin = iconBtn('qn-pin-corner' + (pinned ? ' on' : ''), 'pin', pinned ? '取消釘選' : '釘選');
+    pin.addEventListener('click', function (e) { e.stopPropagation(); onToggle(); });
+    return pin;
+  }
+  function autosize(ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
+
+  // ---- 一張卡片（牆上唯讀）----------------------------------------------------
   function makeCard(note, o) {
     const card = el('div', 'qn-card' + (colorOf(note) ? ' qn-c-' + colorOf(note) : ''));
     card.dataset.id = note.id;
-    let editing = false;
 
-    function renderRead() {
-      card.innerHTML = '';
-      card.appendChild(makePinCorner());
-      // 卡片沒有標題欄（像 Keep 一樣），只有在筆記真的有標題（例如從一般筆記改成隨筆）
-      // 時才顯示；新增時一律留空標題，伺服器預設的「未命名筆記」不算「真的有標題」。
-      if (note.title && note.title !== '未命名筆記') card.appendChild(el('div', 'qn-title', esc(note.title)));
-      const body = el('div', 'qn-body markdown-body');
-      body.innerHTML = (global.MD ? MD.render(note.content || '') : esc(note.content || ''));
-      body.querySelectorAll('input.task-check').forEach(function (cb) { cb.disabled = true; });
-      card.appendChild(body);
-      if (global.MD && MD.resolveImages) MD.resolveImages(body);
-      card.appendChild(makeToolbar());
-    }
-
-    // Keep 把釘選放在卡片右上角，跟底下那排「顏色／封存／刪除」是分開的兩個東西，
-    // 不是工具列裡的一顆按鈕。
-    function makePinCorner() {
-      const pin = el('button', 'qn-pin-corner' + (isPinned(note) ? ' on' : ''), ic('pin'));
-      pin.type = 'button'; pin.title = isPinned(note) ? '取消釘選' : '釘選';
-      pin.addEventListener('click', function (e) { e.stopPropagation(); o.onPatch(note, { pinned: !isPinned(note) }); });
-      return pin;
-    }
-
-    function makeToolbar() {
-      const bar = el('div', 'qn-toolbar');
-      const pal = el('button', 'qn-tbtn', ic('grid'));
-      pal.type = 'button'; pal.title = '顏色';
-      pal.addEventListener('click', function (e) { e.stopPropagation(); openPalette(pal); });
-      bar.appendChild(pal);
-
-      const arc = el('button', 'qn-tbtn', ic(isArchived(note) ? 'folder-open' : 'folder'));
-      arc.type = 'button'; arc.title = isArchived(note) ? '取消封存' : '封存';
-      arc.addEventListener('click', function (e) { e.stopPropagation(); o.onPatch(note, { archived: !isArchived(note) }); });
-      bar.appendChild(arc);
-
-      const del = el('button', 'qn-tbtn', ic('trash'));
-      del.type = 'button'; del.title = '移到垃圾桶';
-      del.addEventListener('click', function (e) { e.stopPropagation(); o.onDelete(note); });
-      bar.appendChild(del);
-      return bar;
-    }
-
-    function openPalette(anchor) {
-      document.querySelectorAll('.qn-palette').forEach(function (p) { p.remove(); });
-      const pop = el('div', 'qn-palette');
-      COLORS.forEach(function (c) {
-        const b = el('button', 'qn-swatch qn-c-' + (c.key || 'none') + (colorOf(note) === c.key ? ' on' : ''));
-        b.type = 'button'; b.title = c.name;
-        b.addEventListener('mousedown', function (e) { e.preventDefault(); });
-        b.addEventListener('click', function (e) {
-          e.stopPropagation(); pop.remove();
-          o.onPatch(note, { color: c.key || null });
-        });
-        pop.appendChild(b);
+    card.appendChild(makePin(isPinned(note), function () { o.onPatch(note, { pinned: !isPinned(note) }); }));
+    if (realTitle(note)) card.appendChild(el('div', 'qn-title', esc(note.title)));
+    const body = el('div', 'qn-body markdown-body');
+    body.innerHTML = (global.MD ? MD.render(note.content || '') : esc(note.content || ''));
+    // 勾選框直接可以勾（Keep 卡片上就能勾）：第 N 個框對應內文第 N 個「- [ ]」
+    body.querySelectorAll('input.task-check').forEach(function (cb, k) {
+      cb.disabled = false;
+      cb.addEventListener('click', function (e) {
+        e.stopPropagation();
+        o.onEdit(note, { content: toggleTaskLine(note.content, k) });
       });
-      document.body.appendChild(pop);
-      const r = anchor.getBoundingClientRect();
-      pop.style.left = Math.max(6, Math.min(r.left, global.innerWidth - pop.offsetWidth - 8)) + 'px';
-      pop.style.top = (r.bottom + 4) + 'px';
-      setTimeout(function () {
-        document.addEventListener('mousedown', function out(e) { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('mousedown', out, true); } }, true);
-      }, 0);
-    }
-
-    function renderEdit() {
-      card.innerHTML = '';
-      const ta = document.createElement('textarea');
-      ta.className = 'qn-edit';
-      ta.value = note.content || '';
-      ta.placeholder = '內容…';
-      card.appendChild(ta);
-      function autosize() { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
-      ta.addEventListener('input', autosize);
-      let saveTimer = null;
-      function scheduleSave() {
-        clearTimeout(saveTimer);
-        saveTimer = setTimeout(function () { o.onEdit(note, ta.value); }, 500);
-      }
-      ta.addEventListener('input', scheduleSave);
-      ta.addEventListener('keydown', function (e) { if (e.key === 'Escape') { e.preventDefault(); ta.blur(); } });
-      ta.addEventListener('blur', function () {
-        clearTimeout(saveTimer);
-        editing = false;
-        note.content = ta.value;
-        o.onEdit(note, ta.value);
-        renderRead();
-      });
-      setTimeout(function () { ta.focus(); autosize(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 0);
-    }
+    });
+    card.appendChild(body);
+    if (global.MD && MD.resolveImages) MD.resolveImages(body);
+    card.appendChild(makeToolbar({
+      color: function () { return colorOf(note); },
+      setColor: function (k) { o.onPatch(note, { color: k || null }); },
+      archived: function () { return isArchived(note); },
+      toggleArchive: function () { o.onPatch(note, { archived: !isArchived(note) }); },
+      addMedia: o.onUpload ? function (files) {
+        o.onUpload(files).then(function (mds) { o.onEdit(note, { content: prependMedia(note.content || '', mds) }); });
+      } : null,
+      more: [
+        { icon: 'trash', label: '刪除筆記', danger: true, fn: function () { o.onDelete(note); } },
+        { icon: 'copy', label: '建立副本', fn: function () { o.onDuplicate(note); } },
+        { icon: 'list-checks', label: hasTasks(note.content) ? '隱藏勾選框' : '顯示勾選框', fn: function () { o.onEdit(note, { content: toggleChecklist(note.content) }); } }
+      ]
+    }));
 
     card.addEventListener('click', function (e) {
-      if (editing || e.target.closest('.qn-toolbar, .task-check, a, button')) return;
-      editing = true;
-      renderEdit();
+      if (e.target.closest('.qn-toolbar, .qn-pin-corner, .task-check, a, button')) return;
+      openModal(note, o);
     });
-
-    renderRead();
     return card;
   }
 
-  // ---- 新增列：常駐在牆頂端的「記點什麼…」------------------------------------
-  // Keep 點進輸入框那一刻（聚焦，不用先打字）就展開成完整輸入框＋工具列，還有
-  // 一顆關閉鈕收合回單行；這裡沒有 Keep 的提醒／協作者／圖片那幾顆，但展開的
-  // 時機跟收合鈕是照實做的。
+  // ---- 點卡片：放大成對話框編輯（Keep 的開啟方式）-------------------------------
+  function openModal(note, o) {
+    document.querySelectorAll('.qn-modal-overlay').forEach(function (m) { m.remove(); });
+    const overlay = el('div', 'qn-modal-overlay');
+    const modal = el('div', 'qn-modal qn-card' + (colorOf(note) ? ' qn-c-' + colorOf(note) : ''));
+    overlay.appendChild(modal);
+
+    let pinned = isPinned(note);
+    let pin = makePin(pinned, function () { pinned = !pinned; o.onPatch(note, { pinned: pinned }); pin.classList.toggle('on', pinned); pin.title = pinned ? '取消釘選' : '釘選'; });
+    modal.appendChild(pin);
+    const title = el('input', 'qn-modal-title');
+    title.type = 'text'; title.placeholder = '標題'; title.value = realTitle(note);
+    modal.appendChild(title);
+    const ta = el('textarea', 'qn-modal-body');
+    ta.placeholder = '記點什麼…'; ta.value = note.content || '';
+    modal.appendChild(ta);
+    const meta = el('div', 'qn-modal-meta', esc(timeLabel(note.updatedAt)));
+    modal.appendChild(meta);
+
+    let saveTimer = null, closed = false;
+    function fields() {
+      const f = {};
+      if (title.value !== realTitle(note)) f.title = title.value;
+      if (ta.value !== (note.content || '')) f.content = ta.value;
+      return f;
+    }
+    function flush() {
+      clearTimeout(saveTimer);
+      const f = fields();
+      if (Object.keys(f).length) o.onEdit(note, f);
+    }
+    function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 500); }
+    function close() {
+      if (closed) return;
+      closed = true;
+      flush();
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+      o.onClosed && o.onClosed();
+    }
+    title.addEventListener('input', scheduleSave);
+    ta.addEventListener('input', function () { autosize(ta); scheduleSave(); });
+
+    const foot = el('div', 'qn-modal-foot');
+    foot.appendChild(makeToolbar({
+      color: function () { return colorOf(note); },
+      setColor: function (k) {
+        o.onPatch(note, { color: k || null });
+        modal.className = 'qn-modal qn-card' + (k ? ' qn-c-' + k : '');
+      },
+      archived: function () { return isArchived(note); },
+      toggleArchive: function () { o.onPatch(note, { archived: !isArchived(note) }); close(); },
+      addMedia: o.onUpload ? function (files) {
+        o.onUpload(files).then(function (mds) { ta.value = prependMedia(ta.value, mds); autosize(ta); scheduleSave(); });
+      } : null,
+      more: [
+        { icon: 'trash', label: '刪除筆記', danger: true, fn: function () { closed = true; overlay.remove(); document.removeEventListener('keydown', onKey, true); o.onDelete(note); } },
+        { icon: 'copy', label: '建立副本', fn: function () { flush(); o.onDuplicate(Object.assign({}, note, { title: title.value, content: ta.value })); } },
+        { icon: 'list-checks', label: hasTasks(ta.value) ? '隱藏勾選框' : '顯示勾選框', fn: function () { ta.value = toggleChecklist(ta.value); autosize(ta); scheduleSave(); } }
+      ]
+    }));
+    const closeBtn = el('button', 'qn-close-btn', '關閉');
+    closeBtn.type = 'button';
+    closeBtn.addEventListener('click', close);
+    foot.appendChild(closeBtn);
+    modal.appendChild(foot);
+
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    }
+    document.addEventListener('keydown', onKey, true);
+    overlay.addEventListener('mousedown', function (e) {
+      if (e.target === overlay) { e.preventDefault(); close(); }
+    });
+    document.body.appendChild(overlay);
+    autosize(ta);
+    setTimeout(function () { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 0);
+  }
+
+  // ---- 新增列：Keep 的「記點什麼…」——聚焦就展開成一張卡片 --------------------
   function makeComposer(o) {
     const box = el('div', 'qn-composer');
-    const ta = document.createElement('textarea');
-    ta.className = 'qn-composer-input';
-    ta.rows = 1;
-    ta.placeholder = '記點什麼…';
-    box.appendChild(ta);
-    const actions = el('div', 'qn-composer-actions');
-    const closeBtn = el('button', 'qn-composer-close', ic('x'));
-    closeBtn.type = 'button'; closeBtn.title = '關閉';
-    const addBtn = el('button', 'btn btn-primary qn-composer-add', '新增');
-    addBtn.type = 'button';
-    actions.appendChild(closeBtn);
-    actions.appendChild(addBtn);
-    box.appendChild(actions);
-    actions.hidden = true;
+    let open = false;
+    let color = '', pinned = false, archived = false;
 
-    function autosize() { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
-    function expand() { actions.hidden = false; }
-    function collapse() { if (!ta.value.trim()) actions.hidden = true; }
-    function commit() {
-      const text = ta.value.trim();
-      ta.value = '';
-      autosize();
-      actions.hidden = true;
-      if (!text) return;
-      o.onCreate(text);
-    }
-    function cancel() { ta.value = ''; autosize(); actions.hidden = true; ta.blur(); }
-    ta.addEventListener('focus', expand);
-    ta.addEventListener('input', autosize);
-    ta.addEventListener('blur', collapse);
-    [closeBtn, addBtn].forEach(function (b) { b.addEventListener('mousedown', function (e) { e.preventDefault(); }); });
-    closeBtn.addEventListener('click', cancel);
-    addBtn.addEventListener('click', commit);
-    ta.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commit(); }
-      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    // 收合狀態：一行輸入 + 「新清單」「新增圖片」兩顆捷徑
+    const bar = el('div', 'qn-composer-bar');
+    const ta = el('textarea', 'qn-composer-input');
+    ta.rows = 1; ta.placeholder = '記點什麼…';
+    bar.appendChild(ta);
+    const quick = el('div', 'qn-composer-quick');
+    const listBtn = iconBtn('qn-tbtn', 'list-checks', '新清單');
+    const imgBtn = iconBtn('qn-tbtn', 'image', '新增圖片');
+    quick.appendChild(listBtn); quick.appendChild(imgBtn);
+    bar.appendChild(quick);
+
+    // 展開狀態：圖釘、標題、（同一個內文框）、工具列 + 關閉
+    const pin = makePin(false, function () { pinned = !pinned; pin.classList.toggle('on', pinned); pin.title = pinned ? '取消釘選' : '釘選'; });
+    const title = el('input', 'qn-composer-title');
+    title.type = 'text'; title.placeholder = '標題';
+    const foot = el('div', 'qn-composer-foot');
+    const tools = makeToolbar({
+      color: function () { return color; },
+      setColor: function (k) { color = k || ''; box.className = 'qn-composer is-open' + (color ? ' qn-c-' + color : ''); },
+      archived: function () { return archived; },
+      toggleArchive: function () { archived = true; commit(); },   // Keep：展開中按封存＝存起來並封存
+      addMedia: o.onUpload ? function (files) {
+        o.onUpload(files).then(function (mds) { expand(); ta.value = prependMedia(ta.value, mds); autosize(ta); });
+      } : null,
+      more: [
+        { icon: 'list-checks', label: '顯示勾選框', fn: function () { ta.value = toggleChecklist(ta.value); autosize(ta); } }
+      ]
     });
+    foot.appendChild(tools);
+    const closeBtn = el('button', 'qn-close-btn', '關閉');
+    closeBtn.type = 'button';
+    closeBtn.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    closeBtn.addEventListener('click', commit);
+    foot.appendChild(closeBtn);
+
+    box.appendChild(pin); box.appendChild(title); box.appendChild(bar); box.appendChild(foot);
+
+    function expand() {
+      if (open) return;
+      open = true;
+      box.className = 'qn-composer is-open' + (color ? ' qn-c-' + color : '');
+      document.addEventListener('mousedown', onOutside, true);
+    }
+    function reset() {
+      open = false; color = ''; pinned = false; archived = false;
+      ta.value = ''; title.value = ''; autosize(ta);
+      pin.classList.remove('on'); pin.title = '釘選';
+      box.className = 'qn-composer';
+      document.removeEventListener('mousedown', onOutside, true);
+    }
+    // 關閉＝存檔（有內容才建立），空的直接收合——Keep 沒有「新增」鈕
+    function commit() {
+      const content = ta.value.trim(), t = title.value.trim();
+      const meta = {};
+      if (color) meta.color = color;
+      if (pinned) meta.pinned = true;
+      if (archived) meta.archived = true;
+      reset();
+      ta.blur();
+      if (content || t) o.onCreate({ title: t, content: content, meta: meta });
+    }
+    function onOutside(e) {
+      if (box.contains(e.target) || e.target.closest('.qn-palette, .qn-menu')) return;
+      commit();
+    }
+    ta.addEventListener('focus', expand);
+    title.addEventListener('focus', expand);
+    ta.addEventListener('input', function () { autosize(ta); });
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); commit(); }
+    });
+    title.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); commit(); }
+      if (e.key === 'Enter') { e.preventDefault(); ta.focus(); }
+    });
+    listBtn.addEventListener('click', function () { expand(); ta.value = ta.value || '- [ ] '; autosize(ta); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); });
+    imgBtn.addEventListener('click', function () { if (o.onUpload) pickFiles(function (fs) { o.onUpload(fs).then(function (mds) { expand(); ta.value = prependMedia(ta.value, mds); autosize(ta); ta.focus(); }); }); });
     return box;
   }
 
-  // ---- 平衡欄卡片牆：跟 Keep 一樣每張新卡片放進「目前最短的那一欄」，不是 CSS
-  // column-width 那種先把一欄由上到下排滿才換下一欄——後者的閱讀順序是「欄1到底
-  // 再欄2」，跟卡片本身的順序（釘選／更新時間）對不起來。欄數看容器寬度即時算，
-  // 用 ResizeObserver 而不是監聽 window resize，因為側邊欄抽屜開合只是改變
-  // .quick-page 的 padding，不會觸發 window 的 resize 事件，但容器寬度確實變了。
+  // ---- 平衡欄卡片牆：每張新卡片放進「目前最短的那一欄」------------------------
+  // 不是 CSS column-width——那種先把一欄由上到下排滿才換下一欄，跟卡片本身的順序
+  // （釘選／更新時間）對不起來，Keep 是照最短欄放。欄數看容器寬度即時算，用
+  // ResizeObserver 而不是 window resize：側邊欄抽屜開合只是改 .quick-page 的 padding，
+  // 不會觸發 window 的 resize 事件，但容器寬度確實變了。
   const COL_WIDTH = 236;
   let roList = [];
   function layoutMasonry(grid, cardEls) {
@@ -246,17 +421,17 @@
     const head = el('div', 'qn-head');
     head.appendChild(el('h1', 'qn-title-h', ic('pin') + '<span>隨筆</span>'));
     const toggle = el('button', 'qn-archive-toggle' + (showArchived ? ' on' : ''),
-      ic(showArchived ? 'folder-open' : 'folder') + '<span>' + (showArchived ? '顯示未封存' : '顯示已封存') + '</span>');
+      ic(showArchived ? 'folder-open' : 'folder') + '<span>' + (showArchived ? '回到筆記' : '封存') + '</span>');
     toggle.type = 'button';
     toggle.addEventListener('click', function () { showArchived = !showArchived; render(container, opts); });
     head.appendChild(toggle);
     container.appendChild(head);
 
-    container.appendChild(makeComposer(opts));
+    if (!showArchived) container.appendChild(makeComposer(opts));
 
     const notes = opts.notes.filter(function (n) { return isArchived(n) === showArchived; });
     if (!notes.length) {
-      container.appendChild(el('div', 'dash-empty', ic('pin') + '<span>' + (showArchived ? '沒有封存的隨筆。' : '還沒有隨筆，在上面記點什麼開始。') + '</span>'));
+      container.appendChild(el('div', 'dash-empty', ic(showArchived ? 'folder' : 'pin') + '<span>' + (showArchived ? '封存的隨筆會顯示在這裡。' : '還沒有隨筆，在上面記點什麼開始。') + '</span>'));
       return;
     }
     const pinned = notes.filter(isPinned);
@@ -280,6 +455,7 @@
     reset: function () {
       roList.forEach(function (ro) { ro.disconnect(); });
       roList = [];
+      document.querySelectorAll('.qn-modal-overlay, .qn-palette, .qn-menu').forEach(function (m) { m.remove(); });
       showArchived = false; lastOpts = null;
     }
   };

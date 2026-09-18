@@ -626,21 +626,38 @@
   }
 
   function quickOpts() {
+    function refreshQuick() { if (quickWrapEl && !quickWrapEl.hidden) QuickNotes.refresh(quickOpts()); }
     return {
       notes: areaNotes('quick'),
-      onCreate: function (text) {
-        // 不特別拆第一行當標題——隨筆卡片本來就沒有標題欄（像 Keep 一樣），拆了
-        // 反而讓第一行在卡片上重複出現一次（標題一次、內文渲染又一次）。
-        Store.createNote('', null, { area: 'quick', content: text }).then(function (n) {
+      // Keep 的輸入卡：標題另外一欄，沒填就是空字串（伺服器補「未命名筆記」，卡片上
+      // 不顯示）；顏色／釘選／封存在輸入時就能設，一起帶進 meta。
+      onCreate: function (d) {
+        Store.createNote(d.title || '', null, { area: 'quick', content: d.content || '', meta: d.meta || {} }).then(function (n) {
           state.notes.push(n);
-          if (quickWrapEl && !quickWrapEl.hidden) QuickNotes.refresh(quickOpts());
+          refreshQuick();
         }, function (e) { toast('新增失敗：' + (e && e.message || e)); });
       },
-      onEdit: function (note, content) {
-        Store.updateNote(Object.assign({}, note, { content: content })).then(function (n) {
-          note.content = n.content; note.rev = n.rev; note.updatedAt = n.updatedAt;
+      // fields = { title?, content? }：對話框裡改標題、改內文，或卡片上直接勾勾選框
+      onEdit: function (note, fields) {
+        Store.updateNote(Object.assign({}, note, fields)).then(function (n) {
+          note.title = n.title; note.content = n.content; note.rev = n.rev; note.updatedAt = n.updatedAt;
+          refreshQuick();
         }, function (e) { toast('儲存失敗：' + (e && e.message || e)); });
       },
+      onDuplicate: function (note) {
+        const meta = {};
+        if (note.meta && note.meta.color) meta.color = note.meta.color;
+        Store.createNote(note.title === '未命名筆記' ? '' : (note.title || ''), null, { area: 'quick', content: note.content || '', meta: meta }).then(function (n) {
+          state.notes.push(n);
+          refreshQuick();
+          toast('已建立副本');
+        }, function (e) { toast('建立副本失敗：' + (e && e.message || e)); });
+      },
+      // 圖片走跟編輯器同一條上傳路（uploadFiles），回來的是 Markdown 參照字串
+      onUpload: function (files) {
+        return uploadFiles(files).catch(function (e) { toast('上傳失敗：' + (e && e.message || e)); return []; });
+      },
+      onClosed: refreshQuick,
       onPatch: function (note, patch) {
         const meta = Object.assign({}, note.meta || {});
         if (patch.pinned !== undefined) meta.pinned = patch.pinned || undefined;
