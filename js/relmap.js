@@ -236,7 +236,8 @@
   // from/to、起點/終點/關係…）就當標題列，否則整份都是資料。分隔符號自動看第一列
   // 是逗號、tab 還是分號。引號內的逗號／換行照 CSV 規則保留。
   function parseCSV(text) {
-    text = String(text || '').replace(/^﻿/, '');
+    text = String(text || '');
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);   // Excel 存的 UTF-8 CSV 開頭有 BOM
     const first = text.split(/\r?\n/)[0] || '';
     const delim = (first.split('\t').length > first.split(',').length) ? '\t'
       : (first.split(';').length > first.split(',').length ? ';' : ',');
@@ -277,7 +278,7 @@
     const byLabel = {}, used = {};
     model.nodes.forEach(function (n) { byLabel[n.label.trim().toLowerCase()] = n; used[n.id] = true; });
     const edgeKey = {};
-    model.edges.forEach(function (e) { edgeKey[e.from + ' ' + e.to] = true; });
+    model.edges.forEach(function (e) { edgeKey[e.from + ' ' + e.to] = true; });
     const added = [];
     let edges = 0;
     function nodeFor(label) {
@@ -296,8 +297,8 @@
       if (!b) continue;   // 只有一欄：單獨一個節點
       const nb = nodeFor(b);
       const label = li >= 0 ? (row[li] || '').trim() : '';
-      if (na.id === nb.id || edgeKey[na.id + ' ' + nb.id]) continue;
-      edgeKey[na.id + ' ' + nb.id] = true;
+      if (na.id === nb.id || edgeKey[na.id + ' ' + nb.id]) continue;
+      edgeKey[na.id + ' ' + nb.id] = true;
       model.edges.push({ from: na.id, to: nb.id, label: label });
       edges++;
     }
@@ -363,18 +364,108 @@
     });
   }
 
-  // ---------------- 編輯器：整頁的畫布（照 React Flow 的做法）--------------------
+  // ---------------- CSV 匯出／範本 -------------------------------------------------
+  function csvCell(s) {
+    s = String(s == null ? '' : s);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  // 跟匯入同一個格式（source,target,label），沒有連線的節點自己佔一列，匯出再匯入不會掉。
+  function toCSV(model) {
+    const byId = {}; model.nodes.forEach(function (n) { byId[n.id] = n; });
+    const used = {}, rows = [['source', 'target', 'label']];
+    model.edges.forEach(function (e) {
+      const a = byId[e.from], b = byId[e.to];
+      if (!a || !b) return;
+      used[a.id] = used[b.id] = true;
+      rows.push([a.label, b.label, e.label || '']);
+    });
+    model.nodes.forEach(function (n) { if (!used[n.id]) rows.push([n.label, '', '']); });
+    return rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n';
+  }
+  const CSV_TEMPLATE = [
+    ['source', 'target', 'label'],
+    ['釣魚信件', '員工電腦', '惡意巨集'],
+    ['員工電腦', '檔案伺服器', 'SMB'],
+    ['員工電腦', '跳板機', 'RDP'],
+    ['跳板機', '網域控制站', 'Kerberoast'],
+    ['檔案伺服器', '網域控制站', 'NTLM relay'],
+    ['網域控制站', '郵件伺服器', 'DCSync'],
+    ['獨立的節點', '', '']
+  ].map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n';
+  function downloadCSV(name, text) {
+    // 開頭放 BOM：Excel 才會把 UTF-8 的中文讀對
+    const blob = new Blob([String.fromCharCode(0xFEFF) + text], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = String(name || '關聯分析').replace(/[\\/:*?"<>|]+/g, '_') + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  // ---------------- React Flow：只在打開關聯分析頁時才載入 ---------------------------
+  // 編輯器就是 React Flow 本尊（@xyflow/react，vendor/reactflow/ 裡固定版本的瀏覽器
+  // bundle，沒有 CDN、沒有 build step）。它要三個全域：React、ReactDOM，還有一個
+  // jsxRuntime——React 沒有出 jsx-runtime 的瀏覽器版，這裡用 createElement 墊一個。
+  // 大約 350 KB，所以不放進 index.html，第一次打開關聯分析頁才抓，抓過就留在頁面上。
+  const RF_BASE = 'vendor/reactflow/';
+  let rfPromise = null;
+  function loadScript(src) {
+    return new Promise(function (res, rej) {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = function () { res(); };
+      s.onerror = function () { rej(new Error('載入失敗：' + src)); };
+      document.head.appendChild(s);
+    });
+  }
+  function loadReactFlow() {
+    if (global.ReactFlow && global.React && global.ReactDOM) return Promise.resolve();
+    if (rfPromise) return rfPromise;
+    if (!document.querySelector('link[data-rf-css]')) {
+      const css = document.createElement('link');
+      css.rel = 'stylesheet'; css.href = RF_BASE + 'xyflow-react.css?v=12.11.6'; css.setAttribute('data-rf-css', '1');
+      // 放在 app.css 前面，app.css 裡的 .rm-rf-* 覆寫才贏得過它
+      document.head.insertBefore(css, document.head.querySelector('link[rel="stylesheet"]'));
+    }
+    rfPromise = loadScript(RF_BASE + 'react.production.min.js?v=18.3.1')
+      .then(function () { return loadScript(RF_BASE + 'react-dom.production.min.js?v=18.3.1'); })
+      .then(function () {
+        const R = global.React;
+        function jsx(type, props, key) {
+          const p = {}; let children;
+          for (const k in props) { if (k === 'children') children = props[k]; else p[k] = props[k]; }
+          if (key !== undefined) p.key = key;
+          if (children === undefined) return R.createElement(type, p);
+          return Array.isArray(children) ? R.createElement.apply(null, [type, p].concat(children)) : R.createElement(type, p, children);
+        }
+        global.jsxRuntime = { jsx: jsx, jsxs: jsx, Fragment: R.Fragment };
+        return loadScript(RF_BASE + 'xyflow-react.umd.js?v=12.11.6');
+      })
+      .catch(function (e) { rfPromise = null; throw e; });
+    return rfPromise;
+  }
+
+  // 編輯器裡的顏色要給 React Flow 當 inline 值用（箭頭、縮圖都吃不到 CSS class），跟
+  // app.css 的 .rm-<色名>／.rm-auto-k／.rm-e<k> 是同一組數字。
+  const NODE_HEX = { red: '#e5484d', orange: '#e08a3c', yellow: '#d9b840', green: '#3fb950', teal: '#2fb8ad', blue: '#4c8dff', purple: '#a371f7' };
+  const AUTO_HEX = ['#e0c674', '#6fa8dc', '#e08a52', '#5fb88a', '#d97a9c', '#9a86d6', '#5cc2c2', '#d66a6a'];
+  const EDGE_HEX = ['#c9822a', '#c9822a', '#c9822a', '#b8702a', '#a86a2c', '#4f8fd6', '#d65f6b', '#8e6fd6', '#4fb0a8'];
+  function nodeHex(id, color) { return NODE_HEX[color] || AUTO_HEX[hash(id) % AUTO_COLORS]; }
+
+  // ---------------- 編輯器：整頁的 React Flow 畫布 ------------------------------------
   //   RelMap.open(text, { container, title, onTitle, onChange, onClose })
-  // container 是 app.js 給的整頁容器（#relmap-wrap）；沒給就自己掛一個滿版的。
-  // 每一次改動（加點、連線、改字、換色、拖完、匯入、排版、還原）都會 debounce 後
-  // 呼叫 onChange(dsl)——像其他筆記一樣自動存檔，沒有「完成」鈕；「返回」只是回去。
-  //   - 雙擊改字／雙擊空白新增：自己用時間＋位移判斷（isDouble），不靠瀏覽器的
-  //     dblclick——第一下 mousedown 會重畫或換選取，第二下落在新的元素上，瀏覽器就
-  //     把點擊計數歸零，原生 dblclick 永遠不會來（之前「雙擊改不了」就是這個）。
-  //   - 選取只切 class（applySelection），不重畫整張 SVG。
-  //   - 左下角 Controls（＋／－／置中／鎖定）、右下角 MiniMap、點狀網格背景隨平移縮放
-  //     一起動：這三樣就是 React Flow 一眼認得出來的東西。
-  //   - 匯入 CSV：工具列按鈕或把 .csv 拖進畫布，新節點用 autoLayout 排開。
+  // DSL 還是唯一的真實來源：開的時候 parse 成 React Flow 的 nodes/edges，每次改動
+  // （拖完、連線、刪除、改字、換色、匯入、排版、還原）debounce 後 serialize 回 DSL 交給
+  // onChange——跟其他筆記一樣自動存檔，沒有「完成」，「返回」只是回去。預覽／PDF／電子書
+  // 裡的那張圖仍然是上面的 renderSVG()（React Flow 沒辦法把自己印成一段靜態 SVG）。
+  //   - 節點是自訂型別 'disc'（白圓盤＋彩色圓環＋首字＋盤下標籤），寬度固定用 nodeSize()
+  //     的估計值，跟靜態 SVG 的座標才對得起來。
+  //   - 連線是自訂型別 'floating'：從圓盤邊緣到圓盤邊緣的彎虛線（同一套 edgeGeometry），
+  //     不是釘在上下左右的 handle 上——關聯網的線要能從任何角度出去。
+  //   - Background（點狀）、Controls（含鎖定）、MiniMap 都是 React Flow 內建的。
   const COLORS = ['', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple'];
   let uidSeq = 0;
   function newId() { return 'n' + (Date.now().toString(36)) + (uidSeq++); }
@@ -384,11 +475,10 @@
     if (typeof document === 'undefined') return null;
     if (typeof opts === 'function') opts = { onSave: opts };
     opts = opts || {};
-    let model = parse(text);
-    let zoom = 1, panX = 40, panY = 40;
-    let sel = null;   // { type: 'node'|'edge', i }
-    let locked = false;
     const undo = [], redo = [];
+    let latestNodes = [], latestEdges = [];   // React Flow 狀態的鏡像（effect 同步過來）
+    let bound = null;                         // { setNodes, setEdges, rf }，Flow 元件掛上後才有
+    let root = null, closed = false, pendingChange = false;
 
     let host = opts.container;
     let ownHost = false;
@@ -402,28 +492,21 @@
       '<button class="btn btn-ghost rm-undo" type="button" title="復原 (Ctrl+Z)">' + ic('undo') + '</button>' +
       '<button class="btn btn-ghost rm-redo" type="button" title="重做 (Ctrl+Shift+Z)">' + ic('redo') + '</button>' +
       '<span class="rm-bar-sep"></span>' +
-      '<button class="btn btn-ghost rm-add" type="button" title="在畫面中央新增一個節點">' + ic('plus') + ' 節點</button>' +
+      '<button class="btn btn-ghost rm-add" type="button" title="在畫面中央新增一個節點（也可以雙擊空白處）">' + ic('plus') + ' 節點</button>' +
       '<button class="btn btn-ghost rm-color" type="button" title="選取一個節點後可以換它的顏色" disabled>' + ic('grid') + ' 顏色</button>' +
-      '<button class="btn btn-ghost rm-csv" type="button" title="匯入 CSV（source,target,label 一列一條關聯；也可以直接把 .csv 拖進畫布）">' + ic('upload') + ' 匯入 CSV</button>' +
+      '<button class="btn btn-ghost rm-csv" type="button" title="匯入 CSV、下載 CSV 範本、把目前的圖匯出成 CSV">' + ic('table') + ' CSV ' + ic('chevron-down') + '</button>' +
       '<button class="btn btn-ghost rm-layout" type="button" title="用力導向把所有節點重新排開">' + ic('wand') + ' 自動排版</button>' +
       '<button class="btn rm-back" type="button">' + ic('arrow-left') + ' 返回</button>' +
       '</header>' +
       '<div class="rm-canvas" tabindex="0">' +
-      '<div class="rm-stage"></div>' +
-      '<div class="rm-controls rm-ctrl">' +
-      '<button class="rm-ctrl-btn rm-zi" type="button" title="放大">' + ic('plus') + '</button>' +
-      '<button class="rm-ctrl-btn rm-zo" type="button" title="縮小">' + ic('minus') + '</button>' +
-      '<button class="rm-ctrl-btn rm-zfit" type="button" title="縮放到剛好看見整張圖">' + ic('maximize') + '</button>' +
-      '<button class="rm-ctrl-btn rm-lock" type="button" title="鎖定：只能平移縮放，不能改圖">' + ic('lock') + '</button>' +
-      '</div>' +
-      '<div class="rm-minimap rm-ctrl" title="縮圖：點一下把那裡移到畫面中央"><svg viewBox="0 0 160 100" width="160" height="100"></svg></div>' +
+      '<div class="rm-rf-root"></div>' +
+      '<div class="rm-loading">載入 React Flow…</div>' +
       '<div class="rm-drop" hidden>' + ic('upload') + '<span>放開以匯入 CSV</span></div>' +
-      '<div class="rm-empty" hidden>' + ic('network') + '<div>還沒有節點</div><div class="rm-empty-hint">雙擊空白處新增節點，或匯入一份 CSV（source,target,label）</div></div>' +
+      '<div class="rm-empty" hidden>' + ic('network') + '<div>還沒有節點</div><div class="rm-empty-hint">雙擊空白處新增節點，或從上面的 CSV 選單匯入（source,target,label）</div></div>' +
       '</div>';
     const canvas = host.querySelector('.rm-canvas');
-    const stage = host.querySelector('.rm-stage');
+    const rootEl = host.querySelector('.rm-rf-root');
     const colorBtn = host.querySelector('.rm-color');
-    const mini = host.querySelector('.rm-minimap svg');
     const titleEl = host.querySelector('.rm-title');
     if (titleEl) {
       titleEl.value = opts.title || '';
@@ -432,21 +515,44 @@
     }
     let input = null;
 
-    // ---- 存檔：每次改動 debounce 後回報 ----
-    let saveTimer = null, dirty = false;
-    function changed() {
-      dirty = true;
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(flush, 600);
+    // ---- DSL <-> React Flow ----
+    function rfNode(n) {
+      return { id: n.id, type: 'disc', position: { x: n.x, y: n.y }, data: { label: n.label, color: n.color || '' }, style: { width: nodeSize(n).w } };
     }
+    function rfEdge(e) {
+      const k = hash(e.from + '|' + e.to) % EDGE_COLORS;
+      return {
+        id: e.from + '>' + e.to, source: e.from, target: e.to, type: 'floating', label: e.label || '', data: { k: k },
+        markerEnd: { type: 'arrowclosed', color: EDGE_HEX[k], width: 18, height: 18 }
+      };
+    }
+    function currentModel() {
+      return {
+        nodes: latestNodes.map(function (n) { return { id: n.id, label: n.data.label || '', x: n.position.x, y: n.position.y, color: n.data.color || '', shape: '' }; }),
+        edges: latestEdges.map(function (e) { return { from: e.source, to: e.target, label: e.label || '' }; })
+      };
+    }
+    function setAll(model) {
+      latestNodes = model.nodes.map(rfNode);
+      latestEdges = model.edges.map(rfEdge);
+      if (bound) { bound.setNodes(latestNodes); bound.setEdges(latestEdges); }
+      refreshChrome();
+    }
+    function applyNodes(fn) { const next = fn(latestNodes); latestNodes = next; if (bound) bound.setNodes(next); refreshChrome(); }
+    function applyEdges(fn) { const next = fn(latestEdges); latestEdges = next; if (bound) bound.setEdges(next); }
+    (function () { const m = parse(text); latestNodes = m.nodes.map(rfNode); latestEdges = m.edges.map(rfEdge); })();
+
+    // ---- 存檔／復原 ----
+    let saveTimer = null, dirty = false;
+    function changed() { dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(flush, 600); }
     function flush() {
       clearTimeout(saveTimer);
       if (!dirty) return;
       dirty = false;
-      if (opts.onChange) opts.onChange(serialize(model));
+      if (opts.onChange) opts.onChange(serialize(currentModel()));
     }
     function snapshot() {
-      undo.push(serialize(model));
+      undo.push(serialize(currentModel()));
       if (undo.length > 100) undo.shift();
       redo.length = 0;
       updateUndoBtns();
@@ -455,290 +561,14 @@
       host.querySelector('.rm-undo').disabled = !undo.length;
       host.querySelector('.rm-redo').disabled = !redo.length;
     }
-    function nodesSized() { return sizedNodes(model); }
-    function byId(id) { return model.nodes.find(function (n) { return n.id === id; }); }
-    function sizedOf(n) { const s = nodeSize(n); return { id: n.id, label: n.label, x: n.x, y: n.y, w: s.w, h: s.h }; }
-
-    function applyTransform() {
-      stage.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
-      // 點狀網格跟著畫布動：背景圖的位移＝平移量、格距＝24 × 縮放
-      const g = 24 * zoom;
-      canvas.style.backgroundSize = g + 'px ' + g + 'px';
-      canvas.style.backgroundPosition = panX + 'px ' + panY + 'px';
-      drawMinimap();
+    function doUndo() { if (!undo.length) return; redo.push(serialize(currentModel())); setAll(parse(undo.pop())); changed(); updateUndoBtns(); }
+    function doRedo() { if (!redo.length) return; undo.push(serialize(currentModel())); setAll(parse(redo.pop())); changed(); updateUndoBtns(); }
+    function selectedNode() { return latestNodes.find(function (n) { return n.selected; }); }
+    function refreshChrome() {
+      colorBtn.disabled = !selectedNode();
+      host.querySelector('.rm-empty').hidden = !!latestNodes.length;
     }
-    function draw() {
-      closeInput();
-      const sized = nodesSized();
-      const byIdS = {}; sized.forEach(function (n) { byIdS[n.id] = n; });
-      const box = bbox(sized);
-      const PAD = 60;
-      stage.dataset.ox = PAD - box.minX; stage.dataset.oy = PAD - box.minY;
-      const ox = +stage.dataset.ox, oy = +stage.dataset.oy;
-      const W = Math.max(canvas.clientWidth / zoom, box.maxX - box.minX + PAD * 2);
-      const H = Math.max(canvas.clientHeight / zoom, box.maxY - box.minY + PAD * 2);
-      let edgesSVG = '';
-      model.edges.forEach(function (e, i) {
-        const a = byIdS[e.from], b = byIdS[e.to];
-        if (!a || !b) return;
-        edgesSVG += edgeSVG(a, b, e, ox, oy, i, sel && sel.type === 'edge' && sel.i === i, 'rm-arrow-ed');
-      });
-      const nodesSVG = sized.map(function (n, i) {
-        const s = nodeSVG(n, ox, oy, i, sel && sel.type === 'node' && sel.i === i);
-        const c = center(n);
-        return s + '<circle class="rm-handle" data-i="' + i + '" cx="' + (c.x + ox + R + 9) + '" cy="' + (c.y + oy) + '" r="6"></circle>';
-      }).join('');
-      stage.innerHTML = '<svg class="relmap-svg" width="' + W + '" height="' + H + '">' +
-        markerDef('rm-arrow-ed') + edgesSVG + nodesSVG + '</svg>';
-      host.querySelector('.rm-empty').hidden = !!model.nodes.length;
-      applyTransform();
-      colorBtn.disabled = locked || !(sel && sel.type === 'node');
-    }
-    function applySelection() {
-      Array.prototype.forEach.call(stage.querySelectorAll('.rm-node'), function (g) {
-        g.classList.toggle('rm-sel', !!(sel && sel.type === 'node' && +g.getAttribute('data-i') === sel.i));
-      });
-      Array.prototype.forEach.call(stage.querySelectorAll('.rm-edge'), function (g) {
-        g.classList.toggle('rm-sel', !!(sel && sel.type === 'edge' && +g.getAttribute('data-i') === sel.i));
-      });
-      colorBtn.disabled = locked || !(sel && sel.type === 'node');
-    }
-    function select(type, i) { sel = (type == null) ? null : { type: type, i: i }; applySelection(); }
-
-    // ---- 縮圖（MiniMap）：內容外框跟目前視窗都畫進去，點一下就把那點移到中央 ----
-    function drawMinimap() {
-      const sized = nodesSized();
-      const ox = +stage.dataset.ox || 0, oy = +stage.dataset.oy || 0;
-      const cw = canvas.clientWidth, ch = canvas.clientHeight;
-      // 視窗在舞台座標裡的範圍
-      const vx0 = -panX / zoom, vy0 = -panY / zoom, vx1 = (cw - panX) / zoom, vy1 = (ch - panY) / zoom;
-      let x0 = vx0, y0 = vy0, x1 = vx1, y1 = vy1;
-      sized.forEach(function (n) {
-        x0 = Math.min(x0, n.x + ox); y0 = Math.min(y0, n.y + oy);
-        x1 = Math.max(x1, n.x + n.w + ox); y1 = Math.max(y1, n.y + n.h + oy);
-      });
-      const pad = 20; x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
-      const s = Math.min(160 / Math.max(1, x1 - x0), 100 / Math.max(1, y1 - y0));
-      const offX = (160 - (x1 - x0) * s) / 2, offY = (100 - (y1 - y0) * s) / 2;
-      mini._map = { x0: x0, y0: y0, s: s, offX: offX, offY: offY };
-      let out = '';
-      sized.forEach(function (n) {
-        const c = center(n);
-        out += '<circle class="rm-mm-node ' + nodeColorClass(n) + '" cx="' + ((c.x + ox - x0) * s + offX) + '" cy="' + ((c.y + oy - y0) * s + offY) + '" r="' + Math.max(1.5, R * s) + '"></circle>';
-      });
-      out += '<rect class="rm-mm-view" x="' + ((vx0 - x0) * s + offX) + '" y="' + ((vy0 - y0) * s + offY) +
-        '" width="' + ((vx1 - vx0) * s) + '" height="' + ((vy1 - vy0) * s) + '" rx="2"></rect>';
-      mini.innerHTML = out;
-    }
-    mini.parentElement.addEventListener('mousedown', function (e) {
-      e.preventDefault(); e.stopPropagation();
-      const m = mini._map; if (!m) return;
-      const r = mini.getBoundingClientRect();
-      const sx = (e.clientX - r.left - m.offX) / m.s + m.x0, sy = (e.clientY - r.top - m.offY) / m.s + m.y0;
-      panX = canvas.clientWidth / 2 - sx * zoom;
-      panY = canvas.clientHeight / 2 - sy * zoom;
-      applyTransform();
-    });
-
-    function toModelXY(clientX, clientY) {
-      const r = canvas.getBoundingClientRect();
-      return {
-        x: (clientX - r.left - panX) / zoom - (+stage.dataset.ox || 0),
-        y: (clientY - r.top - panY) / zoom - (+stage.dataset.oy || 0)
-      };
-    }
-
-    // ---- 縮放／視圖 ----
-    function zoomAt(nz, ax, ay) {
-      nz = Math.max(0.2, Math.min(3, nz));
-      panX = ax - (ax - panX) * (nz / zoom);
-      panY = ay - (ay - panY) * (nz / zoom);
-      zoom = nz;
-      draw();
-    }
-    function zoomStep(f) { zoomAt(zoom * f, canvas.clientWidth / 2, canvas.clientHeight / 2); }
-    function fitView() {
-      const sized = nodesSized();
-      if (!sized.length) { zoom = 1; panX = 40; panY = 40; draw(); return; }
-      const box = bbox(sized);
-      const PAD = 60;
-      const W = box.maxX - box.minX + PAD * 2, H = box.maxY - box.minY + PAD * 2;
-      zoom = Math.max(0.2, Math.min(2, Math.min(canvas.clientWidth / W, canvas.clientHeight / H)));
-      panX = (canvas.clientWidth - W * zoom) / 2;
-      panY = (canvas.clientHeight - H * zoom) / 2;
-      draw();
-    }
-    canvas.addEventListener('wheel', function (e) {
-      e.preventDefault();
-      const r = canvas.getBoundingClientRect();
-      zoomAt(zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1), e.clientX - r.left, e.clientY - r.top);
-    }, { passive: false });
-    const ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(function () { draw(); }) : null;
-    if (ro) ro.observe(canvas);
-
-    // ---- 選取 / 刪除 ----
-    function deleteSelected() {
-      if (!sel || locked) return;
-      snapshot();
-      if (sel.type === 'node') {
-        const id = model.nodes[sel.i].id;
-        model.nodes.splice(sel.i, 1);
-        model.edges = model.edges.filter(function (e) { return e.from !== id && e.to !== id; });
-      } else {
-        model.edges.splice(sel.i, 1);
-      }
-      sel = null;
-      draw(); changed();
-    }
-
-    // ---- 新增節點 ----
-    function addNodeAt(x, y) {
-      snapshot();
-      const n = { id: newId(), label: '新節點', x: x - R, y: y - R, color: '', shape: '' };
-      model.nodes.push(n);
-      sel = { type: 'node', i: model.nodes.length - 1 };
-      draw(); changed();
-      openInput(model.nodes.length - 1, true);
-    }
-
-    // ---- 雙擊：自己判斷（見檔頭說明）----
-    let lastDown = null;
-    function isDouble(e) {
-      const now = Date.now();
-      const d = !!lastDown && (now - lastDown.t < 400) && Math.hypot(e.clientX - lastDown.x, e.clientY - lastDown.y) < 6;
-      lastDown = d ? null : { t: now, x: e.clientX, y: e.clientY };
-      return d;
-    }
-
-    // ---- 拖曳：移動節點 / 平移畫布 / 拉線連接 ----
-    function onCanvasDown(e) {
-      if (e.button !== 0) return;
-      if (e.target.closest && e.target.closest('.rm-ctrl')) return;
-      const handle = e.target.closest && e.target.closest('.rm-handle');
-      const nodeEl = e.target.closest && e.target.closest('.rm-node');
-      const edgeEl = e.target.closest && e.target.closest('.rm-edge');
-      if (isDouble(e)) {
-        e.preventDefault();
-        if (locked) return;
-        if (nodeEl) { const i = +nodeEl.getAttribute('data-i'); select('node', i); openInput(i, true); return; }
-        if (edgeEl) { const i = +edgeEl.getAttribute('data-i'); select('edge', i); openEdgeInput(i); return; }
-        const p = toModelXY(e.clientX, e.clientY);
-        addNodeAt(p.x, p.y);
-        return;
-      }
-      if (handle && !locked) { startConnect(e, +handle.getAttribute('data-i')); return; }
-      if (nodeEl) { if (locked) { select('node', +nodeEl.getAttribute('data-i')); startPan(e); } else startMoveNode(e, +nodeEl.getAttribute('data-i')); return; }
-      if (edgeEl) { select('edge', +edgeEl.getAttribute('data-i')); return; }
-      select(null);
-      startPan(e);
-    }
-    function startMoveNode(e, i) {
-      e.preventDefault();
-      select('node', i);
-      const n = model.nodes[i];
-      const before = serialize(model);
-      const sx = e.clientX, sy = e.clientY, ox0 = n.x, oy0 = n.y;
-      let moved = false;
-      function move(ev) {
-        const dx = (ev.clientX - sx) / zoom, dy = (ev.clientY - sy) / zoom;
-        if (!moved && Math.abs(dx) + Math.abs(dy) > 2) moved = true;
-        if (!moved) return;
-        n.x = ox0 + dx; n.y = oy0 + dy;
-        draw();
-      }
-      function up() {
-        document.removeEventListener('mousemove', move);
-        document.removeEventListener('mouseup', up);
-        if (moved) { undo.push(before); if (undo.length > 100) undo.shift(); redo.length = 0; updateUndoBtns(); changed(); }
-      }
-      document.addEventListener('mousemove', move);
-      document.addEventListener('mouseup', up);
-    }
-    function startPan(e) {
-      e.preventDefault();
-      const sx = e.clientX, sy = e.clientY, px0 = panX, py0 = panY;
-      canvas.classList.add('mm-dragging');
-      function move(ev) { panX = px0 + (ev.clientX - sx); panY = py0 + (ev.clientY - sy); applyTransform(); }
-      function up() { canvas.classList.remove('mm-dragging'); document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); }
-      document.addEventListener('mousemove', move);
-      document.addEventListener('mouseup', up);
-    }
-    function startConnect(e, fromIdx) {
-      e.preventDefault(); e.stopPropagation();
-      const fromNode = model.nodes[fromIdx];
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('class', 'rm-rubberband');
-      const svg = stage.querySelector('svg');
-      svg.appendChild(line);
-      function place(clientX, clientY) {
-        const p = toModelXY(clientX, clientY);
-        const ox = +stage.dataset.ox, oy = +stage.dataset.oy;
-        const c = center(sizedOf(fromNode));
-        const vx = p.x - c.x, vy = p.y - c.y;
-        const l = Math.max(1, Math.sqrt(vx * vx + vy * vy));
-        line.setAttribute('x1', c.x + vx / l * R + ox);
-        line.setAttribute('y1', c.y + vy / l * R + oy);
-        line.setAttribute('x2', p.x + ox);
-        line.setAttribute('y2', p.y + oy);
-      }
-      place(e.clientX, e.clientY);
-      function move(ev) { place(ev.clientX, ev.clientY); }
-      function up(ev) {
-        document.removeEventListener('mousemove', move);
-        document.removeEventListener('mouseup', up);
-        line.remove();
-        const target = document.elementFromPoint(ev.clientX, ev.clientY);
-        const targetNodeEl = target && target.closest && target.closest('.rm-node');
-        if (targetNodeEl) {
-          const toIdx = +targetNodeEl.getAttribute('data-i');
-          const toNode = model.nodes[toIdx];
-          if (toNode && toNode.id !== fromNode.id &&
-              !model.edges.some(function (x) { return x.from === fromNode.id && x.to === toNode.id; })) {
-            snapshot();
-            model.edges.push({ from: fromNode.id, to: toNode.id, label: '' });
-            sel = { type: 'edge', i: model.edges.length - 1 };
-            draw(); changed();
-            return;
-          }
-        }
-        draw();
-      }
-      document.addEventListener('mousemove', move);
-      document.addEventListener('mouseup', up);
-    }
-    canvas.addEventListener('mousedown', onCanvasDown);
-
-    // ---- 拖 .csv 進畫布 ----
-    const dropHint = host.querySelector('.rm-drop');
-    canvas.addEventListener('dragover', function (e) {
-      if (locked) return;
-      if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) {
-        e.preventDefault(); dropHint.hidden = false;
-      }
-    });
-    canvas.addEventListener('dragleave', function (e) { if (!canvas.contains(e.relatedTarget)) dropHint.hidden = true; });
-    canvas.addEventListener('drop', function (e) {
-      dropHint.hidden = true;
-      if (locked || !e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
-      e.preventDefault();
-      readCSVFiles(e.dataTransfer.files);
-    });
-    function readCSVFiles(files) {
-      Array.prototype.forEach.call(files, function (f) {
-        const reader = new FileReader();
-        reader.onload = function () { doImport(String(reader.result || ''), f.name); };
-        reader.readAsText(f);
-      });
-    }
-    function doImport(text, name) {
-      snapshot();
-      const r = importCSV(model, text);
-      if (!r.nodes.length && !r.edges) { undo.pop(); updateUndoBtns(); notify('「' + (name || 'CSV') + '」裡沒有讀到任何關聯（要有 source,target 兩欄）'); return; }
-      if (r.nodes.length) autoLayout(model, r.nodes);
-      sel = null;
-      fitView(); changed();
-      notify('已匯入 ' + r.nodes.length + ' 個節點、' + r.edges + ' 條關聯');
-    }
+    function fitSoon() { setTimeout(function () { if (bound) bound.rf.fitView({ padding: 0.15, duration: 250, maxZoom: 1.25 }); }, 80); }
     function notify(msg) {
       if (global.App && App.toast) { App.toast(msg); return; }
       const t = document.createElement('div');
@@ -747,169 +577,327 @@
       setTimeout(function () { t.remove(); }, 2600);
     }
 
-    // ---- 就地改文字（節點）：輸入框蓋在圓盤下方的標籤上 ----
-    function openInput(i, selectAll) {
+    // ---- React Flow 元件（沒有 JSX，直接 createElement）----
+    function mount() {
+      const RE = global.React, RF = global.ReactFlow, h = RE.createElement;   // 注意：R 在這個模組是圓盤半徑，React 另外叫 RE
+
+      function DiscNode(p) {
+        const d = p.data, hex = nodeHex(p.id, d.color);
+        return h('div', { className: 'rm-rf-node' + (p.selected ? ' is-sel' : '') },
+          // 整顆圓盤都是「連到這裡」的落點；只能當終點，拖圓盤本身是搬節點
+          h(RF.Handle, { type: 'target', position: RF.Position.Top, className: 'rm-rf-target', isConnectableStart: false }),
+          h('div', { className: 'rm-rf-disc', style: { borderColor: hex, color: hex } }, monogram(d.label)),
+          h('div', { className: 'rm-rf-label' }, d.label || '（未命名）'),
+          // 右邊這顆小圓點才是拉線的起點
+          h(RF.Handle, { type: 'source', position: RF.Position.Right, className: 'rm-rf-source' })
+        );
+      }
+      function FloatingEdge(p) {
+        const s = RF.useInternalNode(p.source), t = RF.useInternalNode(p.target);
+        if (!s || !t || !s.measured || !t.measured) return null;
+        function box(n) { return { x: n.internals.positionAbsolute.x, y: n.internals.positionAbsolute.y, w: n.measured.width || (R * 2 + 8), h: n.measured.height || (R * 2 + LABEL_H) }; }
+        const g = edgeGeometry(box(s), box(t), hash(p.source + '|' + p.target));
+        const hex = EDGE_HEX[(p.data && p.data.k) || 0];
+        return h(RF.BaseEdge, {
+          id: p.id, path: pathD(g, 0, 0), markerEnd: p.markerEnd, interactionWidth: 18,
+          style: p.selected ? { stroke: '#4c8dff', strokeWidth: 2.5 } : { stroke: hex, strokeWidth: 1.6, strokeDasharray: '6 4', strokeLinecap: 'round' },
+          label: p.label || undefined, labelX: g.mid.x, labelY: g.mid.y,
+          labelStyle: { fill: '#9aa4b5', fontSize: 11, fontWeight: 600 },
+          labelShowBg: true, labelBgStyle: { fill: '#1c2331', stroke: '#2a3242' }, labelBgPadding: [7, 3], labelBgBorderRadius: 9
+        });
+      }
+      const nodeTypes = { disc: DiscNode }, edgeTypes = { floating: FloatingEdge };
+
+      function Flow() {
+        const ns = RF.useNodesState(latestNodes), es = RF.useEdgesState(latestEdges);
+        const nodes = ns[0], setNodes = ns[1], onNodesChange = ns[2];
+        const edges = es[0], setEdges = es[1], onEdgesChange = es[2];
+        const rf = RF.useReactFlow();
+        const dragSnap = RE.useRef(null);
+        RE.useEffect(function () {
+          latestNodes = nodes; latestEdges = edges;
+          refreshChrome();
+          if (pendingChange) { pendingChange = false; changed(); }
+        }, [nodes, edges]);
+        RE.useEffect(function () {
+          bound = { setNodes: setNodes, setEdges: setEdges, rf: rf };
+          return function () { bound = null; };
+        }, []);
+        // 刪除（Delete／Backspace 是 React Flow 自己處理的）：套用之前先留一份復原點
+        const handleNodes = RE.useCallback(function (changes) {
+          if (changes.some(function (c) { return c.type === 'remove'; })) { if (!pendingChange) snapshot(); pendingChange = true; }
+          onNodesChange(changes);
+        }, [onNodesChange]);
+        const handleEdges = RE.useCallback(function (changes) {
+          if (changes.some(function (c) { return c.type === 'remove'; })) { if (!pendingChange) snapshot(); pendingChange = true; }
+          onEdgesChange(changes);
+        }, [onEdgesChange]);
+        const onConnect = RE.useCallback(function (c) {
+          if (!c.source || !c.target || c.source === c.target) return;
+          if (latestEdges.some(function (e) { return e.source === c.source && e.target === c.target; })) return;
+          snapshot(); pendingChange = true;
+          setEdges(function (list) { return list.concat([rfEdge({ from: c.source, to: c.target, label: '' })]); });
+        }, []);
+        return h(RF.ReactFlow, {
+          nodes: nodes, edges: edges, nodeTypes: nodeTypes, edgeTypes: edgeTypes,
+          onNodesChange: handleNodes, onEdgesChange: handleEdges, onConnect: onConnect,
+          onNodeDragStart: function () { dragSnap.current = serialize(currentModel()); },
+          onNodeDragStop: function () {
+            const before = dragSnap.current; dragSnap.current = null;
+            if (before == null) return;
+            // 位置要等這一輪 state 套完才是新的
+            setTimeout(function () {
+              if (serialize(currentModel()) === before) return;
+              undo.push(before); if (undo.length > 100) undo.shift(); redo.length = 0; updateUndoBtns(); changed();
+            }, 0);
+          },
+          onNodeDoubleClick: function (ev, node) { openInput(node.id); },
+          onEdgeDoubleClick: function (ev, edge) { openEdgeInput(edge.id, ev.clientX, ev.clientY); },
+          colorMode: 'dark', connectionMode: 'loose', connectionRadius: 34, zoomOnDoubleClick: false,
+          deleteKeyCode: ['Backspace', 'Delete'], minZoom: 0.15, maxZoom: 3,
+          fitView: true, fitViewOptions: { padding: 0.2, maxZoom: 1.25 },
+          connectionLineStyle: { stroke: '#4c8dff', strokeWidth: 2, strokeDasharray: '5 3' },
+          attributionPosition: 'top-right'
+        },
+          h(RF.Background, { variant: 'dots', gap: 24, size: 1.3, color: 'rgba(255,255,255,.16)' }),
+          h(RF.Controls, { position: 'bottom-left' }),
+          h(RF.MiniMap, {
+            position: 'bottom-right', pannable: true, zoomable: true,
+            nodeColor: function (n) { return nodeHex(n.id, n.data && n.data.color); },
+            nodeStrokeWidth: 0, nodeBorderRadius: 40, maskColor: 'rgba(15, 19, 26, .62)'
+          })
+        );
+      }
+      root = global.ReactDOM.createRoot(rootEl);
+      root.render(h(RF.ReactFlowProvider, null, h(Flow)));
+      host.querySelector('.rm-loading').hidden = true;
+      refreshChrome();
+    }
+
+    // ---- 雙擊空白處：新增節點（React Flow 沒有 pane 的雙擊事件，自己接）----
+    canvas.addEventListener('dblclick', function (e) {
+      if (!bound || !e.target.classList || !e.target.classList.contains('react-flow__pane')) return;
+      addNodeAt(e.clientX, e.clientY);
+    });
+    function addNodeAt(clientX, clientY) {
+      if (!bound) return;
+      const p = bound.rf.screenToFlowPosition({ x: clientX, y: clientY });
+      const n = { id: newId(), label: '新節點', x: Math.round(p.x - nodeSize({ label: '新節點' }).w / 2), y: Math.round(p.y - R), color: '' };
+      snapshot();
+      applyNodes(function (list) {
+        return list.map(function (x) { return x.selected ? Object.assign({}, x, { selected: false }) : x; })
+          .concat([Object.assign(rfNode(n), { selected: true })]);
+      });
+      changed();
+      setTimeout(function () { openInput(n.id); }, 80);   // 等 React 把節點畫出來才量得到位置
+    }
+
+    // ---- 就地改文字：輸入框是 body 層的 fixed 元素，疊在節點標籤／連線標籤上 ----
+    function openInput(id) {
       closeInput();
-      const n = model.nodes[i];
-      const ox = +stage.dataset.ox, oy = +stage.dataset.oy;
-      const s = sizedOf(n), c = center(s);
+      const node = latestNodes.find(function (n) { return n.id === id; });
+      const lbl = rootEl.querySelector('.react-flow__node[data-id="' + cssEsc(id) + '"] .rm-rf-label');
+      if (!node || !lbl) return;
+      const r = lbl.getBoundingClientRect();
+      const w = Math.max(140, r.width + 40);
+      placeInput(r.left + r.width / 2 - w / 2, r.top - 3, w, Math.max(24, r.height + 6), node.data.label || '', '節點名稱…', function (v) {
+        if (v === (node.data.label || '')) return;
+        snapshot();
+        applyNodes(function (list) {
+          return list.map(function (n) {
+            return n.id === id ? Object.assign({}, n, { data: Object.assign({}, n.data, { label: v }), style: { width: nodeSize({ label: v }).w } }) : n;
+          });
+        });
+        changed();
+      });
+    }
+    function openEdgeInput(id, x, y) {
+      closeInput();
+      const edge = latestEdges.find(function (e) { return e.id === id; });
+      if (!edge) return;
+      placeInput(x - 75, y - 13, 150, 26, edge.label || '', '連線文字…', function (v) {
+        if (v === (edge.label || '')) return;
+        snapshot();
+        applyEdges(function (list) { return list.map(function (e) { return e.id === id ? Object.assign({}, e, { label: v }) : e; }); });
+        changed();
+      });
+    }
+    function placeInput(left, top, w, hgt, value, placeholder, onCommit) {
       input = document.createElement('input');
       input.className = 'rm-input';
-      input.value = n.label;
+      input.value = value; input.placeholder = placeholder;
+      input.style.left = Math.max(4, left) + 'px'; input.style.top = top + 'px';
+      input.style.width = w + 'px'; input.style.height = hgt + 'px';
       host.appendChild(input);
-      const w = Math.max(120, s.w + 24);
-      placeInputAt(c.x + ox - w / 2, c.y + oy + R + 3, w, 24);
-      input.focus();
-      if (selectAll) input.select();
-      function commit() {
-        const v = input.value;
-        closeInput();
-        if (v !== n.label) { snapshot(); n.label = v; draw(); changed(); }
+      input.focus(); input.select();
+      const el = input;
+      let done = false;
+      function finish(save) {
+        if (done) return; done = true;
+        const v = el.value;
+        if (input === el) input = null;
+        el.remove();
+        if (save) onCommit(v);
       }
-      input.addEventListener('keydown', function (e) {
+      el.addEventListener('keydown', function (e) {
         e.stopPropagation();
-        if (e.key === 'Enter') { e.preventDefault(); commit(); }
-        else if (e.key === 'Escape') { e.preventDefault(); closeInput(); }
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
       });
-      input.addEventListener('blur', commit);
+      el.addEventListener('blur', function () { finish(true); });
     }
-    function openEdgeInput(i) {
-      closeInput();
-      const e = model.edges[i];
-      const a = byId(e.from), b = byId(e.to);
-      if (!a || !b) return;
-      const ox = +stage.dataset.ox, oy = +stage.dataset.oy;
-      const g = edgeGeometry(sizedOf(a), sizedOf(b), hash(e.from + '|' + e.to));
-      input = document.createElement('input');
-      input.className = 'rm-input rm-input-edge';
-      input.placeholder = '連線文字…';
-      input.value = e.label || '';
-      host.appendChild(input);
-      placeInputAt(g.mid.x + ox - 70, g.mid.y + oy - 12, 140, 24);
-      input.focus();
-      input.select();
-      function commit() {
-        const v = input.value;
-        closeInput();
-        if (v !== e.label) { snapshot(); e.label = v; draw(); changed(); }
-      }
-      input.addEventListener('keydown', function (ev) {
-        ev.stopPropagation();
-        if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
-        else if (ev.key === 'Escape') { ev.preventDefault(); closeInput(); }
-      });
-      input.addEventListener('blur', commit);
-    }
-    function placeInputAt(x, y, w, h) {
-      const r = canvas.getBoundingClientRect();
-      input.style.left = (r.left + x * zoom + panX) + 'px';
-      input.style.top = (r.top + y * zoom + panY) + 'px';
-      input.style.width = (w * zoom) + 'px';
-      input.style.height = (h * zoom) + 'px';
-      input.style.fontSize = Math.max(11, 13 * zoom) + 'px';
-    }
-    function closeInput() { if (input) { const el = input; input = null; el.remove(); } }
+    function closeInput() { if (input) { const el = input; input = null; el.blur(); } }
+    function cssEsc(s) { return (global.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/"/g, '\\"'); }
 
-    // ---- 顏色（選取節點後按工具列的「顏色」，圓形色板出現在圓盤下方）----
+    // ---- 顏色 ----
     function colorMenu() {
-      if (!sel || sel.type !== 'node' || locked) return;
-      closeColorMenu();
-      const n = model.nodes[sel.i];
+      const sel = selectedNode();
+      if (!sel) return;
+      closePopups();
       const pop = document.createElement('div');
-      pop.className = 'rm-colors';
+      pop.className = 'rm-colors rm-pop';
       COLORS.forEach(function (c) {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'rm-swatch' + (c ? ' rm-' + c : ' rm-none') + (n.color === c ? ' on' : '');
+        b.className = 'rm-swatch' + (c ? ' rm-' + c : ' rm-none') + ((sel.data.color || '') === c ? ' on' : '');
         b.title = c || '自動';
         b.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
-        b.addEventListener('click', function () { snapshot(); n.color = c; draw(); changed(); closeColorMenu(); });
+        b.addEventListener('click', function () {
+          closePopups();
+          snapshot();
+          applyNodes(function (list) { return list.map(function (n) { return n.id === sel.id ? Object.assign({}, n, { data: Object.assign({}, n.data, { color: c }) }) : n; }); });
+          changed();
+        });
         pop.appendChild(b);
       });
+      showPopup(pop, colorBtn);
+    }
+
+    // ---- CSV 選單：匯入／下載範本／匯出 ----
+    function csvMenu() {
+      closePopups();
+      const pop = document.createElement('div');
+      pop.className = 'rm-menu rm-pop';
+      const items = [
+        { icon: 'upload', label: '匯入 CSV…', fn: pickCSV },
+        { icon: 'download', label: '下載 CSV 範本', fn: function () { downloadCSV('關聯分析-範本', CSV_TEMPLATE); } },
+        { icon: 'file-text', label: '匯出成 CSV', fn: function () {
+          const m = currentModel();
+          if (!m.nodes.length) { notify('畫布上還沒有節點可以匯出'); return; }
+          downloadCSV((titleEl && titleEl.value.trim()) || '關聯分析', toCSV(m));
+        } }
+      ];
+      items.forEach(function (it) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'rm-menu-item';
+        b.innerHTML = ic(it.icon) + '<span>' + esc(it.label) + '</span>';
+        b.addEventListener('click', function () { closePopups(); it.fn(); });
+        pop.appendChild(b);
+      });
+      const hint = document.createElement('div');
+      hint.className = 'rm-menu-hint';
+      hint.innerHTML = '格式：一列一條關聯<br><code>source,target,label</code><br>label 可以不填；也可以把 .csv 直接拖進畫布';
+      pop.appendChild(hint);
+      showPopup(pop, host.querySelector('.rm-csv'));
+    }
+    function showPopup(pop, anchor) {
       host.appendChild(pop);
-      const disc = stage.querySelector('.rm-node[data-i="' + sel.i + '"] .rm-disc');
-      const r = disc ? disc.getBoundingClientRect() : colorBtn.getBoundingClientRect();
-      pop.style.left = Math.max(8, Math.min(r.left + r.width / 2 - 74, window.innerWidth - 160)) + 'px';
-      pop.style.top = (r.bottom + 26) + 'px';
-      setTimeout(function () { document.addEventListener('mousedown', onColorOutside, true); }, 0);
+      const r = anchor.getBoundingClientRect();
+      pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - pop.offsetWidth - 8)) + 'px';
+      pop.style.top = (r.bottom + 6) + 'px';
+      setTimeout(function () { document.addEventListener('mousedown', onPopOutside, true); }, 0);
     }
-    function onColorOutside(e) { if (!e.target.closest('.rm-colors')) closeColorMenu(); }
-    function closeColorMenu() {
-      const p = host.querySelector('.rm-colors');
-      if (p) p.remove();
-      document.removeEventListener('mousedown', onColorOutside, true);
+    function onPopOutside(e) { if (!e.target.closest('.rm-pop')) closePopups(); }
+    function closePopups() {
+      Array.prototype.forEach.call(host.querySelectorAll('.rm-pop'), function (p) { p.remove(); });
+      document.removeEventListener('mousedown', onPopOutside, true);
     }
-
-    // ---- 鍵盤（畫布有焦點時）----
-    function doUndo() { if (!undo.length) return; redo.push(serialize(model)); model = parse(undo.pop()); sel = null; draw(); changed(); updateUndoBtns(); }
-    function doRedo() { if (!redo.length) return; undo.push(serialize(model)); model = parse(redo.pop()); sel = null; draw(); changed(); updateUndoBtns(); }
-    function onKey(e) {
-      if (input || e.target === titleEl) return;
-      if ((e.key === 'Delete' || e.key === 'Backspace') && sel) { e.preventDefault(); deleteSelected(); return; }
-      if (e.key === 'F2' && sel && sel.type === 'node' && !locked) { e.preventDefault(); openInput(sel.i, true); return; }
-      if (e.key === 'Escape') { if (sel) { e.preventDefault(); select(null); } return; }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        if (e.shiftKey) doRedo(); else doUndo();
-      }
-    }
-    host.addEventListener('keydown', onKey);
-
-    // ---- 工具列 / Controls ----
-    host.querySelector('.rm-add').addEventListener('click', function () {
-      if (locked) return;
-      const r = canvas.getBoundingClientRect();
-      const p = toModelXY(r.left + canvas.clientWidth / 2, r.top + canvas.clientHeight / 2);
-      addNodeAt(p.x, p.y);
-    });
-    colorBtn.addEventListener('click', colorMenu);
-    host.querySelector('.rm-undo').addEventListener('click', doUndo);
-    host.querySelector('.rm-redo').addEventListener('click', doRedo);
-    host.querySelector('.rm-layout').addEventListener('click', function () {
-      if (locked || !model.nodes.length) return;
-      snapshot(); autoLayout(model, null); fitView(); changed();
-    });
-    host.querySelector('.rm-csv').addEventListener('click', function () {
-      if (locked) return;
+    function pickCSV() {
       const inp = document.createElement('input');
       inp.type = 'file'; inp.accept = '.csv,.tsv,.txt,text/csv,text/plain'; inp.multiple = true; inp.hidden = true;
       document.body.appendChild(inp);
       inp.addEventListener('change', function () { readCSVFiles(inp.files); inp.remove(); });
       inp.click();
+    }
+    function readCSVFiles(files) {
+      Array.prototype.forEach.call(files, function (f) {
+        const reader = new FileReader();
+        reader.onload = function () { doImport(String(reader.result || ''), f.name); };
+        reader.readAsText(f);
+      });
+    }
+    function doImport(csvText, name) {
+      const model = currentModel();
+      const before = serialize(model);
+      const r = importCSV(model, csvText);
+      if (!r.nodes.length && !r.edges) { notify('「' + (name || 'CSV') + '」裡沒有讀到任何關聯（要有 source,target 兩欄）'); return; }
+      undo.push(before); if (undo.length > 100) undo.shift(); redo.length = 0; updateUndoBtns();
+      if (r.nodes.length) autoLayout(model, r.nodes);
+      setAll(model);
+      changed(); fitSoon();
+      notify('已匯入 ' + r.nodes.length + ' 個節點、' + r.edges + ' 條關聯');
+    }
+    const dropHint = host.querySelector('.rm-drop');
+    canvas.addEventListener('dragover', function (e) {
+      if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) { e.preventDefault(); dropHint.hidden = false; }
     });
-    host.querySelector('.rm-zi').addEventListener('click', function () { zoomStep(1.25); });
-    host.querySelector('.rm-zo').addEventListener('click', function () { zoomStep(1 / 1.25); });
-    host.querySelector('.rm-zfit').addEventListener('click', fitView);
-    const lockBtn = host.querySelector('.rm-lock');
-    lockBtn.addEventListener('click', function () {
-      locked = !locked;
-      lockBtn.classList.toggle('on', locked);
-      lockBtn.title = locked ? '解除鎖定' : '鎖定：只能平移縮放，不能改圖';
-      canvas.classList.toggle('rm-locked', locked);
-      ['.rm-add', '.rm-csv', '.rm-layout'].forEach(function (s) { host.querySelector(s).disabled = locked; });
-      applySelection();
+    canvas.addEventListener('dragleave', function (e) { if (!canvas.contains(e.relatedTarget)) dropHint.hidden = true; });
+    canvas.addEventListener('drop', function (e) {
+      dropHint.hidden = true;
+      if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+      e.preventDefault();
+      readCSVFiles(e.dataTransfer.files);
     });
 
-    let closed = false;
+    // ---- 鍵盤：Delete／Backspace 交給 React Flow；這裡只管復原、F2 ----
+    function onKey(e) {
+      if (input || e.target === titleEl) return;
+      if (e.key === 'F2') { const s = selectedNode(); if (s) { e.preventDefault(); openInput(s.id); } return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) doRedo(); else doUndo(); }
+    }
+    host.addEventListener('keydown', onKey);
+
+    // ---- 工具列 ----
+    host.querySelector('.rm-add').addEventListener('click', function () {
+      const r = canvas.getBoundingClientRect();
+      addNodeAt(r.left + r.width / 2, r.top + r.height / 2);
+    });
+    colorBtn.addEventListener('click', colorMenu);
+    host.querySelector('.rm-csv').addEventListener('click', csvMenu);
+    host.querySelector('.rm-undo').addEventListener('click', doUndo);
+    host.querySelector('.rm-redo').addEventListener('click', doRedo);
+    host.querySelector('.rm-layout').addEventListener('click', function () {
+      const model = currentModel();
+      if (!model.nodes.length) return;
+      snapshot(); autoLayout(model, null); setAll(model); changed(); fitSoon();
+    });
+
     function close() {
       if (closed) return;
       closed = true;
+      closeInput(); closePopups();
       flush();
-      closeInput(); closeColorMenu();
-      if (ro) ro.disconnect();
       host.removeEventListener('keydown', onKey);
+      const finalDsl = serialize(currentModel());
+      if (root) { try { root.unmount(); } catch (e) { /* ignore */ } root = null; }
       host.classList.remove('rm-page');
       host.innerHTML = '';
       if (ownHost) host.remove();
-      if (opts.onSave) opts.onSave(serialize(model));
+      if (opts.onSave) opts.onSave(finalDsl);
       if (opts.onClose) opts.onClose();
     }
     host.querySelector('.rm-back').addEventListener('click', close);
 
     updateUndoBtns();
-    draw();
-    if (model.nodes.length) fitView();
-    canvas.focus();
+    refreshChrome();
+    loadReactFlow().then(function () {
+      if (!closed) mount();
+    }, function (e) {
+      if (closed) return;
+      const l = host.querySelector('.rm-loading');
+      l.textContent = 'React Flow 載入失敗（' + (e && e.message || e) + '），重新整理後再試一次。';
+      l.classList.add('is-error');
+    });
     return { close: close, flush: flush, importCSV: function (t) { doImport(t); } };
   }
 
@@ -921,6 +909,7 @@
     isRelNote: isRelNote,
     generate: generate,
     importCSV: importCSV,
+    toCSV: toCSV,
     autoLayout: autoLayout
   };
 })(window);
