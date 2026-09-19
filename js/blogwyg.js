@@ -60,6 +60,12 @@
   }
 
   // ---- 區塊：DOM → Markdown -------------------------------------------------
+  // 空的清單項目、空引言在原始碼裡放一個零寬空格（EMPTY）當佔位：只有「- 」的一行 marked 會
+  // 排成一段字面上的「-」，「> 」會排成裡面沒有 <p> 的 <blockquote>，兩種都沒地方放游標——
+  // 前者打的字黏在「-」後面被跳脫成 \-，後者打的字落在序列化不讀的地方，整個不見。
+  // 一打字佔位就拿掉；原本內文裡就有零寬空格的區塊會在往返檢查被擋下，走純文字框，不會被改動。
+  const EMPTY = '\u200b';
+  function dropPlaceholder(t) { return t === EMPTY ? t : t.replace(/\u200b/g, ''); }
   function prefixLines(text, prefix) {
     return text.split('\n').map(function (l) { return prefix + l; }).join('\n');
   }
@@ -91,9 +97,9 @@
       const box = li.querySelector('input.task-check');
       const cb = inline.querySelector('input.task-check');
       if (cb) cb.remove();
-      body = marker + '[' + (box && box.checked ? 'x' : ' ') + '] ' + inlineOf(inline).replace(/^\s+|\s+$/g, '');
+      body = marker + '[' + (box && box.checked ? 'x' : ' ') + '] ' + dropPlaceholder(inlineOf(inline).replace(/^\s+|\s+$/g, ''));
     } else {
-      body = marker + inlineOf(inline).replace(/^\s+|\s+$/g, '');
+      body = marker + dropPlaceholder(inlineOf(inline).replace(/^\s+|\s+$/g, ''));
     }
     let text = indent + body;
     subs.forEach(function (sub) { text += '\n' + listMd(sub, indent + '  '); });   // 巢狀縮排 +2
@@ -116,8 +122,8 @@
     indent = indent || '';
     const tag = el.tagName;
     // 結尾的 <br> 是 contentEditable 讓空段落能放游標的佔位（<p><br></p>），不是內容
-    if (/^H[1-6]$/.test(tag)) return indent + '#'.repeat(+tag[1]) + ' ' + inlineOf(el).replace(/\n+$/, '');
-    if (tag === 'P') return prefixLines(inlineOf(el).replace(/\n+$/, ''), indent);
+    if (/^H[1-6]$/.test(tag)) return indent + '#'.repeat(+tag[1]) + ' ' + dropPlaceholder(inlineOf(el).replace(/\n+$/, ''));
+    if (tag === 'P') return prefixLines(dropPlaceholder(inlineOf(el).replace(/\n+$/, '')), indent);
     if (tag === 'BLOCKQUOTE') return prefixLines(blocksOf(el, '').join('\n\n'), indent + '> ');
     if (tag === 'UL' || tag === 'OL') return listMd(el, indent);
     return null;   // 不支援 → 交給往返測試擋下
@@ -215,7 +221,9 @@
   function closeSlash() { if (slash) { slash.el.remove(); document.removeEventListener('mousedown', slash.out, true); slash = null; } }
 
   // ---- 反白格式工具列（像 Notion）：目前掛著的區塊裡反白文字就浮出來 -----------------
-  // 行內：粗體／斜體／刪除線／行內碼／連結；區塊：內文／H1／H2／H3／引言（清單不換類型）。
+  // 行內：粗體／斜體／刪除線／行內碼／連結；區塊：內文／H1／H2／H3／引言／項目清單／編號清單／
+  // 待辦清單。在清單區塊上只出現「內文」跟三種清單（清單之間互換，或攤平回內文）——多個項目
+  // 沒有單一對應的標題或引言。
   let active = null;   // { block, kind, fireChange, retype }
   let fmt = null, link = null;
   function ic(name) { return (global.Icons && Icons.svg) ? Icons.svg(name) : ''; }
@@ -229,6 +237,7 @@
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'blog-fmt-btn' + (spec.block ? ' wyg-fmt-block' : '');
+      if (spec.block) b.dataset.scope = spec.scope || 'text';
       b.title = spec.title;
       b.innerHTML = ic(spec.icon) || spec.title;
       b.addEventListener('mousedown', function (e) { e.preventDefault(); });   // 不搶焦點，選取才不會消失
@@ -242,11 +251,14 @@
     add({ icon: 'code', title: '行內程式碼', run: toggleCode });
     add({ icon: 'link', title: '連結', run: openLink });
     const sep = document.createElement('span'); sep.className = 'blog-fmt-sep'; fmt.appendChild(sep);
-    add({ icon: 'type', title: '內文', block: true, run: function () { retypeTo('para'); } });
+    add({ icon: 'type', title: '內文', block: true, scope: 'both', run: function () { retypeTo('para'); } });
     add({ icon: 'heading-1', title: '標題 1', block: true, run: function () { retypeTo('h1'); } });
     add({ icon: 'heading-2', title: '標題 2', block: true, run: function () { retypeTo('h2'); } });
     add({ icon: 'heading-3', title: '標題 3', block: true, run: function () { retypeTo('h3'); } });
     add({ icon: 'quote', title: '引言', block: true, run: function () { retypeTo('quote'); } });
+    add({ icon: 'list', title: '項目清單', block: true, scope: 'both', run: function () { retypeTo('ul'); } });
+    add({ icon: 'list-ordered', title: '編號清單', block: true, scope: 'both', run: function () { retypeTo('ol'); } });
+    add({ icon: 'check-square', title: '待辦清單', block: true, scope: 'both', run: function () { retypeTo('todo'); } });
     document.body.appendChild(fmt);   // body 子元素一律 fixed
     return fmt;
   }
@@ -320,15 +332,52 @@
   }
   function closeLink() { if (link) { link.el.remove(); document.removeEventListener('mousedown', link.out, true); link = null; } }
 
-  // 把目前這個區塊換成另一種類型（行內內容保留）
+  // 把目前這個區塊換成另一種類型（行內內容保留）。type：para／h1–h3／quote／ul／ol／todo。
+  const LIST_ITEM = /^((?:[-*+]|\d+[.)])\s+)(\[[ xX]\]\s+)?(.*)$/;   // 最外層的一項（行首沒有縮排）
+  function listMarker(type, n, box) {
+    if (type === 'ol') return n + '. ';
+    if (type === 'todo') return '- ' + (box && /x/i.test(box) ? '[x] ' : '[ ] ');
+    return '- ';
+  }
   function retypeTo(type) {
     if (!active) return;
-    const lines = serialize(active.block).split('\n').map(function (l) { return l.replace(/^(#{1,6}\s+|>\s?)/, ''); });
-    const one = lines.join(' ').trim(), all = lines.join('\n');
+    const raw = serialize(active.block).split('\n');
+    const toList = type === 'ul' || type === 'ol' || type === 'todo';
     let md, kind;
-    if (type === 'para') { md = all; kind = 'para'; }
-    else if (type === 'quote') { md = lines.map(function (l) { return '> ' + l; }).join('\n'); kind = 'quote'; }
-    else { md = '#'.repeat(+type[1]) + ' ' + one; kind = 'heading'; }
+    if (active.kind === 'list') {
+      if (type === 'para') {
+        // 攤平：每一項（含巢狀）變成內文的一行
+        md = raw.map(function (l) { return l.replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, ''); })
+          .filter(function (l) { return l.trim() !== ''; }).join('\n');
+        kind = 'para';
+      } else if (toList) {
+        // 換清單種類：只換最外層的記號，巢狀的維持原樣；待辦的勾選狀態保留
+        let n = 0;
+        md = raw.map(function (l) {
+          const m = l.match(LIST_ITEM);
+          if (!m) return l;
+          n++;
+          return listMarker(type, n, m[2]) + m[3];
+        }).join('\n');
+        kind = 'list';
+      } else return;
+    } else {
+      const lines = raw.map(function (l) { return l.replace(/^(#{1,6}\s+|>\s?)/, ''); });
+      const one = lines.join(' ').trim(), all = lines.join('\n');
+      if (type === 'para') { md = all; kind = 'para'; }
+      else if (type === 'quote') {
+        md = (all.trim() === '' ? [EMPTY] : lines).map(function (l) { return '> ' + l; }).join('\n');
+        kind = 'quote';
+      }
+      else if (toList) {
+        // 一行一項（內文裡用 Shift+Enter 換的行、原始碼裡的單一換行都算一行）；空行不成項
+        const items = lines.map(function (l) { return l.trim(); }).filter(Boolean);
+        if (!items.length) items.push(EMPTY);
+        md = items.map(function (l, i) { return listMarker(type, i + 1) + l; }).join('\n');
+        kind = 'list';
+      }
+      else { md = '#'.repeat(+type[1]) + ' ' + one; kind = 'heading'; }
+    }
     hideFmt();
     active.retype(md, kind);
   }
@@ -351,10 +400,10 @@
     if (!r || r.collapsed || !active.block.contains(r.commonAncestorContainer) || document.querySelector('.wyg-slash')) { hideFmt(); return; }
     const el = ensureFmt();
     el.hidden = false;
-    // 清單不提供換區塊類型（多個項目沒有單一對應）
+    // 清單區塊：只有「內文」跟三種清單（多個項目沒有單一對應的標題／引言）
     const isList = active.kind === 'list';
-    el.querySelectorAll('.wyg-fmt-block').forEach(function (b) { b.hidden = isList; });
-    el.querySelector('.blog-fmt-sep').hidden = isList;
+    el.querySelectorAll('.wyg-fmt-block').forEach(function (b) { b.hidden = isList && b.dataset.scope !== 'both'; });
+    el.querySelector('.blog-fmt-sep').hidden = false;
     positionFmt();
   }
   function hideFmt() { if (fmt) fmt.hidden = true; }
@@ -373,11 +422,33 @@
     function fireChange() { if (!composing) opts.onChange(serialize(block)); }
     active = { block: block, kind: kind, fireChange: fireChange, retype: function (md, k) { opts.onRetype(md, k); } };
 
-    function onInput() {
+    function onInput(e) {
       // execCommand／貼上可能塞進 <div><font><span style>，這些序列化不認得。這裡不重排
       // （會掉游標），交給往返：離開時 blogmode 會用序列化的 Markdown 重新排版。
       closeSlash();
+      if (e && e.inputType === 'insertText' && (e.data === ' ' || e.data === '\u00a0') && tryShortcut()) return;
       fireChange();
+    }
+    // 內文第一行開頭打了「記號 + 空白」→ 換成對應的區塊。沒有這個，打「- 」只會得到一段字面上的
+    // 「- 」（序列化時還會被跳脫成 \-，免得它意外變成清單），Blog 裡就沒辦法用打字的方式開清單。
+    const SHORTCUTS = [
+      { re: /^[-*+]$/, type: 'ul' }, { re: /^\d+[.)]$/, type: 'ol' }, { re: /^\[ ?\]$/, type: 'todo' },
+      { re: /^#$/, type: 'h1' }, { re: /^##$/, type: 'h2' }, { re: /^###$/, type: 'h3' }, { re: /^>$/, type: 'quote' }
+    ];
+    function tryShortcut() {
+      if (kind !== 'para' || !active || active.block !== block) return false;
+      const s = global.getSelection();
+      if (!s.rangeCount || !s.isCollapsed) return false;
+      const probe = document.createRange();
+      probe.selectNodeContents(inner);
+      probe.setEnd(s.anchorNode, s.anchorOffset);
+      const m = probe.toString().match(/^([^\s\u00a0]+)[ \u00a0]$/);
+      if (!m) return false;
+      const sc = SHORTCUTS.filter(function (x) { return x.re.test(m[1]); })[0];
+      if (!sc) return false;
+      probe.deleteContents();   // 記號跟空白本身不留下來
+      retypeTo(sc.type);
+      return true;
     }
 
     function insertText(t) { document.execCommand('insertText', false, t); }
@@ -561,8 +632,8 @@
       closeSlash();
       // 這個區塊目前的行內內容（去掉可能打進去的 /）
       const cur = serialize(block).replace(/\/+\s*$/, '').replace(/^\/+/, '').trim();
-      const bare = cur;
-      opts.onRetype(it.md(bare), it.k);
+      const needsSlot = cur === '' && (it.k === 'quote' || (it.k === 'list' && it.md('').indexOf('[ ]') < 0));
+      opts.onRetype(it.md(needsSlot ? EMPTY : cur), it.k);
     }
 
     block.addEventListener('input', onInput);

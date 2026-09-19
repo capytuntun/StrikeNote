@@ -787,6 +787,10 @@
       onFolderMenu: showFolderMenu, onMenu: showNoteMenu, onPin: pinNote,
       onSortMenu: showSortMenu, selection: selectionApi,
       onNavigate: function (folderId) { setHash(areaHash(area, folderId)); },
+      // 拖放：跟首頁同一組（placeItems 會擋跨區域、擋資料夾拖進自己的子資料夾）
+      onMoveNotes: moveNotesToFolder,
+      onReorderNotes: function (ids, folderId, targetId, after) { placeItems('note', ids, folderId, targetId, after); },
+      onPlaceFolders: function (ids, parentId, targetId, after) { placeItems('folder', ids, parentId, targetId, after); },
       // 課程筆記可以把 PPTX／PDF／影片直接放進資料夾：檔案本體走 Store.uploadFile（大檔自動
       // 分塊），在資料夾裡則是一篇 meta.file 的「檔案筆記」，內文就是那個檔案的引用——所以
       // 改名、移動、垃圾桶、還原、備份、檔案管理的「使用中」判斷全部沿用筆記既有的機制。

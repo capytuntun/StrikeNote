@@ -1043,6 +1043,9 @@ a.dash-row-act { text-decoration: none; }
 :root[data-theme="dark"] .ab-sticky[data-color="purple"] { --sk-bar: #c78eff; }
 :root[data-theme="dark"] .ab-sticky[data-color="blue"]   { --sk-bar: #5ac0e7; }
 :root[data-theme="dark"] .ab-sticky[data-color="gray"]   { --sk-bar: #aaaaaa; }
+/* 便條紙拖這條色帶可以搬到別的資料夾（js/areabrowser.js makeSticky） */
+.ab-sticky-bar[draggable="true"] { cursor: grab; }
+.ab-sticky-bar[draggable="true"] button { cursor: pointer; }
 .ab-sticky-bar {
   display: flex; align-items: center; justify-content: space-between; gap: 6px;
   height: 28px; padding: 0 4px 0 8px; background: var(--sk-bar);

@@ -2,7 +2,9 @@
  *
  * 資料夾方框、筆記條列跟首頁儀表板（dashboard.js）長得一模一樣：同一套 CSS class（.dash-*）、
  * 同樣的「⋮」／釘選／「⋯」、同一份勾選（批次列在側邊欄），選單也是 app.js 同一個函式。
- * 刻意沒有的：標籤雲、電子書區、拖拉（搬東西改由選單的「移動到…」）。一篇筆記一旦點開，
+ * 拖放也跟首頁同一套（同樣的 MIME 協定，所以跟側邊欄的樹互拖也行）：筆記、上傳的檔案、便條紙
+ * （拖上緣的色帶）拖進資料夾方框或麵包屑；筆記列之間、資料夾方框之間拖曳排序；從電腦拖檔案到
+ * 資料夾方框上就傳進那個資料夾。刻意沒有的：標籤雲、電子書區。一篇筆記一旦點開，
  * 分享／版本歷史／PDF／協作編輯全部照常運作——那些功能都在筆記編輯器本身，
  * 不需要這裡重做一份。
  *
@@ -18,6 +20,8 @@
  *   onPin(note, on) / selection {has, toggle} / onSortMenu(anchor)   跟首頁共用
  *   onNavigate(folderId)      使用者自己點進／點出資料夾（呼叫端留一筆瀏覽紀錄）
  *   onDeleteNote(note) / onMoveNote(note)   檔案列、便條紙自己的按鈕用
+ *   onMoveNotes(ids, folderId) / onReorderNotes(ids, folderId, targetId, after) /
+ *   onPlaceFolders(ids, parentId, targetId, after)   拖放（跟首頁的 dashOpts 同名同義）
  *   onUploadFile(file, folderId, onProgress)  有給才會出現「上傳檔案」跟拖放上傳；回傳
  *                             Promise<note>——檔案在資料夾裡是一篇「檔案筆記」（meta.file），
  *                             所以改名／移動／垃圾桶／備份都走筆記既有的那一套
@@ -153,10 +157,11 @@
   // 一次傳一個，其餘排隊——大影片同時開好幾條只會互搶頻寬。
   let uploads = [];   // { key, name, size, sent, folderId, error, bar, pct }
   let uploading = false, upSeq = 0;
-  function queueUploads(files, o) {
+  function queueUploads(files, o, folderId) {
+    const into = folderId === undefined ? curFolderId : folderId;
     Array.prototype.forEach.call(files, function (f) {
       // 區域跟上傳函式在排隊當下就記住：傳到一半切去別的區域，檔案還是進原本那個資料夾
-      uploads.push({ key: ++upSeq, file: f, name: f.name, size: f.size, sent: 0, folderId: curFolderId, area: o.area || null, upload: o.onUploadFile, error: null });
+      uploads.push({ key: ++upSeq, file: f, name: f.name, size: f.size, sent: 0, folderId: into, area: o.area || null, upload: o.onUploadFile, error: null });
     });
     render(o, true);
     pump();
@@ -241,6 +246,154 @@
 
   // user=true：使用者自己點資料夾方框或麵包屑——回報給呼叫端留一筆瀏覽紀錄（跟首頁的 onNavigate 一樣），
   // 瀏覽器的「上一頁」才會一層一層退回去。程式呼叫的 openFolder（例如跟著網址走）不回報，不然會重複留紀錄。
+  // ---- 拖放：跟首頁（dashboard.js）同一套協定與樣式 ------------------------------
+  // 資料放在私有的 MIME 型別上，側邊欄的樹（app.js）也認得——兩邊都是這一頁上看得到的東西，
+  // 從這裡拖到樹上的資料夾、或從樹拖到這裡的資料夾方框都行。模組變數只是 dragover 時的捷徑
+  // （那時還讀不到資料本身）。
+  const DND = 'application/x-strikenote-notes';
+  const DND_FOLDER = 'application/x-strikenote-folder';
+  let dragging = null, draggingFolder = null;
+  function hasType(e, t) {
+    const ts = e.dataTransfer && e.dataTransfer.types;
+    return !!(ts && Array.prototype.indexOf.call(ts, t) >= 0);
+  }
+  function isNoteDrag(e) { return !!dragging || hasType(e, DND); }
+  function isFolderDrag(e) { return !!draggingFolder || hasType(e, DND_FOLDER); }
+  function clearDropHints() {
+    if (!lastOpts || !lastOpts.container) return;
+    lastOpts.container.querySelectorAll('.drop-target, .drop-before, .drop-after')
+      .forEach(function (n) { n.classList.remove('drop-target', 'drop-before', 'drop-after'); });
+  }
+  function draggedNoteIds(e) {
+    let ids = dragging;
+    try { const raw = e.dataTransfer.getData(DND); if (raw) ids = JSON.parse(raw); } catch (err) { /* 用 dragstart 記下的 */ }
+    return ids || [];
+  }
+  function draggedFolderId(e) {
+    let id = draggingFolder;
+    try { id = e.dataTransfer.getData(DND_FOLDER) || id; } catch (err) { /* 用 dragstart 記下的 */ }
+    return id;
+  }
+  // 拖一篇有勾選的筆記＝拖整批勾選的（跟首頁一樣）
+  function beginNoteDrag(e, note, o) {
+    let ids = [note.id];
+    if (o.selection && o.selection.has(note.id) && o.selection.ids) {
+      const all = o.selection.ids();
+      if (all.length > 1) ids = all;
+    }
+    dragging = ids;
+    e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData(DND, JSON.stringify(ids));
+      e.dataTransfer.setData('text/plain', note.title || '');
+    } catch (err) { /* 模組變數還在 */ }
+    e.stopPropagation();
+  }
+  function endDrag() { dragging = null; draggingFolder = null; clearDropHints(); }
+  function makeNoteDraggable(el, note, o) {
+    if (!o.onMoveNotes) return;
+    el.draggable = true;
+    el.addEventListener('dragstart', function (e) { beginNoteDrag(e, note, o); });
+    el.addEventListener('dragend', endDrag);
+  }
+  // 一列（筆記或檔案）當排序落點：上半＝插在它前面，下半＝後面
+  function makeNoteRowDrop(wrap, note, o) {
+    if (!o.onReorderNotes) return;
+    wrap.addEventListener('dragover', function (e) {
+      if (!isNoteDrag(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      const r = wrap.getBoundingClientRect();
+      const after = e.clientY > r.top + r.height / 2;
+      wrap.classList.toggle('drop-before', !after);
+      wrap.classList.toggle('drop-after', after);
+    });
+    wrap.addEventListener('dragleave', function () { wrap.classList.remove('drop-before', 'drop-after'); });
+    wrap.addEventListener('drop', function (e) {
+      if (!isNoteDrag(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const after = wrap.classList.contains('drop-after');
+      clearDropHints();
+      const ids = draggedNoteIds(e);
+      dragging = null;
+      if (ids.length && !(ids.length === 1 && ids[0] === note.id)) o.onReorderNotes(ids, curFolderId, note.id, after);
+    });
+  }
+  // 資料夾方框：可以拖；別的資料夾拖過來時左右兩側是插入點、中間是放進去
+  function makeFolderTileDnD(tile, folder, o) {
+    if (!o.onPlaceFolders) return;
+    tile.draggable = true;
+    tile.addEventListener('dragstart', function (e) {
+      draggingFolder = folder.id;
+      e.dataTransfer.effectAllowed = 'move';
+      try {
+        e.dataTransfer.setData(DND_FOLDER, folder.id);
+        e.dataTransfer.setData('text/plain', folder.name || '');
+      } catch (err) { /* 模組變數還在 */ }
+      e.stopPropagation();
+    });
+    tile.addEventListener('dragend', endDrag);
+    tile.addEventListener('dragover', function (e) {
+      if (!isFolderDrag(e) || draggingFolder === folder.id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      const r = tile.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width;
+      tile.classList.toggle('drop-before', x < 0.3);
+      tile.classList.toggle('drop-after', x > 0.7);
+      tile.classList.toggle('drop-target', x >= 0.3 && x <= 0.7);
+    });
+    tile.addEventListener('dragleave', function () { tile.classList.remove('drop-before', 'drop-after', 'drop-target'); });
+    tile.addEventListener('drop', function (e) {
+      if (!isFolderDrag(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const before = tile.classList.contains('drop-before'), after = tile.classList.contains('drop-after');
+      clearDropHints();
+      const id = draggedFolderId(e);
+      draggingFolder = null;
+      if (!id || id === folder.id) return;
+      if (before || after) o.onPlaceFolders([id], folder.parentId || null, folder.id, after);
+      else o.onPlaceFolders([id], folder.id, null, true);
+    });
+  }
+  // 放進 folderId（null＝這個區域的最上層）。麵包屑（acceptFolders）也收資料夾方框。
+  function makeDropTarget(el, folderId, o, acceptFolders) {
+    if (!o.onMoveNotes) return el;
+    const wantsFolder = function (e) {
+      return acceptFolders && o.onPlaceFolders && isFolderDrag(e) && draggingFolder !== folderId;
+    };
+    el.addEventListener('dragover', function (e) {
+      if (!isNoteDrag(e) && !wantsFolder(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('drop-target');
+    });
+    el.addEventListener('dragleave', function () { el.classList.remove('drop-target'); });
+    el.addEventListener('drop', function (e) {
+      if (wantsFolder(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        clearDropHints();
+        const id = draggedFolderId(e);
+        draggingFolder = null;
+        if (id) o.onPlaceFolders([id], folderId, null, true);
+        return;
+      }
+      if (!isNoteDrag(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      clearDropHints();
+      const ids = draggedNoteIds(e);
+      dragging = null;
+      if (ids.length) o.onMoveNotes(ids, folderId);
+    });
+    return el;
+  }
+
   function go(folderId, user) {
     folderId = folderId || null;
     const moved = folderId !== curFolderId;
@@ -263,6 +416,7 @@
       c.type = 'button';
       if (isCurrent) c.setAttribute('aria-current', 'page');
       else { c.title = '回到「' + label + '」'; c.addEventListener('click', function () { go(folderId, true); }); }
+      makeDropTarget(c, folderId, o, true);
       return c;
     }
     nav.appendChild(crumb(o.title || '筆記', o.icon, null, !curFolderId));
@@ -356,6 +510,8 @@
     // 刪除都在選單裡（選單本身是 app.js 的 showFolderMenu，首頁跟這裡共用同一個）。
     const tile = el('div', 'dash-folder-tile');
     tile.dataset.id = folder.id;
+    makeDropTarget(tile, folder.id, o);
+    makeFolderTileDnD(tile, folder, o);
     tile.tabIndex = 0;
     tile.setAttribute('role', 'button');
     tile.title = '打開資料夾';
@@ -411,6 +567,8 @@
     const pinned = isPinned(note);
     const wrap = el('div', 'dash-note-wrap' + (pinned ? ' pinned' : ''));
     wrap.dataset.id = note.id;
+    makeNoteDraggable(wrap, note, o);
+    makeNoteRowDrop(wrap, note, o);
 
     if (o.selection) {
       if (o.selection.has(note.id)) wrap.className += ' selected';
@@ -466,6 +624,8 @@
     const f = fileOf(note), kind = fileKind(f);
     const wrap = el('div', 'dash-note-wrap ab-file-wrap');
     wrap.dataset.id = note.id;
+    makeNoteDraggable(wrap, note, o);
+    makeNoteRowDrop(wrap, note, o);
     const row = el('div', 'dash-row');
     row.tabIndex = 0;
     row.setAttribute('role', 'button');
@@ -520,6 +680,7 @@
     card.dataset.color = STICKY_COLORS.indexOf(st.color) >= 0 ? st.color : 'yellow';
 
     const bar = el('div', 'ab-sticky-bar');
+    if (!readOnly) { makeNoteDraggable(bar, note, o); bar.title = '拖這裡可以搬到其他資料夾'; }
     if (!readOnly) {
       const dots = el('div', 'ab-sticky-colors');
       STICKY_COLORS.forEach(function (c) {
@@ -726,21 +887,29 @@
     container._abDrop = true;
     let depth = 0;
     function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; }
-    function off() { depth = 0; container.classList.remove('ab-dropping'); }
+    function off() {
+      depth = 0; container.classList.remove('ab-dropping');
+      container.querySelectorAll('.dash-folder-tile.drop-target').forEach(function (x) { x.classList.remove('drop-target'); });
+    }
     container.addEventListener('dragenter', function (e) {
       if (!lastOpts || !lastOpts.onUploadFile || !hasFiles(e)) return;
       e.preventDefault(); depth++; container.classList.add('ab-dropping');
     });
+    function tileAt(e) { return e.target && e.target.closest ? e.target.closest('.dash-folder-tile') : null; }
     container.addEventListener('dragover', function (e) {
       if (!lastOpts || !lastOpts.onUploadFile || !hasFiles(e)) return;
       e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
       container.classList.add('ab-dropping');   // 拖到一半畫面重畫過、漏了 dragenter 也照樣亮
+      const t = tileAt(e);
+      container.querySelectorAll('.dash-folder-tile.drop-target').forEach(function (x) { if (x !== t) x.classList.remove('drop-target'); });
+      if (t) t.classList.add('drop-target');
     });
     container.addEventListener('dragleave', function () { if (--depth <= 0) off(); });
     container.addEventListener('drop', function (e) {
       if (!lastOpts || !lastOpts.onUploadFile || !hasFiles(e)) return;
+      const t = tileAt(e);
       e.preventDefault(); off();
-      if (e.dataTransfer.files && e.dataTransfer.files.length) queueUploads(e.dataTransfer.files, lastOpts);
+      if (e.dataTransfer.files && e.dataTransfer.files.length) queueUploads(e.dataTransfer.files, lastOpts, t ? t.dataset.id : undefined);
     });
   }
 
