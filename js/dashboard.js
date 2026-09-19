@@ -616,7 +616,10 @@
         return tags.some(function (t) { return t.toLowerCase() === key; });
       }));
       const sec = el('section', 'dash-section');
-      sec.appendChild(sectionHead('file-text', '筆記', matches.length));
+      const mh = sectionHead('file-text', '筆記', matches.length);
+      const msa = selAllButton(matches, o);
+      if (msa) mh.appendChild(msa);
+      sec.appendChild(mh);
       const body = el('div', 'dash-list');
       if (!matches.length) body.appendChild(emptyState('tag', '沒有帶有 #' + tagFilter + ' 的筆記。'));
       matches.forEach(function (n) { body.appendChild(makeNoteRow(n, o)); });
@@ -657,7 +660,10 @@
     }
 
     const sec2 = el('section', 'dash-section');
-    sec2.appendChild(sectionHead('file-text', curFolderId ? '筆記' : '未歸類筆記', ns.length));
+    const h2 = sectionHead('file-text', curFolderId ? '筆記' : '未歸類筆記', ns.length);
+    const sa = selAllButton(ns, o);
+    if (sa) h2.appendChild(sa);
+    sec2.appendChild(h2);
     const body = el('div', 'dash-list');
     if (!ns.length) {
       body.appendChild(emptyState('file-text',
@@ -673,6 +679,21 @@
   function emptyState(icon, text) {
     return el('div', 'dash-empty', ic(icon) + '<span>' + esc(text) + '</span>');
   }
+  // 「全選」：這一段列出來的筆記一次勾起來，再按一次全部取消；批次的移動／刪除在側邊欄的批次列。
+  // 字（全選／取消全選）由 _label 算，app.js 在勾選有變的時候（逐一勾、從側邊欄勾、按 ✕ 清掉）
+  // 都會叫一次，所以不會跟實際狀態對不上。
+  function selAllButton(list, o) {
+    const ids = list.filter(function (n) { return !n.perm || n.perm === 'owner'; }).map(function (n) { return n.id; });
+    if (!o.selection || !o.selection.setMany || !ids.length) return null;
+    const b = el('button', 'dash-selall');
+    b.type = 'button';
+    function allOn() { return ids.every(function (id) { return o.selection.has(id); }); }
+    b._label = function () { b.textContent = allOn() ? '取消全選' : '全選'; };
+    b._label();
+    b.addEventListener('click', function (e) { e.stopPropagation(); o.selection.setMany(ids, !allOn()); });
+    return b;
+  }
+
 
   // ---- 進入點 ------------------------------------------------------------
   function paint() {

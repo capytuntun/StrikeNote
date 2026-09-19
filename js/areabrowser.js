@@ -626,6 +626,20 @@
     wrap.dataset.id = note.id;
     makeNoteDraggable(wrap, note, o);
     makeNoteRowDrop(wrap, note, o);
+    if (o.selection) {
+      if (o.selection.has(note.id)) wrap.className += ' selected';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'dash-note-check';
+      cb.checked = o.selection.has(note.id);
+      cb.title = '選取';
+      cb.addEventListener('click', function (e) { e.stopPropagation(); });
+      cb.addEventListener('change', function () {
+        o.selection.toggle(note.id, cb.checked);
+        wrap.classList.toggle('selected', cb.checked);
+      });
+      wrap.appendChild(cb);
+    }
     const row = el('div', 'dash-row');
     row.tabIndex = 0;
     row.setAttribute('role', 'button');
@@ -822,6 +836,21 @@
       ic(icon) + '<span>' + esc(label) + '</span><span class="dash-section-count">' + count + '</span>');
   }
   function emptyState(icon, text) { return el('div', 'dash-empty', ic(icon) + '<span>' + esc(text) + '</span>'); }
+  // 「全選」：這一段列出來的筆記一次勾起來，再按一次全部取消；批次的移動／刪除在側邊欄的批次列。
+  // 字（全選／取消全選）由 _label 算，app.js 在勾選有變的時候（逐一勾、從側邊欄勾、按 ✕ 清掉）
+  // 都會叫一次，所以不會跟實際狀態對不上。
+  function selAllButton(list, o) {
+    const ids = list.filter(function (n) { return !n.perm || n.perm === 'owner'; }).map(function (n) { return n.id; });
+    if (!o.selection || !o.selection.setMany || !ids.length) return null;
+    const b = el('button', 'dash-selall');
+    b.type = 'button';
+    function allOn() { return ids.every(function (id) { return o.selection.has(id); }); }
+    b._label = function () { b.textContent = allOn() ? '取消全選' : '全選'; };
+    b._label();
+    b.addEventListener('click', function (e) { e.stopPropagation(); o.selection.setMany(ids, !allOn()); });
+    return b;
+  }
+
 
   function renderBody(o) {
     const frag = document.createDocumentFragment();
@@ -856,7 +885,10 @@
     // 只放檔案的資料夾（一週的投影片跟錄影）不需要一段「還沒有筆記」擋在檔案上面
     if (ns.length || !(files.length || ups.length || stickies.length)) {
       const sec2 = el('section', 'dash-section');
-      sec2.appendChild(sectionHead('file-text', curFolderId ? '筆記' : '未歸類筆記', ns.length));
+      const h2 = sectionHead('file-text', curFolderId ? '筆記' : '未歸類筆記', ns.length);
+      const sa = selAllButton(ns, o);
+      if (sa) h2.appendChild(sa);
+      sec2.appendChild(h2);
       const list = el('div', 'dash-list');
       if (!ns.length) list.appendChild(emptyState('file-text', o.emptyHint || (curFolderId ? '這個資料夾裡還沒有筆記。' : '還沒有筆記。')));
       ns.forEach(function (n) { list.appendChild(makeNoteRow(n, o)); });
@@ -868,7 +900,10 @@
     // 也顯示這一段（當作拖放的落點跟提示）；沒有上傳功能的區域只在真的有檔案時才出現。
     if (o.onUploadFile || files.length || ups.length) {
       const sec3 = el('section', 'dash-section');
-      sec3.appendChild(sectionHead('paperclip', '檔案', files.length));
+      const h3 = sectionHead('paperclip', '檔案', files.length);
+      const fsa = selAllButton(files, o);
+      if (fsa) h3.appendChild(fsa);
+      sec3.appendChild(h3);
       const flist = el('div', 'dash-list');
       ups.forEach(function (u) { flist.appendChild(makeUploadRow(u)); });
       if (!files.length && !ups.length) {

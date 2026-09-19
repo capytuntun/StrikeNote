@@ -338,6 +338,7 @@
         row.classList.toggle('selected', cb.checked);
         syncDashCheck(note.id, cb.checked);   // 反映到儀表板「所有筆記」
         updateBatchBar();
+        syncSelAll();
       });
     }
     row.addEventListener('click', function () {
@@ -569,6 +570,7 @@
     selected.forEach(function (id) { syncDashCheck(id, false); });
     selected.clear();
     selectedFolders.clear();
+    syncSelAll();
     treeEl.querySelectorAll('.tree-row.selected').forEach(function (r) {
       r.classList.remove('selected');
       const cb = r.querySelector('.tree-check'); if (cb) cb.checked = false;
@@ -608,8 +610,23 @@
       if (on) selected.add(id); else selected.delete(id);
       syncTreeCheck(id, on);   // 反映到側邊欄
       updateBatchBar();
+      syncSelAll();
+    },
+    // 「全選／取消全選」：一次勾（或取消）一整批，頁面上的勾選框、側邊欄、批次列一起更新
+    setMany: function (ids, on) {
+      ids.forEach(function (id) {
+        if (on) selected.add(id); else selected.delete(id);
+        syncTreeCheck(id, on);
+        syncDashCheck(id, on);
+      });
+      updateBatchBar();
+      syncSelAll();
     }
   };
+  // 頁面上每顆「全選」鈕（dashboard.js／areabrowser.js 的 .dash-selall）依目前的勾選重寫自己的字
+  function syncSelAll() {
+    document.querySelectorAll('.dash-selall').forEach(function (b) { if (b._label) b._label(); });
+  }
   // 批次動作後同時刷新側邊欄與（若正在顯示的）儀表板 / 四個獨立區域頁面
   function refreshViews() {
     renderTree();

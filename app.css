@@ -3439,11 +3439,11 @@ div.ver-item.ver-now { cursor: default; }
 
 .trash-section.is-soon .dash-section-head { color: var(--danger); }
 .trash-section.is-soon .dash-section-count { color: var(--danger); background: var(--danger-weak); }
-.trash-selall {
+.trash-selall, .dash-selall {
   margin-left: auto; padding: 2px 8px; border: 0; background: none; cursor: pointer;
   font: inherit; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text-dim);
 }
-.trash-selall:hover { color: var(--accent); background: var(--accent-weak); }
+.trash-selall:hover, .dash-selall:hover { color: var(--accent); background: var(--accent-weak); }
 
 .trash-row-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .trash-row-text .dash-row-title { flex: none; }
