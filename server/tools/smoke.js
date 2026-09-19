@@ -147,6 +147,25 @@ async function main() {
   r = await call(admin, 'PUT', '/api/notes/' + noteIds[1], { title: base.title, content: b.join('\n'), baseContent: base.content, folderId: fid });
   ok(r.status === 200 && r.data.note.content.includes('A 改標題行') && r.data.note.content.includes('B 加了一行'),
     'merge: second save keeps both edits', r.data.note && r.data.note.content);
+  // Same line, different places: merged word by word, not "last save takes the line".
+  let mcur = (await call(admin, 'GET', '/api/notes/' + noteIds[1])).data.note;
+  const line = '共同的一行：今天討論報告內容';
+  const cbase = mcur.content + '\n' + line;
+  r = await call(admin, 'PUT', '/api/notes/' + noteIds[1], { title: mcur.title, content: cbase, baseContent: mcur.content, folderId: fid });
+  mcur = r.data.note;
+  await call(admin, 'PUT', '/api/notes/' + noteIds[1], { title: mcur.title, content: cbase.replace('今天', '今天下午'), baseContent: cbase, folderId: fid });
+  r = await call(admin, 'PUT', '/api/notes/' + noteIds[1], { title: mcur.title, content: cbase.replace('報告', '期末報告'), baseContent: cbase, folderId: fid });
+  ok(r.status === 200 && r.data.note.content.endsWith('共同的一行：今天下午討論期末報告內容'), 'merge: same line, different places → both kept', r.data.note && r.data.note.content.slice(-40));
+  // Same spot: both typed right there → both kept.
+  const sbase = r.data.note.content;
+  await call(admin, 'PUT', '/api/notes/' + noteIds[1], { title: mcur.title, content: sbase + '【甲】', baseContent: sbase, folderId: fid });
+  r = await call(admin, 'PUT', '/api/notes/' + noteIds[1], { title: mcur.title, content: sbase + '【乙】', baseContent: sbase, folderId: fid });
+  ok(r.status === 200 && r.data.note.content.includes('【甲】') && r.data.note.content.includes('【乙】'), 'merge: same spot → both kept', r.data.note && r.data.note.content.slice(-20));
+  // A save measured against a stale base re-sends text the server already has: not added twice.
+  const now = r.data.note.content;
+  r = await call(admin, 'PUT', '/api/notes/' + noteIds[1], { title: mcur.title, content: now + '\n再加一行', baseContent: '', folderId: fid });
+  ok(r.status === 200 && r.data.note.content.split('共同的一行').length === 2 && r.data.note.content.endsWith('再加一行'),
+    'merge: a stale-base save does not duplicate the note', r.data.note && r.data.note.content.length);
 
   section('shares + site-wide access');
   r = await call(bob, 'GET', '/api/notes/' + noteIds[0]);

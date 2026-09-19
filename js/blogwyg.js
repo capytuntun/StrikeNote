@@ -177,6 +177,20 @@
     return block;
   }
 
+  // 游標放到排版後純文字的第 n 個字（跟 Range.toString 同一種數法）。超過就放到最後。
+  function setTextOffset(el, n) {
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let node, left = Math.max(0, n);
+    while ((node = walk.nextNode())) {
+      if (left <= node.nodeValue.length) {
+        const r = document.createRange();
+        r.setStart(node, left); r.collapse(true); sel(r);
+        return;
+      }
+      left -= node.nodeValue.length;
+    }
+    caretToEnd(el);
+  }
   function caretToStart(el) { const r = document.createRange(); r.selectNodeContents(el); r.collapse(true); sel(r); }
   function caretToEnd(el) { const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); sel(r); }
   function sel(range) { const s = global.getSelection(); s.removeAllRanges(); s.addRange(range); }
@@ -656,6 +670,9 @@
     try { block.focus({ preventScroll: true }); } catch (e) { block.focus(); }
     if (caret === 'start') caretToStart(inner);
     else if (caret === 'end') caretToEnd(inner);
+    else if (caret && typeof caret === 'object' && typeof caret.textOffset === 'number') {
+      setTextOffset(inner, caret.textOffset);   // 協作：別人的修改進來、重排之後放回原本那個字
+    }
     else if (caret && typeof caret === 'object' && document.caretRangeFromPoint) {
       // 點在排版好的哪個字上，游標就放哪
       const r = document.caretRangeFromPoint(caret.x, caret.y);
@@ -665,6 +682,17 @@
     return {
       block: block,
       getMd: function () { return serialize(block); },
+      // 協作重排用：這一塊排版後的純文字，以及游標在其中的位置（跟 setTextOffset 同一種算法）
+      text: function () { const r = document.createRange(); r.selectNodeContents(inner); return r.toString(); },
+      setCaretOffset: function (n) { setTextOffset(inner, n); },
+      caretOffset: function () {
+        const s = global.getSelection();
+        if (!s.rangeCount || !block.contains(s.anchorNode)) return null;
+        const r = document.createRange();
+        r.selectNodeContents(inner);
+        r.setEnd(s.anchorNode, s.anchorOffset);
+        return r.toString().length;
+      },
       focus: function () { try { block.focus({ preventScroll: true }); } catch (e) { block.focus(); } },
       destroy: function () {
         closeSlash();

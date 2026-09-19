@@ -2283,10 +2283,13 @@
     lastSentPos = -1;
   }
 
-  // Map a caret offset from the pre-merge text onto the merged text, keeping the
-  // caret put when the edit landed elsewhere. Best-effort: exact within an
-  // unchanged prefix/suffix, otherwise anchored at the start of the change.
+  // Map a caret offset from the pre-merge text onto the merged text. Merge.mapOffset
+  // follows the actual changes (by line, then word by word inside a changed line); the
+  // prefix/suffix version below it is only a fallback, and it was the whole story until
+  // edits both above and below the caret (two other people typing) threw the caret
+  // back to the first edit — the next keystrokes then landed in someone else's words.
   function mapCaret(oldV, newV, caret) {
+    if (window.Merge && Merge.mapOffset) return Merge.mapOffset(oldV, newV, caret);
     const max = Math.min(oldV.length, newV.length);
     let p = 0;
     while (p < max && oldV[p] === newV[p]) p++;
@@ -2301,17 +2304,20 @@
     const oldV = editorEl.value;
     if (merged === oldV) return;
     const focused = document.activeElement === editorEl;
-    const caret = editorEl.selectionStart;
+    const caret = editorEl.selectionStart, caretEnd = editorEl.selectionEnd;
     const scroll = editorEl.scrollTop;
     editorEl.value = merged;
+    shiftRemoteCarets(merged);
     // Blog mode 要馬上知道，不能等 renderPreview 的 120ms：那段時間裡再打一個字，
     // blogmode.js 會拿舊內容去換行，把這次合併進來的修改蓋掉。
     if (state.mode === 'blog' && window.BlogMode) {
       BlogMode.update(merged, !!(state.current && state.current.perm === 'read'));
     }
     if (focused) {
+      // both ends, so a selection someone is about to format survives a merge elsewhere
       const c = mapCaret(oldV, merged, caret);
-      try { editorEl.selectionStart = editorEl.selectionEnd = c; } catch (e) {}
+      const ce = caretEnd === caret ? c : Math.max(c, mapCaret(oldV, merged, caretEnd));
+      try { editorEl.setSelectionRange(c, ce); } catch (e) {}
     }
     editorEl.scrollTop = scroll;
     if (editorEl._hlRefresh) editorEl._hlRefresh();
@@ -2355,10 +2361,13 @@
   }
 
   // Render the avatars of other people viewing this note (self excluded).
+  // How many other people have this note open right now (see scheduleSave).
+  let collaborators = 0;
   function renderPresence(users) {
-    if (!presenceEl) return;
     const me = (window.Auth && Auth.user && Auth.user()) ? Auth.user().username : null;
     const others = (users || []).filter(function (u) { return u !== me; });
+    collaborators = others.length;
+    if (!presenceEl) return;
     presenceEl.innerHTML = '';
     others.slice(0, 5).forEach(function (u) {
       const dot = document.createElement('span');
@@ -2388,6 +2397,7 @@
   // markdown textarea. Positions are measured with a hidden mirror div that copies
   // the textarea's exact text metrics, then offset by the current scroll.
   const remoteCarets = {};     // username -> { pos, el }
+  let caretText = null;        // the text those offsets refer to (see shiftRemoteCarets)
   let caretMirror = null;
   let caretRAF = null;
 
@@ -2482,6 +2492,7 @@
       rc = remoteCarets[payload.by] = { pos: 0, el: el };
     }
     rc.pos = payload.pos || 0;
+    if (caretText == null) caretText = editorEl.value;
     scheduleCaretRender();
   }
 
@@ -2493,6 +2504,20 @@
   }
   function clearRemoteCarets() {
     Object.keys(remoteCarets).forEach(removeRemoteCaret);
+    caretText = null;
+  }
+  // Remote carets are offsets into MY text. When my text changes — my own typing, or a
+  // merge coming in — every caret after the change has to move with the text it sits
+  // in. Before this they stayed put by offset: someone parked at the end of line 5
+  // slid into line 4 as I typed above them, and stayed wrong until they moved again.
+  function shiftRemoteCarets(newV) {
+    const oldV = caretText;
+    caretText = newV;
+    if (oldV == null || oldV === newV) return;
+    Object.keys(remoteCarets).forEach(function (name) {
+      remoteCarets[name].pos = mapCaret(oldV, newV, remoteCarets[name].pos);
+    });
+    scheduleCaretRender();
   }
   // Drop carets for anyone who has left (per the presence list).
   function pruneRemoteCarets(users) {
@@ -2558,11 +2583,16 @@
   }
 
   let saveTimer = null;
+  // Alone, a save half a second after the last keystroke is plenty. With someone else in
+  // the note, that half second is also how late they see each word, so it drops to
+  // 150 ms — still one save per burst of typing, and still only one in flight at a time
+  // (saveNow queues the rest), so the server sees a few small saves a second at most.
+  const SAVE_DELAY = 500, SAVE_DELAY_SHARED = 150;
   function scheduleSave() {
     if (state.current && state.current.perm === 'read') return;
     statusSave.textContent = '編輯中…';
     if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveNow, 500);
+    saveTimer = setTimeout(saveNow, collaborators ? SAVE_DELAY_SHARED : SAVE_DELAY);
   }
   // One save per note at a time. While a PUT is on its way the server may or may
   // not have applied it yet, so `_syncContent` stops being a common ancestor of
@@ -2692,6 +2722,7 @@
     const cur = state.current;
     if (!cur || cur.perm === 'read' || state.mode !== 'blog' || cur.id !== blogNoteId) return;
     editorEl.value = text;
+    shiftRemoteCarets(text);
     scheduleSave();
     updateStatus();
     danceCapybara();
@@ -4339,6 +4370,7 @@
       updateStatus();
       danceCapybara();
       scheduleSendCursor();     // my caret moved
+      shiftRemoteCarets(editorEl.value);   // others' carets move with the text they sit in
       scheduleCaretRender();    // text reflowed → reposition others' carets
     });
     editorEl.addEventListener('paste', handlePaste);

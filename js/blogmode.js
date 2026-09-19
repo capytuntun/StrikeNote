@@ -1139,8 +1139,27 @@
     const roChanged = ro != null && !!ro !== readOnly;
     if (ro != null) readOnly = !!ro;
     if (text === src && !roChanged) return;
-    // WYSIWYG 區塊打的字每一下都已寫回原始碼，遠端更新時直接放下編輯重排即可，不會丟東西
-    if (!ed || readOnly || ed.wyg) { detach(); src = text; render(); return; }
+    // 所見即所得編輯中：每個字都已經寫回原始碼，所以可以放心重排——但重排完要把人放回同一塊、
+    // 同一個字。以前是直接放下編輯：別人在另一段打字時，這邊每 150ms 就被踢出來一次，
+    // 打到一半的字沒有地方去。這一塊本身也被別人改了的話，用 Merge.mapOffset 把游標對到
+    // 新的文字上（跟一般編輯器同一套）。
+    if (ed && ed.wyg && !readOnly) {
+      const e = ed, oldPlain = ed.wyg.text(), off = ed.wyg.caretOffset();
+      const body = splitLines(src).slice(e.line0 - 1, e.line0 - 1 + e.count);
+      const at = findLines(splitLines(text), body, e.line0 - 1);
+      const keep = scroller ? scroller.scrollTop : 0;
+      detach(); src = text; render();
+      if (off != null) {
+        editAtLine(at >= 0 ? at + 1 : e.line0, { textOffset: off });
+        if (ed && ed.wyg && global.Merge && Merge.mapOffset) {
+          const now = ed.wyg.text();
+          if (now !== oldPlain) ed.wyg.setCaretOffset(Merge.mapOffset(oldPlain, now, off));
+        }
+      }
+      if (scroller) scroller.scrollTop = keep;   // 別人的修改不該把畫面捲走
+      return;
+    }
+    if (!ed || readOnly) { detach(); src = text; render(); return; }
     const caret = ta.selectionStart;
     const body = ta.value === '' ? [] : ed.prefix.concat(ta.value.split('\n'), ed.suffix);
     const at = findLines(splitLines(text), body, ed.line0 - 1);
