@@ -57,6 +57,65 @@
     if (n >= 1024) return Math.round(n / 1024) + ' KB';
     return n + ' B';
   }
+  // ---- 圖片縮圖與滑過預覽 ----
+  // 圖片檔在清單裡直接顯示縮圖（蓋在類型圖示上，載入成功才換上去；HEIC／TIFF 這種伺服器
+  // 當附件送的格式解不出來，就留著原本的圖示）。沒有伺服器端縮圖：跟檔案管理一樣直接抓
+  // /api/images/<id>、loading=lazy。<img> 元素以檔案 id 快取、每次 render 只是重新掛上去，
+  // 所以畫面重畫（上傳完成、改名、移動）不會讓縮圖重抓或閃一下。
+  const thumbCache = new Map();   // file id -> <img>
+  function attachThumb(host, f) {
+    const src = '/api/images/' + encodeURIComponent(f.id);
+    if (thumbCache.get(f.id) === null) return;   // 這個工作階段已經試過、解不出來：維持一般圖示，不再重抓
+    let im = thumbCache.get(f.id);
+    if (!im) {
+      im = document.createElement('img');
+      im.className = 'ab-thumb-img';
+      im.alt = ''; im.loading = 'lazy'; im.decoding = 'async'; im.draggable = false;
+      im.addEventListener('load', function () { im._ok = true; if (im.parentNode) im.parentNode.classList.add('has-thumb'); });
+      im.addEventListener('error', function () {
+        thumbCache.set(f.id, null);
+        if (im.parentNode) im.parentNode.classList.remove('ab-thumb');   // 縮回一般圖示的大小
+        im.remove();
+      });
+      im.src = src;
+      thumbCache.set(f.id, im);
+    }
+    host.classList.add('ab-thumb');
+    if (im._ok) host.classList.add('has-thumb');
+    host.appendChild(im);
+    // 滑到縮圖上浮出大一點的預覽；觸控裝置沒有 hover，點下去就是檢視器
+    host.addEventListener('mouseenter', function () { if (im._ok) showPop(host, src, im); });
+    host.addEventListener('mouseleave', hidePop);
+  }
+  let popEl = null;
+  function hidePop() { if (popEl) { popEl.remove(); popEl = null; } }
+  // 預覽放在這一列的「下面」（下面沒位置就放上面），不放旁邊：放旁邊會蓋住檔名，包括正在看
+  // 的這一列自己的。框的大小照圖片比例算好再放，直式的圖不會留兩條大白邊。
+  function showPop(host, src, im) {
+    hidePop();
+    if (!global.matchMedia || !global.matchMedia('(hover: hover)').matches) return;
+    const MAXW = 380, MAXH = 300, PAD = 6, GAP = 6;
+    const nw = im.naturalWidth || MAXW, nh = im.naturalHeight || MAXH;
+    if (nw <= 80 && nh <= 80) return;                        // 本來就是小圖示，縮圖已經是全貌
+    const k = Math.min(MAXW / nw, MAXH / nh, 1);
+    const w = Math.max(48, Math.round(nw * k)), h = Math.max(48, Math.round(nh * k));
+    const bw = w + PAD * 2 + 2, bh = h + PAD * 2 + 2;
+    const r = (host.closest('.dash-note-wrap') || host).getBoundingClientRect();
+    const hr = host.getBoundingClientRect();
+    let top = r.bottom + GAP;
+    if (top + bh > global.innerHeight - 8) top = r.top - GAP - bh;
+    if (top < 8) return;                                     // 上下都放不下（很矮的視窗）就不浮
+    const pop = el('div', 'ab-thumb-pop');                   // body 的子元素：一定是 position: fixed
+    const big = document.createElement('img');
+    big.alt = ''; big.width = w; big.height = h; big.src = src;   // 同一個網址，瀏覽器直接拿已經載入的那份
+    pop.appendChild(big);
+    pop.style.left = Math.round(Math.max(8, Math.min(hr.left, global.innerWidth - bw - 8))) + 'px';
+    pop.style.top = Math.round(top) + 'px';
+    document.body.appendChild(pop);
+    popEl = pop;
+  }
+  global.addEventListener('scroll', hidePop, true);
+
   // 正在上傳的檔案（跨 render 保留：上傳中切資料夾、別處觸發 refresh 都不會讓進度列消失）。
   // 一次傳一個，其餘排隊——大影片同時開好幾條只會互搶頻寬。
   let uploads = [];   // { key, name, size, sent, folderId, error, bar, pct }
@@ -321,7 +380,9 @@
     const row = el('div', 'dash-row');
     row.tabIndex = 0;
     row.setAttribute('role', 'button');
-    row.appendChild(el('span', 'dash-row-ic ab-file-ic ab-file-' + kind.cls, ic(kind.icon)));
+    const icEl = el('span', 'dash-row-ic ab-file-ic ab-file-' + kind.cls, ic(kind.icon));
+    if (kind.cls === 'img') attachThumb(icEl, f);
+    row.appendChild(icEl);
     const titleEl = el('span', 'dash-row-title', esc(note.title || f.name || '未命名檔案'));
     row.appendChild(titleEl);
     const meta = el('span', 'dash-row-meta');
@@ -329,7 +390,7 @@
     meta.appendChild(el('span', 'ab-file-size', esc(fmtSize(f.size))));
     meta.appendChild(el('span', 'dash-row-time', esc(relTime(note.updatedAt))));
     row.appendChild(meta);
-    function open() { if (o.onOpenFile) o.onOpenFile(note); }
+    function open() { hidePop(); if (o.onOpenFile) o.onOpenFile(note); }
     row.addEventListener('click', open);
     row.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); open(); } });
     wrap.appendChild(row);
@@ -493,6 +554,7 @@
     lastOpts = opts;
     if (!keepPos) curFolderId = null;
     const container = opts.container;
+    hidePop();
     bindDrop(container);
     container.innerHTML = '';
     container.appendChild(renderHead(opts));
@@ -506,6 +568,6 @@
     openFolder: function (id) { go(id || null); },
     // app.js 的檔案檢視器用同一套分類／大小寫法，列表跟檢視器才不會各說各話
     fileKind: fileKind, fmtSize: fmtSize,
-    reset: function () { curFolderId = null; lastOpts = null; }
+    reset: function () { curFolderId = null; lastOpts = null; hidePop(); thumbCache.clear(); }
   };
 })(window);

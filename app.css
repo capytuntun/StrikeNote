@@ -980,6 +980,25 @@ mark.search-hit {
   min-width: 64px; text-align: right; white-space: nowrap;
 }
 a.dash-row-act { text-decoration: none; }
+/* 圖片檔：類型圖示的位置換成縮圖。比一般圖示大（40px，看得出是哪張圖），上下用負邊界
+   吃回去，所以這一列跟其他檔案列一樣高。載入成功（.has-thumb）才蓋掉圖示。 */
+.ab-file-ic.ab-thumb {
+  position: relative; width: 40px; height: 40px; margin: -7px 0; overflow: hidden;
+  border: 1px solid var(--border); cursor: zoom-in;
+}
+.ab-thumb-img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  opacity: 0; transition: opacity .15s; background: #fff;
+}
+.ab-thumb.has-thumb .ab-thumb-img { opacity: 1; }
+.ab-thumb.has-thumb .ic-svg { visibility: hidden; }
+/* 滑過縮圖的大預覽：body 的子元素，所以是 fixed；不吃滑鼠事件，不會擋到下面幾列的點擊 */
+.ab-thumb-pop {
+  position: fixed; z-index: 900; padding: 6px;
+  background: var(--bg); border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow); pointer-events: none;
+}
+.ab-thumb-pop img { display: block; background: #fff; }   /* 寬高由 js 照比例設好 */
 /* 上傳中的一列：跟檔案列同寬同高，進度條在檔名下面 */
 /* 右邊留出檔案列那四顆動作鈕的寬度（4×28 + 3），大小／百分比才會跟下面的欄位對齊 */
 .ab-upload {
