@@ -36,7 +36,7 @@ function uid(prefix) {
 // row").
 const AREAS = ['course', 'knowledge', 'quick', 'novel'];
 function normalizeArea(a) { return AREAS.indexOf(a) >= 0 ? a : null; }
-// 所有筆記／證照課程筆記／知識區 之間可以互相搬——novel 有解鎖的安全考量、quick
+// 所有筆記／課程筆記／知識區 之間可以互相搬——novel 有解鎖的安全考量、quick
 // 沒有資料夾概念，兩個都刻意不讓這個功能碰，維持它們原本各自的規則。
 const MOVABLE_AREAS = [null, 'course', 'knowledge'];
 
@@ -158,7 +158,7 @@ async function createNote(user, body) {
   return shapeNote(await q.noteById.get(id), 'owner');
 }
 
-// 在 所有筆記／證照課程筆記／知識區 之間搬一篇筆記——這三個都是一般的資料夾式
+// 在 所有筆記／課程筆記／知識區 之間搬一篇筆記——這三個都是一般的資料夾式
 // 區域，跟建立筆記一樣的規則：目標資料夾（如果有指定）必須屬於目標區域。只有
 // 擁有者可以做，而且來源、目標都得是 MOVABLE_AREAS 之一（novel/quick 兩邊都不
 // 給碰，見 MOVABLE_AREAS 的說明）。手動排序的 position 重置成 NULL——它在舊區域
@@ -701,20 +701,49 @@ async function restoreNote(user, id) {
   if (!r.affectedRows) return { status: 404 };
   return { note: shapeNote(await q.noteById.get(id), 'owner') };
 }
+// A "file note" (meta.file, made by uploading into an area folder — js/app.js) is only
+// the folder entry for an upload. When the note is deleted for good its file goes with it,
+// unless some other note still references it — otherwise a purged 500 MB lecture video
+// would sit in the file library forever as "unused". Two steps, in this order: read the
+// file id off the row (fileOfNoteRow) BEFORE the note is deleted, drop the file
+// (dropFileIfUnused) AFTER — checked against the notes that are left, trashed ones
+// included, so two trashed notes naming one file cannot keep each other's file alive when
+// the trash is emptied. If the second step fails the file merely shows as unused in the
+// library. An id that is a prefix of another id reads as "still used": the safe direction.
+function fileOfNoteRow(row) {
+  let meta = null;
+  try { meta = row && row.meta ? JSON.parse(row.meta) : null; } catch (e) { meta = null; }
+  const fid = meta && meta.file && meta.file.id;
+  return fid && /^[\w.-]+$/.test(fid) ? { id: fid, ownerId: row.owner_id } : null;
+}
+async function dropFileIfUnused(f) {
+  if (!f) return;
+  if (await q.mediaUsedElsewhere.get('', 'img:' + f.id, 'pdf:' + f.id, 'file:' + f.id)) return;
+  await q.deleteImage.run(f.id, f.ownerId);   // owner-scoped: never someone else's upload
+}
 async function purgeNote(user, id) {
-  if (!(await trashedRowOf(user, id))) return { status: 404 };
+  const row = await trashedRowOf(user, id);
+  if (!row) return { status: 404 };
+  const f = fileOfNoteRow(row);
   await q.deleteNote.run(id);
+  await dropFileIfUnused(f);
   return { ok: true };
 }
 async function emptyTrash(user) {
+  const files = (await q.trashedFileNotesOf.all(user.id)).map(fileOfNoteRow);
   const r = await q.purgeTrashOf.run(user.id);
+  for (const f of files) await dropFileIfUnused(f);
   return { ok: true, purged: r.affectedRows };
 }
 // Retention sweep (server.js runs it at start and hourly). One hard delete per
 // row so the FK cascades do the same work they do for a manual purge.
 async function purgeExpiredTrash() {
   const rows = await q.trashExpired.all(Date.now() - trashKeepMs());
-  for (const r of rows) await q.deleteNote.run(r.id);
+  for (const r of rows) {
+    const f = fileOfNoteRow(await q.noteById.get(r.id));
+    await q.deleteNote.run(r.id);
+    await dropFileIfUnused(f);
+  }
   return rows.length;
 }
 
@@ -815,6 +844,57 @@ async function saveOrder(user, body) {
 }
 
 // ---------------- images ----------------
+// Chunked uploads: a file too big for one request (MAX_BODY_BYTES) or one packet
+// (max_allowed_packet) arrives as fixed-size chunks, each stored as its own row. The image
+// row is `pending` until finishUpload has counted every byte, so a half-uploaded file is
+// never listed, served or backed up; abandoned ones are swept hourly. A retried chunk is
+// recognised by its sequence number and not appended twice. 8 MiB fits the default
+// MAX_BODY_BYTES (25 MB), MariaDB's stock max_allowed_packet (16 MB) and any tunnel; an
+// operator who lowered MAX_BODY_BYTES below that gets chunks that still fit one request.
+const UPLOAD_CHUNK = Math.max(64 * 1024, Math.min(8 * 1024 * 1024, config.maxBodyBytes || Infinity));
+async function startUpload(user, body) {
+  const size = Number(body && body.size);
+  if (!config.uploadMaxBytes) return { status: 400, error: '這台伺服器沒有開放大檔案上傳' };
+  if (!Number.isSafeInteger(size) || size <= 0) return { status: 400, error: '檔案大小不正確' };
+  if (size > config.uploadMaxBytes) {
+    return { status: 413, error: '檔案太大（上限 ' + Math.floor(config.uploadMaxBytes / 1048576) + ' MB）' };
+  }
+  const id = uid('img');
+  const mime = String((body && body.mime) || 'application/octet-stream').slice(0, 255);
+  const name = body && body.name ? String(body.name).slice(0, 255) : null;
+  await q.insertImagePending.run(id, user.id, mime, name, Date.now(), size, UPLOAD_CHUNK);
+  return { id: id, chunkSize: UPLOAD_CHUNK, chunks: Math.ceil(size / UPLOAD_CHUNK) };
+}
+async function pendingUploadOf(user, id) {
+  const row = await q.imageById.get(id);
+  return row && row.owner_id === user.id && row.pending ? row : null;
+}
+async function putChunk(user, id, seq, buf) {
+  const row = await pendingUploadOf(user, id);
+  if (!row) return { status: 404 };
+  const total = Number(row.size), cs = Number(row.chunk_size);
+  const last = Math.ceil(total / cs) - 1;
+  if (!Number.isInteger(seq) || seq < 0 || seq > last) return { status: 400, error: '區塊序號不正確' };
+  const want = seq === last ? total - cs * last : cs;
+  if (buf.length !== want) return { status: 400, error: '區塊大小不正確' };
+  const have = Number((await q.chunkStats.get(id)).n);
+  if (seq < have) return { ok: true, next: have };            // a retry of a chunk we already hold
+  if (seq > have) return { status: 409, error: '區塊順序不對', next: have };
+  await q.insertChunk.run(id, seq, buf);
+  return { ok: true, next: have + 1 };
+}
+async function finishUpload(user, id) {
+  const row = await pendingUploadOf(user, id);
+  if (!row) return { status: 404 };
+  const st = await q.chunkStats.get(id);
+  if (Number(st.bytes) !== Number(row.size)) return { status: 409, error: '檔案還沒傳完', next: Number(st.n) };
+  await q.finishImage.run(id, user.id);
+  return { id: id, size: Number(row.size) };
+}
+async function sweepPendingUploads() {
+  const r = await q.deleteStalePending.run(Date.now() - 3600000);
+  return r.affectedRows;
+}
 async function createImage(user, mime, buf, name) {
   const id = uid('img');
   await q.insertImage.run(id, user.id, String(mime || 'application/octet-stream'), name || null,
@@ -824,7 +904,7 @@ async function createImage(user, mime, buf, name) {
 
 async function getImage(user, id) {
   const row = await q.imageById.get(id);
-  if (!row) return null;
+  if (!row || row.pending) return null;   // pending = a chunked upload still in progress
   if (row.owner_id === user.id) return row;
   // Not the owner: only serve it if some note the caller can read references it,
   // as an image (img:), a PDF (pdf:) or any other attachment (file:).
@@ -840,6 +920,8 @@ async function saveImage(user, id, body) {
   // Annotations rewrite pixels — only the owner may do that, even if a recipient
   // has edit rights on a note that happens to embed the image.
   if (row.owner_id !== user.id) return { status: 403, error: '只有圖片擁有者可以標註' };
+  // A chunked upload is served from image_chunks; rewriting `data` would be ignored.
+  if (row.size != null) return { status: 400, error: '分塊上傳的大檔案不能標註' };
   const data = Buffer.from(body.data, 'base64');
   const original = body.original ? Buffer.from(body.original, 'base64') : row.original;
   await q.updateImage.run(String(body.mime || row.mime), data, original,
@@ -1075,6 +1157,7 @@ module.exports = {
   listBookLinks, createBookLink, updateBookLink, deleteBookLink, publicBook,
   listFolders, createFolder, updateFolder, deleteFolder,
   createImage, getImage, saveImage, deleteImage, listImages, saveOrder,
+  startUpload, putChunk, finishUpload, sweepPendingUploads,
   listShares, addShare, removeShare,
   normalizeArea   // server/backup.js reuses this so a restored area is validated the same way a live create is
 };

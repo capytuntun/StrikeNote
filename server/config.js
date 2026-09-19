@@ -76,6 +76,10 @@ const config = {
   // days later (hourly sweep), or sooner if the owner empties the trash.
   trashKeepDays: int(process.env.TRASH_KEEP_DAYS, 30),
 
+  // Files above MAX_BODY_BYTES (course videos, big decks) are uploaded in chunks and
+  // stored as chunks (image_chunks); this caps one whole file. 0 turns chunked uploads off.
+  uploadMaxBytes: int(process.env.UPLOAD_MAX_BYTES, 1024 * 1024 * 1024),
+
   // A backup zip being uploaded for restore is written to the temp directory in
   // chunks (each under MAX_BODY_BYTES); this caps the whole file.
   backupMaxBytes: int(process.env.BACKUP_MAX_BYTES, 4 * 1024 * 1024 * 1024),

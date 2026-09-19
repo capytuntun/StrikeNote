@@ -964,6 +964,86 @@ mark.search-hit {
   min-width: 76px; text-align: right; white-space: nowrap;
 }
 
+/* ---- 課程筆記：資料夾裡上傳的檔案（js/areabrowser.js 的 makeFileRow / makeUploadRow）----
+   跟筆記同一種條列，只有圖示底色跟類型標籤按檔案種類上色：PDF 紅、簡報橘、影片藍、
+   圖片綠，其餘中性。顏色全走既有 token，兩個主題都不用另外寫。 */
+.ab-file-ic.ab-file-pdf, .ab-file-tag.ab-file-pdf { background: var(--danger-weak); color: var(--danger); }
+.ab-file-ic.ab-file-ppt, .ab-file-tag.ab-file-ppt { background: var(--folder-weak); color: var(--folder); }
+.ab-file-ic.ab-file-video, .ab-file-tag.ab-file-video { background: var(--accent-weak); color: var(--accent); }
+.ab-file-ic.ab-file-img, .ab-file-tag.ab-file-img { background: var(--success-weak); color: var(--success); }
+.ab-file-tag {
+  font-size: var(--fs-micro); font-weight: 700; padding: 2px 7px; white-space: nowrap; letter-spacing: .02em;
+  background: var(--bg-3); color: var(--text-dim);
+}
+.ab-file-size {
+  font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums;
+  min-width: 64px; text-align: right; white-space: nowrap;
+}
+a.dash-row-act { text-decoration: none; }
+/* 上傳中的一列：跟檔案列同寬同高，進度條在檔名下面 */
+/* 右邊留出檔案列那四顆動作鈕的寬度（4×28 + 3），大小／百分比才會跟下面的欄位對齊 */
+.ab-upload {
+  display: flex; align-items: center; gap: 11px; padding: 8px 123px 8px 18px; min-height: 46px;
+  color: var(--text-dim);
+}
+.ab-upload-main { flex: 1 1 auto; min-width: 0; }
+.ab-upload-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-base); color: var(--text); }
+.ab-upload-track { height: 3px; margin-top: 6px; background: var(--bg-3); overflow: hidden; }
+.ab-upload-bar { height: 100%; width: 0; background: var(--accent); transition: width .2s linear; }
+.ab-upload-pct {
+  font-size: var(--fs-xs); color: var(--text-dim); font-variant-numeric: tabular-nums;
+  min-width: 48px; text-align: right; white-space: nowrap;
+}
+.ab-upload.is-error .dash-row-ic { background: var(--danger-weak); color: var(--danger); }
+.ab-upload-err { font-size: var(--fs-xs); color: var(--danger); margin-top: 2px; white-space: normal; }
+/* 拖檔案進來：整頁一個內框，不擋操作 */
+.ab-dropping { box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-weak); }
+
+/* ---- 檔案檢視器（js/app.js 的 openFileViewer）----
+   body 的子元素，所以一定是 position: fixed（app shell 不能被撐出捲軸）。底色固定是深的：
+   看影片／投影片的場合，跟主題無關。 */
+.fv-overlay {
+  position: fixed; inset: 0; z-index: 1200; display: flex; flex-direction: column;
+  background: rgba(10, 12, 16, .94); color: #e8eaee;
+  /* 檢視器永遠是深色，類型徽章用深色主題那一組值，不跟著頁面主題走 */
+  --danger: #ff6b78; --danger-weak: #331a1f; --folder: #e2b054; --folder-weak: #2c2413;
+  --accent: #5d8ff5; --accent-weak: #182741; --success: #4cc57a; --success-weak: #14291d;
+  --accent-hover: #7aa3f8;
+}
+.fv-bar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 12px 0 16px;
+  background: #15181e; border-bottom: 1px solid #272c35;
+}
+.fv-ic, .fv-big { background: #232830; color: #c9ced6; }   /* 沒有專屬顏色的類型；有的由 .ab-file-ic.ab-file-* 蓋過 */
+.fv-ic { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 28px; height: 28px; }
+.fv-ic .ic-svg { width: 15px; height: 15px; }
+.fv-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.fv-meta { flex: 1 1 auto; font-size: var(--fs-xs); color: #8d95a3; white-space: nowrap; }
+.fv-btn {
+  display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; height: 32px; padding: 0 10px;
+  border: 1px solid transparent; background: transparent; color: #c9ced6; cursor: pointer;
+  font: inherit; font-size: var(--fs-sm); text-decoration: none; transition: background .12s, color .12s;
+}
+.fv-btn .ic-svg { width: 15px; height: 15px; }
+.fv-btn:hover { background: #232832; color: #fff; }
+.fv-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-ring); }
+.fv-close { width: 32px; padding: 0; justify-content: center; }
+.fv-btn-primary { background: var(--accent); color: #fff; height: 36px; padding: 0 16px; }
+.fv-btn-primary:hover { background: var(--accent-hover); color: #fff; }
+.fv-stage {
+  flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center;
+  padding: 20px; overflow: auto;
+}
+.fv-frame { width: min(1200px, 100%); height: 100%; border: 0; background: #fff; }
+.fv-video { max-width: 100%; max-height: 100%; background: #000; outline: none; }
+.fv-audio { width: min(560px, 100%); }
+.fv-img { max-width: 100%; max-height: 100%; object-fit: contain; background: #fff; }
+.fv-nopreview { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; max-width: 420px; }
+.fv-big { display: inline-flex; align-items: center; justify-content: center; width: 84px; height: 84px; }
+.fv-big .ic-svg { width: 38px; height: 38px; }
+.fv-np-name { font-size: var(--fs-lg, 16px); font-weight: 600; word-break: break-all; }
+.fv-np-hint { font-size: var(--fs-sm); color: #8d95a3; margin-bottom: 6px; }
+
 .dash-empty {
   display: flex; align-items: center; gap: 9px; padding: 26px 10px;
   color: var(--text-faint); font-size: var(--fs-base);
@@ -3725,7 +3805,7 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 /* 檔案管理：標題列的上傳鈕 */
 .imglib-upload { flex: 0 0 auto; padding: 5px 10px; margin-right: 6px; font-size: var(--fs-sm); }
 
-/* ---------- 四個獨立區域：證照／課程筆記、知識區、小說（js/areabrowser.js）用
+/* ---------- 四個獨立區域：課程筆記、知識區、小說（js/areabrowser.js）用
    跟首頁一樣的 .dash-* class，不需要另外的 CSS；隨筆（js/quicknotes.js）是照著
    Google Keep 做的卡片牆，以下是它專用的樣式——顏色、陰影、圓角、字級全部取 Keep
    實際的值（--kp-*），不是拿全站的 token 湊：全站是直角深藍的「工具」風格，Keep 是
@@ -3988,4 +4068,15 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
   .qn-modal-body, .qn-modal-title, .qn-composer-title, .modal-input, .auth-field input, .rm-title { font-size: 16px; }
   /* 頂列：帳號名字、主題鈕的間距收一點 */
   .topbar-right { gap: 2px; }
+  /* 課程筆記的檔案列：大小收掉，留類型標籤；觸控沒有 hover，動作鈕常駐 */
+  .ab-file-size { display: none; }
+  .ab-upload { padding-right: 8px; }
+  .ab-file-wrap .dash-row-actions { opacity: 1; }
+  /* 檔案檢視器：按鈕只留圖示，內容貼滿 */
+  .fv-bar { padding: 0 6px 0 10px; gap: 2px; }
+  .fv-btn:not(.fv-btn-primary) > span { display: none; }
+  .fv-btn:not(.fv-btn-primary) { width: 36px; padding: 0; justify-content: center; }
+  .fv-meta { display: none; }
+  .fv-name { flex: 1 1 auto; }
+  .fv-stage { padding: 0; }
 }

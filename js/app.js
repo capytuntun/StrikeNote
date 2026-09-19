@@ -116,6 +116,14 @@
         if (window.Dashboard) Dashboard.openFolder(wantFolder);
       } else if (wantBook && state.folders.some(function (f) { return f.id === wantBook; })) {
         openBook(wantBook);
+      } else if (wantNote && isFileNote(state.notes.find(function (n) { return n.id === wantNote; }))) {
+        // 連結指到一個上傳的檔案：背景先停在它所在的區域／資料夾，再把檢視器疊上去
+        const fn = state.notes.find(function (n) { return n.id === wantNote; });
+        if (fn.area && fn.area !== 'novel' && AREA_INFO[fn.area] && AREA_INFO[fn.area].wrap) {
+          openArea(fn.area);
+          if (fn.folderId && window.AreaBrowser) AreaBrowser.openFolder(fn.folderId);
+        } else showEmpty();
+        openFileViewer(fn);
       } else if (last && state.notes.some(function (n) { return n.id === last; })) {
         openNote(last);
       } else {
@@ -127,7 +135,7 @@
 
   // ---- Tree rendering ----------------------------------------------------
   // 排序方式與手動順序跟首頁共用（js/sorting.js）
-  // 側邊欄樹跟首頁儀表板永遠只看一般區域（area 是 null／undefined）——證照課程、
+  // 側邊欄樹跟首頁儀表板永遠只看一般區域（area 是 null／undefined）——課程筆記、
   // 知識區、隨筆、小說都是各自獨立的分頁（見 areaNotes/areaFolders 與四個
   // openXxx 函式），不會混進這裡，即使小說解鎖後它的筆記已經在 state.notes 裡。
   function childFolders(parentId, mode) {
@@ -552,12 +560,12 @@
     };
   }
 
-  // ---- 四個獨立區域（證照／課程筆記、隨筆、知識區、小說）--------------------
-  // 證照課程／知識區／小說用同一個簡化檔案總管（js/areabrowser.js）；隨筆是它
+  // ---- 四個獨立區域（課程筆記、隨筆、知識區、小說）--------------------
+  // 課程筆記／知識區／小說用同一個簡化檔案總管（js/areabrowser.js）；隨筆是它
   // 自己的 Keep 風格卡片牆（js/quicknotes.js）。三個共用瀏覽器的區域共用同一套
   // 回呼邏輯（新增／改名／刪除／移動），差別只在 area 這個字串跟顯示用的標題。
   const AREA_INFO = {
-    course: { title: '證照／課程筆記', icon: 'award', wrap: null, page: null },
+    course: { title: '課程筆記', icon: 'award', wrap: null, page: null },
     knowledge: { title: '知識區', icon: 'book-open', wrap: null, page: null },
     novel: { title: '小說', icon: 'lock', wrap: null, page: null }
   };
@@ -568,12 +576,136 @@
     AREA_INFO.novel.wrap = novelWrapEl; AREA_INFO.novel.page = novelPageEl;
   }
 
+  // ---- 檔案檢視器（課程筆記資料夾裡上傳的 PPTX／PDF／影片） -------------------
+  // 檔案筆記的內文只是一行引用，沒有東西可編輯，所以不進編輯器：在目前畫面上疊一層
+  // position: fixed 的檢視器（body 的子元素一律 fixed，見 CLAUDE.md 的 app shell 規則）。
+  // 能不能在瀏覽器裡看，跟 server.js 的 INLINE_UPLOAD 同一份名單——其餘型別伺服器一律當
+  // 附件送，塞進 <video>/<iframe> 也放不出來，所以只給下載。影片可以拖時間軸是因為
+  // 伺服器支援 Range。
+  function isFileNote(n) { return !!(n && n.meta && n.meta.file && n.meta.file.id); }
+  let fileViewerEl = null;
+  function closeFileViewer() {
+    const ov = fileViewerEl;
+    if (!ov) return;
+    fileViewerEl = null;
+    // 先停掉再移除：拿掉 src 才會真的中斷還在抓的影片串流
+    ov.querySelectorAll('video, audio').forEach(function (m) {
+      try { m.pause(); m.removeAttribute('src'); m.load(); } catch (e) {}
+    });
+    document.removeEventListener('keydown', ov._onKey, true);
+    ov.remove();
+  }
+  function openFileViewer(note) {
+    if (!isFileNote(note)) return;
+    closeFileViewer();
+    const f = note.meta.file;
+    const kind = window.AreaBrowser ? AreaBrowser.fileKind(f) : { icon: 'paperclip', tag: 'FILE', cls: 'other' };
+    const url = '/api/images/' + encodeURIComponent(f.id);
+    const mime = String(f.mime || '').toLowerCase();
+    const name = note.title || f.name || '檔案';
+
+    const ov = document.createElement('div');
+    ov.className = 'fv-overlay';
+    ov.setAttribute('role', 'dialog');
+    ov.setAttribute('aria-label', name);
+
+    const bar = document.createElement('div');
+    bar.className = 'fv-bar';
+    bar.innerHTML = '<span class="fv-ic ab-file-ic ab-file-' + kind.cls + '">' + Icons.svg(kind.icon) + '</span>' +
+      '<span class="fv-name"></span><span class="fv-meta"></span>';
+    bar.querySelector('.fv-name').textContent = name;
+    bar.querySelector('.fv-meta').textContent = kind.tag +
+      (f.size && window.AreaBrowser ? '・' + AreaBrowser.fmtSize(f.size) : '');
+    function link(cls, icon, label, attrs) {
+      const a = document.createElement('a');
+      a.className = 'fv-btn ' + cls;
+      a.href = url;
+      Object.keys(attrs).forEach(function (k) { a.setAttribute(k, attrs[k]); });
+      a.innerHTML = Icons.svg(icon) + '<span>' + label + '</span>';
+      return a;
+    }
+    const stage = document.createElement('div');
+    stage.className = 'fv-stage';
+    let inline = true;
+    if (mime === 'application/pdf') {
+      const fr = document.createElement('iframe');
+      fr.className = 'fv-frame'; fr.title = name; fr.src = url;
+      stage.appendChild(fr);
+    } else if (/^video\/(mp4|webm|ogg)$/.test(mime)) {
+      const v = document.createElement('video');
+      v.className = 'fv-video'; v.controls = true; v.preload = 'metadata';
+      v.setAttribute('playsinline', ''); v.src = url;
+      stage.appendChild(v);
+    } else if (/^audio\/(mpeg|mp4|ogg|wav|webm|x-m4a|aac)$/.test(mime)) {
+      const au = document.createElement('audio');
+      au.className = 'fv-audio'; au.controls = true; au.preload = 'metadata'; au.src = url;
+      stage.appendChild(au);
+    } else if (/^image\/(png|jpeg|gif|webp|avif|bmp|svg\+xml)$/.test(mime)) {
+      const im = document.createElement('img');
+      im.className = 'fv-img'; im.alt = name; im.src = url;
+      stage.appendChild(im);
+    } else {
+      // PPTX、MOV／MKV、壓縮檔……瀏覽器自己開不了：給個清楚的下載入口，不要留一片黑
+      inline = false;
+      const box = document.createElement('div');
+      box.className = 'fv-nopreview';
+      box.innerHTML = '<span class="fv-big ab-file-ic ab-file-' + kind.cls + '">' + Icons.svg(kind.icon) + '</span>' +
+        '<div class="fv-np-name"></div><div class="fv-np-hint">這種檔案無法在瀏覽器內預覽，請下載後開啟。</div>';
+      box.querySelector('.fv-np-name').textContent = f.name || name;
+      box.appendChild(link('fv-btn-primary', 'download', '下載檔案', { download: f.name || name }));
+      stage.appendChild(box);
+    }
+    if (inline) bar.appendChild(link('', 'external-link', '新分頁開啟', { target: '_blank', rel: 'noopener' }));
+    bar.appendChild(link('', 'download', '下載', { download: f.name || name }));
+    const close = document.createElement('button');
+    close.type = 'button'; close.className = 'fv-btn fv-close'; close.title = '關閉（Esc）';
+    close.innerHTML = Icons.svg('x');
+    close.addEventListener('click', closeFileViewer);
+    bar.appendChild(close);
+
+    // 點檔案以外的空白處關閉（點到影片／PDF 本身不算）
+    stage.addEventListener('mousedown', function (e) { if (e.target === stage) closeFileViewer(); });
+    // capture：App.confirm 之類的也在 capture 聽 Esc，後開的先收到，才不會一次關兩層
+    ov._onKey = function (e) {
+      if (e.key !== 'Escape' || fileViewerEl !== ov) return;
+      e.preventDefault(); e.stopPropagation();
+      closeFileViewer();
+    };
+    document.addEventListener('keydown', ov._onKey, true);
+
+    ov.appendChild(bar);
+    ov.appendChild(stage);
+    document.body.appendChild(ov);
+    fileViewerEl = ov;
+    close.focus();
+  }
+
   function areaOpts(area) {
     const info = AREA_INFO[area];
     return {
+      area: area,
       title: info.title, icon: info.icon,
       notes: areaNotes(area), folders: areaFolders(area),
       onOpen: openNote,
+      // 課程筆記可以把 PPTX／PDF／影片直接放進資料夾：檔案本體走 Store.uploadFile（大檔自動
+      // 分塊），在資料夾裡則是一篇 meta.file 的「檔案筆記」，內文就是那個檔案的引用——所以
+      // 改名、移動、垃圾桶、還原、備份、檔案管理的「使用中」判斷全部沿用筆記既有的機制。
+      onUploadFile: area === 'course' ? function (file, folderId, onProgress) {
+        const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+        const isImg = !isPdf && (file.type || '').indexOf('image/') === 0;
+        const mime = isPdf ? 'application/pdf' : (file.type || 'application/octet-stream');
+        return Store.uploadFile(file, onProgress, mime).then(function (id) {
+          const name = cleanName(file.name, isPdf ? 'PDF' : '檔案');
+          const ref = isImg ? '![' + name + '](img:' + id + ')'
+            : isPdf ? '![' + name.replace(/\.pdf$/i, '') + '](pdf:' + id + ')'
+            : '[' + name + '](file:' + id + ')';
+          return Store.createNote(name, folderId, {
+            area: area, content: ref + '\n',
+            meta: { file: { id: id, name: file.name, mime: mime, size: file.size } }
+          });
+        }).then(function (n) { state.notes.push(n); return n; });
+      } : null,
+      onOpenFile: openFileViewer,
       onNewNote: function (folderId) {
         return Store.createNote('未命名筆記', folderId, { area: area }).then(function (n) {
           state.notes.push(n); renderTree(); return n;
@@ -1001,7 +1133,7 @@
   const bookWrapEl = $('#book-wrap');
   const trashWrapEl = $('#trash-wrap');
   const trashPageEl = $('#trash-page');
-  // 四個獨立區域（js/areas.js）：證照課程筆記、知識區、小說共用 AreaBrowser；
+  // 四個獨立區域（js/areas.js）：課程筆記、知識區、小說共用 AreaBrowser；
   // 隨筆是它自己的 Keep 風格卡片牆（js/quicknotes.js）。
   const courseWrapEl = $('#course-wrap'), coursePageEl = $('#course-page');
   const knowledgeWrapEl = $('#knowledge-wrap'), knowledgePageEl = $('#knowledge-page');
@@ -1318,6 +1450,11 @@
   }
 
   function openNote(id) {
+    // 檔案筆記（meta.file：課程筆記資料夾裡上傳的 PPTX／PDF／影片）沒有編輯器可開，只是在
+    // 目前畫面上疊一個檢視器。一定要在 closeStream()/BlogMode.reset() 之前判斷——從搜尋或
+    // 連結點到一個檔案，不該把正開著的那篇筆記的協作連線關掉。
+    const known = state.notes.find(function (n) { return n.id === id; });
+    if (isFileNote(known)) { openFileViewer(known); return; }
     closeStream();   // stop listening to the note we're leaving
     // 放下 Blog mode 裡正在編輯的區塊。它打的字早就寫進 #editor 了；要是等新筆記載入後
     // 才收尾，收尾的回寫會落到新筆記上。
@@ -1333,6 +1470,8 @@
       // 它——不動 state.currentId、不收起首頁，取消或存檔都只是把疊層收掉，見
       // openRelMapNote 開頭的說明。一定要在任何畫面狀態被改掉之前判斷。
       if (window.RelMap && RelMap.isRelNote(note)) { openRelMapNote(note); return; }
+      // 不在 state.notes 裡的檔案筆記（理論上不會發生）：同樣只疊檢視器，背景沒東西就回首頁
+      if (isFileNote(note)) { if (!state.currentId) showEmpty(); openFileViewer(note); return; }
       state.currentId = id;
       state.current = note;
       // Seed the collaboration baseline: this is the version we're now in sync with.
@@ -2833,16 +2972,16 @@
     openMenuAt(r.right, r.bottom + 4, actions, { alignRight: true });
   }
 
-  // 所有筆記／證照課程筆記／知識區 之間搬一篇筆記——novel／quick 兩邊都不給碰
+  // 所有筆記／課程筆記／知識區 之間搬一篇筆記——novel／quick 兩邊都不給碰
   // （伺服器那邊也會擋，這裡先不讓選單長出這個選項）。開一個小選單選目標區域，
   // 選了再跳資料夾選擇（沿用既有的 showFolderPicker，已支援 o.folders 覆寫）。
   const MOVABLE_AREAS = [null, 'course', 'knowledge'];
-  function areaLabel(a) { return a === 'course' ? '證照／課程筆記' : a === 'knowledge' ? '知識區' : '所有筆記'; }
+  function areaLabel(a) { return a === 'course' ? '課程筆記' : a === 'knowledge' ? '知識區' : '所有筆記'; }
   function moveNoteToArea(note, x, y) {
     const cur = note.area || null;
     const items = [
       { key: null, label: '所有筆記', icon: 'layout-grid' },
-      { key: 'course', label: '證照／課程筆記', icon: 'award' },
+      { key: 'course', label: '課程筆記', icon: 'award' },
       { key: 'knowledge', label: '知識區', icon: 'book-open' }
     ].map(function (o) {
       return {
@@ -3834,6 +3973,7 @@
 
     // 複製連結：#note/<id> 或 #book/<id> 變化時跟著切換（瀏覽器上一頁／下一頁也適用）
     window.addEventListener('hashchange', function () {
+      closeFileViewer();   // 上一頁／下一頁換了畫面，疊在上面的檔案檢視器不該留著
       const nid = noteIdFromHash();
       if (nid) {
         if (nid !== state.currentId && state.notes.some(function (n) { return n.id === nid; })) openNote(nid);
@@ -3879,9 +4019,9 @@
     if (graphBtn) graphBtn.addEventListener('click', function () {
       if (!window.Graph) return;
       // 隨筆沒有標題、彼此也不會互連，進圖只是一堆「未命名筆記」的孤點；小說是
-      // 刻意隔開的區域，也不該混進一般筆記的關聯圖。證照課程／知識區是有標題、
+      // 刻意隔開的區域，也不該混進一般筆記的關聯圖。課程筆記／知識區是有標題、
       // 會互相 [[連結]] 的正經筆記，留著。
-      Graph.open(state.notes.filter(function (n) { return n.area !== 'quick' && n.area !== 'novel'; }), {
+      Graph.open(state.notes.filter(function (n) { return n.area !== 'quick' && n.area !== 'novel' && !isFileNote(n); }), {
         onOpenNote: function (note) { openNote(note.id); },
         onOpenTag: function (tag) { browseTag(tag); }
       });
@@ -3900,7 +4040,7 @@
       });
     });
 
-    // 四個獨立區域：證照／課程筆記、隨筆、知識區、小說（見 openArea / openQuick）
+    // 四個獨立區域：課程筆記、隨筆、知識區、小說（見 openArea / openQuick）
     initAreaInfo();
     const courseBtn = $('#course-open-btn'); if (courseBtn) courseBtn.addEventListener('click', function () { openArea('course'); });
     const knowledgeBtn = $('#knowledge-open-btn'); if (knowledgeBtn) knowledgeBtn.addEventListener('click', function () { openArea('knowledge'); });

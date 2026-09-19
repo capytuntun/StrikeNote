@@ -180,6 +180,19 @@ const SCHEMA = [
     CONSTRAINT fk_images_owner FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+  // Big uploads (course videos, decks): one request can carry at most MAX_BODY_BYTES
+  // and one packet at most max_allowed_packet, so a large file is stored as a run of
+  // fixed-size chunks instead of one LONGBLOB. images.size / images.chunk_size say so;
+  // images.data is then an empty blob. Every chunk but the last is exactly chunk_size
+  // bytes, which is what makes HTTP Range a matter of arithmetic (server.js sendChunked).
+  `CREATE TABLE IF NOT EXISTS image_chunks (
+    image_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
+    seq      INT NOT NULL,
+    data     LONGBLOB NOT NULL,
+    PRIMARY KEY (image_id, seq),
+    CONSTRAINT fk_chunks_image FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
   `CREATE TABLE IF NOT EXISTS shares (
     note_id    VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
     user_id    INT NOT NULL,
@@ -279,6 +292,12 @@ const MIGRATIONS = [
   ['folders', 'position', 'INT NULL'],
   // The uploaded file's own name, for downloads and the file library.
   ['images', 'name', 'VARCHAR(255) NULL'],
+  // Chunked uploads (image_chunks): total bytes and the chunk size they were cut at;
+  // both NULL for an ordinary single-blob upload. pending = still being uploaded:
+  // invisible to every listing and read until finishUpload clears it, swept after an hour.
+  ['images', 'size', 'BIGINT NULL'],
+  ['images', 'chunk_size', 'INT NULL'],
+  ['images', 'pending', 'TINYINT NOT NULL DEFAULT 0'],
   // Areas (server/api.js "areas"): a note/folder's home is NULL (一般, unchanged
   // default) or 'course' | 'knowledge' | 'quick' | 'novel', set once at creation
   // and never changed afterwards. A folder's own area must match every note and
@@ -454,6 +473,8 @@ const q = {
     FROM notes WHERE owner_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC`),
   trashExpired: stmt('SELECT id FROM notes WHERE deleted_at IS NOT NULL AND deleted_at < ?'),
   purgeTrashOf: stmt('DELETE FROM notes WHERE owner_id = ? AND deleted_at IS NOT NULL'),
+  // File notes in the trash (api.js dropFileOfNote): the LIKE only trims the scan, the JSON is parsed there.
+  trashedFileNotesOf: stmt('SELECT id, owner_id, meta FROM notes WHERE owner_id = ? AND deleted_at IS NOT NULL AND meta LIKE ' + "'%\"file\"%'"),
 
   // note versions — the list view never selects `content`, only its length, so
   // opening the history of a long note costs one small row per version.
@@ -521,12 +542,26 @@ const q = {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
   updateImage: stmt('UPDATE images SET mime = ?, data = ?, original = ?, shapes = ? WHERE id = ?'),
   deleteImage: stmt('DELETE FROM images WHERE id = ? AND owner_id = ?'),
+  // chunked uploads (api.js startUpload / putChunk / finishUpload)
+  insertImagePending: stmt(`
+    INSERT INTO images (id, owner_id, mime, name, data, original, shapes, created_at, size, chunk_size, pending)
+    VALUES (?, ?, ?, ?, '', NULL, NULL, ?, ?, ?, 1)`),
+  insertChunk: stmt('INSERT INTO image_chunks (image_id, seq, data) VALUES (?, ?, ?)'),
+  chunkStats: stmt('SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(data)), 0) AS bytes FROM image_chunks WHERE image_id = ?'),
+  chunkData: stmt('SELECT data FROM image_chunks WHERE image_id = ? AND seq = ?'),
+  deleteChunks: stmt('DELETE FROM image_chunks WHERE image_id = ?'),
+  finishImage: stmt('UPDATE images SET pending = 0 WHERE id = ? AND owner_id = ?'),
+  deleteStalePending: stmt('DELETE FROM images WHERE pending = 1 AND created_at < ?'),
+  // A file note being purged takes its file with it, unless some other note still uses it.
+  mediaUsedElsewhere: stmt(`
+    SELECT 1 AS ok FROM notes WHERE id <> ?
+      AND (INSTR(content, ?) > 0 OR INSTR(content, ?) > 0 OR INSTR(content, ?) > 0) LIMIT 1`),
   // File library (api.js listImages): the owner's uploads without their bytes,
   // and every note, any owner, trashed or not, whose text could embed an upload.
   // The INSTR filter only trims the scan; listImages does the exact matching.
   imagesOf: stmt(
-    'SELECT id, mime, name, created_at, LENGTH(data) AS bytes, COALESCE(LENGTH(original), 0) AS original_bytes, ' +
-    '(original IS NOT NULL) AS annotated FROM images WHERE owner_id = ? ORDER BY created_at DESC'),
+    'SELECT id, mime, name, created_at, COALESCE(size, LENGTH(data)) AS bytes, COALESCE(LENGTH(original), 0) AS original_bytes, ' +
+    '(original IS NOT NULL) AS annotated FROM images WHERE owner_id = ? AND pending = 0 ORDER BY created_at DESC'),
   notesEmbeddingMedia: stmt(
     'SELECT n.id, n.owner_id, u.username AS owner_name, n.title, n.folder_id, n.access, n.access_perm, ' +
     'n.deleted_at, n.updated_at, n.content FROM notes n JOIN users u ON u.id = n.owner_id ' +
@@ -538,7 +573,7 @@ const q = {
     'UPDATE notes SET folder_id = ?, position = ? WHERE id = ? AND owner_id = ? AND deleted_at IS NULL'),
   orderFolder: stmt('UPDATE folders SET parent_id = ?, position = ? WHERE id = ? AND owner_id = ?'),
   // The one deliberate exception to "a note's area never changes" (api.js
-  // moveNoteArea): reclassifying a note between 所有筆記／證照課程筆記／知識區.
+  // moveNoteArea): reclassifying a note between 所有筆記／課程筆記／知識區.
   // Resets position to NULL — a manual order position made sense in the old
   // area's level, not this one, and NULL sorts predictably (see sorting.js).
   setNoteArea: stmt(
@@ -567,8 +602,8 @@ const q = {
     UPDATE notes SET folder_id = ?, title = ?, content = ?, meta = ?, updated_at = ?, rev = ?,
       access = ?, access_perm = ?, deleted_at = ?, position = ? WHERE id = ?`),
   versionsOfNote: stmt('SELECT * FROM note_versions WHERE note_id = ? ORDER BY id'),
-  imageIdsOf: stmt('SELECT id FROM images WHERE owner_id = ? ORDER BY created_at'),
-  imageIdsAll: stmt('SELECT id FROM images ORDER BY created_at'),
+  imageIdsOf: stmt('SELECT id FROM images WHERE owner_id = ? AND pending = 0 ORDER BY created_at'),
+  imageIdsAll: stmt('SELECT id FROM images WHERE pending = 0 ORDER BY created_at'),
   imageOwner: stmt('SELECT id, owner_id FROM images WHERE id = ?'),
   updateImageFull: stmt('UPDATE images SET mime = ?, name = ?, data = ?, original = ?, shapes = ? WHERE id = ?'),
   bookVersionsOf: stmt('SELECT * FROM book_versions WHERE owner_id = ? ORDER BY id'),
@@ -607,7 +642,7 @@ const q = {
   dbBytes: stmt(
     'SELECT COALESCE(SUM(data_length + index_length), 0) AS bytes FROM information_schema.TABLES WHERE table_schema = DATABASE()'),
   imageBytes: stmt(
-    'SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(data)), 0) + COALESCE(SUM(LENGTH(original)), 0) AS bytes FROM images'),
+    'SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(size, LENGTH(data))), 0) + COALESCE(SUM(LENGTH(original)), 0) AS bytes FROM images'),
   noteBytes: stmt('SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(content)), 0) AS bytes FROM notes'),
   // Version history keeps a full copy of the text per version, so it is a real
   // consumer of disk and has to be reported separately — otherwise the storage
@@ -624,7 +659,7 @@ const q = {
         (SELECT COALESCE(SUM(LENGTH(v.content)), 0) FROM note_versions v
            JOIN notes n3 ON n3.id = v.note_id WHERE n3.owner_id = u.id)                          AS version_bytes,
         (SELECT COUNT(*) FROM images i WHERE i.owner_id = u.id)                                  AS images,
-        (SELECT COALESCE(SUM(LENGTH(i.data)), 0) + COALESCE(SUM(LENGTH(i.original)), 0)
+        (SELECT COALESCE(SUM(COALESCE(i.size, LENGTH(i.data))), 0) + COALESCE(SUM(LENGTH(i.original)), 0)
            FROM images i WHERE i.owner_id = u.id)                                                AS image_bytes
       FROM users u
     ) t

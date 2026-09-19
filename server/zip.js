@@ -29,10 +29,12 @@ function crcTable() {
   }
   return TABLE;
 }
-function crc32(buf) {
-  if (typeof zlib.crc32 === 'function') return zlib.crc32(buf) >>> 0;
+// prev: the CRC of everything before buf, so a file that never sits in memory whole
+// (addStream / ZipReader.stream) can be summed piece by piece.
+function crc32(buf, prev) {
+  if (typeof zlib.crc32 === 'function') return zlib.crc32(buf, prev || 0) >>> 0;
   const t = crcTable();
-  let c = -1;
+  let c = (prev || 0) ^ -1;
   for (let i = 0; i < buf.length; i++) c = t[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
   return (c ^ -1) >>> 0;
 }
@@ -101,6 +103,37 @@ class ZipWriter {
     await this.emit(Buffer.concat([h, nameBuf, extra]));
     await this.emit(payload);
     this.entries.push({ nameBuf, method, time: t.time, date: t.date, crc, csize: payload.length, usize: data.length, offset });
+  }
+
+  // An entry too big to hold in memory (a chunked upload — a course video). Stored, not
+  // deflated, and its size is known up front; the local header still carries the real CRC
+  // like every other entry, so `pieces` is walked twice: once to sum, once to write.
+  // pieces: () => async iterable of Buffers, the same bytes both times.
+  async addStream(name, size, opts, pieces) {
+    const o = opts || {};
+    const nameBuf = Buffer.from(String(name), 'utf8');
+    let crc = 0, seen = 0;
+    for await (const b of pieces()) { crc = crc32(b, crc); seen += b.length; }
+    if (seen !== size) throw new Error('檔案大小跟紀錄不符：' + name);
+    const t = dosTime(o.mtime || Date.now());
+    const big = size >= MAX32;
+    const extra = big ? zip64Extra(size, size, null) : Buffer.alloc(0);
+    const h = Buffer.alloc(30);
+    h.writeUInt32LE(0x04034b50, 0);
+    h.writeUInt16LE(big ? 45 : 20, 4);
+    h.writeUInt16LE(0x0800, 6);
+    h.writeUInt16LE(0, 8);
+    h.writeUInt16LE(t.time, 10);
+    h.writeUInt16LE(t.date, 12);
+    h.writeUInt32LE(crc, 14);
+    h.writeUInt32LE(big ? MAX32 : size, 18);
+    h.writeUInt32LE(big ? MAX32 : size, 22);
+    h.writeUInt16LE(nameBuf.length, 26);
+    h.writeUInt16LE(extra.length, 28);
+    const offset = this.offset;
+    await this.emit(Buffer.concat([h, nameBuf, extra]));
+    for await (const b of pieces()) await this.emit(b);
+    this.entries.push({ nameBuf, method: 0, time: t.time, date: t.date, crc, csize: size, usize: size, offset });
   }
 
   async finish() {
@@ -268,6 +301,25 @@ class ZipReader {
     else throw new Error('不支援的壓縮方式：' + name);
     if (out.length !== e.usize || crc32(out) !== e.crc) throw new Error('zip 項目損毀：' + name);
     return out;
+  }
+
+  // The same entry as a stream of pieces, for one too big for read(): stored or deflated
+  // (a re-zipped backup may have deflated it). Size and CRC are checked when the last
+  // piece has gone out, so the caller must treat a throw as "discard what you wrote".
+  async *stream(name) {
+    const e = this.entries.get(name);
+    if (!e) return;
+    const lh = this.readAt(e.offset, 30);
+    if (lh.readUInt32LE(0) !== 0x04034b50) throw new Error('zip 項目損毀：' + name);
+    if (e.method !== 0 && e.method !== 8) throw new Error('不支援的壓縮方式：' + name);
+    const pos = e.offset + 30 + lh.readUInt16LE(26) + lh.readUInt16LE(28);
+    let crc = 0, n = 0;
+    if (e.csize > 0) {
+      const rs = fs.createReadStream('', { fd: this.fd, start: pos, end: pos + e.csize - 1, autoClose: false, highWaterMark: 1 << 20 });
+      const src = e.method === 0 ? rs : rs.pipe(zlib.createInflateRaw());
+      for await (const b of src) { crc = crc32(b, crc); n += b.length; yield b; }
+    }
+    if (n !== e.usize || crc !== e.crc) throw new Error('zip 項目損毀：' + name);
   }
 }
 

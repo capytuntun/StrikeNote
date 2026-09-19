@@ -143,7 +143,9 @@ async function readJSON(req) {
 // sandbox policy. Everything else — HTML, JavaScript, anything unknown — goes
 // out as an octet-stream attachment. Served as-is, an uploaded .js would satisfy
 // script-src 'self' and an uploaded page would run inside the app's origin.
-const INLINE_UPLOAD = /^(?:image\/(?:png|jpeg|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon|svg\+xml)|application\/pdf)$/;
+// Video and audio are on the list too: they cannot run script, and a <video> element
+// will not play a file served as application/octet-stream.
+const INLINE_UPLOAD = /^(?:image\/(?:png|jpeg|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon|svg\+xml)|application\/pdf|video\/(?:mp4|webm|ogg)|audio\/(?:mpeg|mp4|ogg|wav|webm|x-m4a|aac))$/;
 
 function uploadMime(header) {
   const t = String(header || '').split(';')[0].trim().toLowerCase();
@@ -160,10 +162,10 @@ function uploadName(header) {
   return s || null;
 }
 
-function sendUpload(res, row, buf) {
+function uploadHeaders(row, length) {
   const mime = String(row.mime || '').toLowerCase();
   const headers = {
-    'Content-Length': buf.length,
+    'Content-Length': length,
     'Cache-Control': 'private, no-cache',
     'X-Content-Type-Options': 'nosniff'
   };
@@ -178,8 +180,44 @@ function sendUpload(res, row, buf) {
     headers['Content-Disposition'] = 'attachment; filename="' + ascii + '"; filename*=UTF-8\'\'' + utf8;
     headers['Content-Security-Policy'] = "default-src 'none'; sandbox";
   }
-  res.writeHead(200, headers);
+  return headers;
+}
+function sendUpload(res, row, buf) {
+  res.writeHead(200, uploadHeaders(row, buf.length));
   return res.end(buf);
+}
+// A chunked upload (image_chunks) streamed back one row at a time, honouring a single
+// HTTP Range — a <video> cannot seek without it. Every chunk but the last is exactly
+// chunk_size bytes, so which rows a byte range touches is arithmetic, and no more than
+// one chunk (8 MB) is ever in memory. Same header rules as sendUpload: the stored type
+// only counts if it is on the inert allow-list.
+async function sendChunked(req, res, row) {
+  const total = Number(row.size), cs = Number(row.chunk_size);
+  let start = 0, end = total - 1, partial = false;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim());
+  if (m && (m[1] || m[2])) {
+    if (m[1]) { start = Number(m[1]); if (m[2]) end = Math.min(Number(m[2]), total - 1); }
+    else start = Math.max(0, total - Number(m[2]));
+    if (!(start <= end) || start >= total) {
+      res.writeHead(416, { 'Content-Range': 'bytes */' + total });
+      return res.end();
+    }
+    partial = true;
+  }
+  const headers = uploadHeaders(row, end - start + 1);
+  headers['Accept-Ranges'] = 'bytes';
+  if (partial) headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + total;
+  res.writeHead(partial ? 206 : 200, headers);
+  let gone = false;
+  res.on('close', function () { gone = true; });
+  for (let seq = Math.floor(start / cs); seq <= Math.floor(end / cs) && !gone; seq++) {
+    const c = await dbmod.q.chunkData.get(row.id, seq);
+    if (!c) break;
+    const base = seq * cs;
+    const piece = c.data.subarray(Math.max(0, start - base), Math.min(c.data.length, end - base + 1));
+    if (!res.write(piece) && !gone) await new Promise(function (r) { res.once('drain', r); res.once('close', r); });
+  }
+  return res.end();
 }
 
 // ---------------- static ----------------
@@ -327,7 +365,12 @@ async function handleApi(req, res, url) {
   // serialise as `{}` with a 200, so refuse it loudly instead.
   const send = function (r) {
     if (r && typeof r.then === 'function') throw new Error('send() got a Promise — missing await');
-    return (r && r.status) ? json(res, r.status, { error: r.error || 'error' }) : json(res, 200, r);
+    if (!(r && r.status)) return json(res, 200, r);
+    const body = { error: r.error || 'error' };
+    // A chunked upload out of step (409) tells the client which chunk it holds next, so a
+    // retry after a dropped connection resumes instead of starting over (js/store.js uploadFile).
+    if (Number.isInteger(r.next)) body.next = r.next;
+    return json(res, r.status, body);
   };
 
   // 小說區：重新輸入目前帳號的密碼，通過就把這個 session 標記為已解鎖（js/app.js
@@ -427,7 +470,7 @@ async function handleApi(req, res, url) {
   if ((m = p.match(/^\/api\/notes\/([\w.-]+)\/access$/)) && method === 'PUT') {
     return send(await api.setAccess(user, m[1], await readJSON(req)));
   }
-  // 所有筆記／證照課程筆記／知識區 之間搬一篇筆記（js/app.js moveNoteToArea）。
+  // 所有筆記／課程筆記／知識區 之間搬一篇筆記（js/app.js moveNoteToArea）。
   if ((m = p.match(/^\/api\/notes\/([\w.-]+)\/area$/)) && method === 'PUT') {
     return send(await api.moveNoteArea(user, m[1], await readJSON(req)));
   }
@@ -497,6 +540,22 @@ async function handleApi(req, res, url) {
     if (method === 'DELETE') return send(await api.deleteFolder(user, m[1]));
   }
 
+  // Chunked uploads for files over MAX_BODY_BYTES (js/store.js uploadFile → api.js):
+  // start → PUT each chunk in order → finish. Name and type go through the same
+  // sanitisers as a whole-file upload.
+  if (p === '/api/uploads' && method === 'POST') {
+    const b = await readJSON(req);
+    return send(await api.startUpload(user, {
+      size: b.size, mime: uploadMime(b.mime), name: uploadName(encodeURIComponent(String(b.name || '')))
+    }));
+  }
+  if ((m = p.match(/^\/api\/uploads\/([\w.-]+)\/(\d+)$/)) && method === 'PUT') {
+    return send(await api.putChunk(user, m[1], Number(m[2]), await readBody(req, config.maxBodyBytes)));
+  }
+  if ((m = p.match(/^\/api\/uploads\/([\w.-]+)\/finish$/)) && method === 'POST') {
+    return send(await api.finishUpload(user, m[1]));
+  }
+
   // File library (js/imagelib.js): the caller's uploads, metadata only, each with the notes that embed it.
   if (p === '/api/images' && method === 'GET') return json(res, 200, await api.listImages(user));
   if (p === '/api/images' && method === 'POST') {
@@ -513,6 +572,7 @@ async function handleApi(req, res, url) {
     if (method === 'GET') {
       const row = await api.getImage(user, id);
       if (!row) return json(res, 404, { error: 'not found' });
+      if (row.size != null) return sendChunked(req, res, row);
       return sendUpload(res, row, row.data);
     }
     if (method === 'PUT') return send(await api.saveImage(user, id, await readJSON(req)));
@@ -526,7 +586,7 @@ async function handleApi(req, res, url) {
         id: row.id, mime: row.mime,
         shapes: row.shapes ? JSON.parse(row.shapes) : [],
         hasOriginal: !!row.original,
-        canAnnotate: row.owner_id === user.id
+        canAnnotate: row.owner_id === user.id && row.size == null   // not a chunked upload, see api.saveImage
       });
     }
   }
@@ -534,6 +594,7 @@ async function handleApi(req, res, url) {
     if (method === 'GET') {
       const row = await api.getImage(user, m[1]);
       if (!row) return json(res, 404, { error: 'not found' });
+      if (row.size != null) return sendChunked(req, res, row);
       return sendUpload(res, row, row.original || row.data);
     }
   }
@@ -751,6 +812,8 @@ function checkStorage() {
 // Trash retention: notes in the bin longer than TRASH_KEEP_DAYS are deleted for
 // good — the same hard delete as emptying the bin — at startup and then hourly.
 function purgeTrash() {
+  // 傳到一半就放棄的大檔案（api.js startUpload 的 pending 列）也在同一輪清掉
+  api.sweepPendingUploads().catch(function (e) { console.warn('[uploads] 清理失敗：' + (e && e.message || e)); });
   api.purgeExpiredTrash().then(function (n) {
     if (n) console.log('[trash] 已永久刪除 ' + n + ' 篇在垃圾桶超過 ' + config.trashKeepDays + ' 天的筆記');
   }).catch(function (e) { console.warn('[trash] 清理失敗：' + (e && e.message || e)); });

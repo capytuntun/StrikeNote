@@ -696,6 +696,150 @@ async function main() {
   }
 
   if (!OLD) {
+    section('chunked uploads, Range and file notes (課程筆記)');
+    const { ZipReader } = require('../zip');
+    const os = require('node:os'), fs = require('node:fs'), path = require('node:path');
+    const RAW = { raw: true, contentType: 'application/octet-stream' };
+    const dave = jar();
+    r = await call(dave, 'POST', '/api/register', { username: 'dave', password: 'dave-password-123', invite: '' });
+    ok(r.status === 200, 'dave registered', r.data);
+
+    // Two full chunks and a short tail, so every boundary case exists.
+    r = await call(dave, 'POST', '/api/uploads', { size: 1, mime: 'video/mp4', name: 'probe.mp4' });
+    const CS = r.data.chunkSize, probe = r.data.id;   // never finished: stays pending
+    ok(r.status === 200 && CS > 0 && CS < BODY_LIMIT && r.data.chunks === 1, 'a chunk fits inside one request body', r.data);
+    const VID = crypto.randomBytes(CS * 2 + 12345);
+    r = await call(dave, 'POST', '/api/uploads', { size: VID.length, mime: 'video/mp4', name: '第一堂 錄影.mp4' });
+    ok(r.status === 200 && r.data.id && r.data.chunks === 3, 'start a chunked upload', r.data);
+    const vid = r.data.id;
+    const put = (s, id, seq, buf) => call(s, 'PUT', '/api/uploads/' + id + '/' + seq, buf, RAW);
+    r = await put(dave, vid, 1, VID.subarray(CS, CS * 2));
+    ok(r.status === 409 && r.data.next === 0, 'a chunk ahead of its turn is refused and says what is next', r.data);
+    r = await put(dave, vid, 0, VID.subarray(0, CS - 1));
+    ok(r.status === 400, 'a chunk of the wrong size is refused', r.status);
+    r = await put(bob, vid, 0, VID.subarray(0, CS));
+    ok(r.status === 404, "another user cannot write into dave's upload", r.status);
+    r = await put(dave, vid, 0, VID.subarray(0, CS));
+    ok(r.status === 200 && r.data.next === 1, 'chunk 0', r.data);
+    r = await put(dave, vid, 0, VID.subarray(0, CS));
+    ok(r.status === 200 && r.data.next === 1, 'a retried chunk is acknowledged, not appended twice', r.data);
+    r = await call(dave, 'POST', '/api/uploads/' + vid + '/finish', {});
+    ok(r.status === 409 && r.data.next === 1, 'finish before the last chunk is refused', r.data);
+    r = await call(dave, 'GET', '/api/images/' + vid);
+    ok(r.status === 404, 'an unfinished upload cannot be fetched', r.status);
+    r = await put(dave, vid, 1, VID.subarray(CS, CS * 2));
+    ok(r.status === 200 && r.data.next === 2, 'chunk 1', r.data);
+    r = await put(dave, vid, 2, VID.subarray(CS * 2));
+    ok(r.status === 200 && r.data.next === 3, 'the short last chunk', r.data);
+    r = await call(dave, 'POST', '/api/uploads/' + vid + '/finish', {});
+    ok(r.status === 200 && r.data.size === VID.length, 'finish', r.data);
+    r = await put(dave, vid, 2, VID.subarray(CS * 2));
+    ok(r.status === 404, 'a finished upload takes no more chunks', r.status);
+
+    r = await call(dave, 'GET', '/api/images/' + vid, undefined, { buffer: true });
+    ok(r.status === 200 && r.data.length === VID.length && sha(r.data) === sha(VID) &&
+       r.headers.get('content-type') === 'video/mp4' && r.headers.get('accept-ranges') === 'bytes',
+      'the whole file streams back byte for byte, as video', { status: r.status, len: r.data.length, type: r.headers.get('content-type') });
+    const range = (s, id, v) => call(s, 'GET', '/api/images/' + id, undefined, { buffer: true, headers: { Range: v } });
+    r = await range(dave, vid, 'bytes=' + (CS - 50) + '-' + (CS + 49));
+    ok(r.status === 206 && r.data.equals(VID.subarray(CS - 50, CS + 50)) &&
+       r.headers.get('content-range') === 'bytes ' + (CS - 50) + '-' + (CS + 49) + '/' + VID.length,
+      'a Range across a chunk boundary', { status: r.status, cr: r.headers.get('content-range') });
+    r = await range(dave, vid, 'bytes=' + (CS * 2 + 1000) + '-');
+    ok(r.status === 206 && r.data.equals(VID.subarray(CS * 2 + 1000)), 'an open-ended Range runs to the end', r.status);
+    r = await range(dave, vid, 'bytes=-777');
+    ok(r.status === 206 && r.data.equals(VID.subarray(VID.length - 777)), 'a suffix Range', r.status);
+    r = await range(dave, vid, 'bytes=' + VID.length + '-');
+    ok(r.status === 416 && r.headers.get('content-range') === 'bytes */' + VID.length, 'a Range past the end is 416', r.status);
+
+    // A type the browser must never run is still an attachment when chunked.
+    const HTML = Buffer.concat([Buffer.from('<script>alert(1)</script>'), crypto.randomBytes(2000)]);
+    r = await call(dave, 'POST', '/api/uploads', { size: HTML.length, mime: 'text/html', name: 'evil.html' });
+    const evil = r.data.id;
+    await put(dave, evil, 0, HTML);
+    await call(dave, 'POST', '/api/uploads/' + evil + '/finish', {});
+    r = await call(dave, 'GET', '/api/images/' + evil, undefined, { buffer: true });
+    ok(r.status === 200 && r.headers.get('content-type') === 'application/octet-stream' &&
+       /^attachment/.test(r.headers.get('content-disposition') || '') && /sandbox/.test(r.headers.get('content-security-policy') || ''),
+      'a chunked .html is served as an inert attachment', r.headers.get('content-type'));
+
+    // The file lives in a 課程筆記 folder as a "file note".
+    r = await call(dave, 'POST', '/api/folders', { name: '第一週', area: 'course' });
+    const dFolder = r.data.folder.id;
+    const fileNote = (s, id, name, size, mime) => call(s, 'POST', '/api/notes', {
+      title: name, folderId: dFolder, area: 'course', content: '[' + name + '](file:' + id + ')\n',
+      meta: { file: { id: id, name: name, mime: mime, size: size } } });
+    r = await fileNote(dave, vid, '第一堂 錄影.mp4', VID.length, 'video/mp4');
+    ok(r.status === 200 && r.data.note.area === 'course' && r.data.note.meta.file.id === vid, 'a file note in a course folder', r.data);
+    const vNote = r.data.note.id;
+    r = await call(dave, 'GET', '/api/images');
+    const listed = r.data.images.find(i => i.id === vid);
+    ok(listed && listed.bytes === VID.length && listed.notes.some(n => n.id === vNote), 'the library lists it with its real size, as used', listed);
+    ok(!r.data.images.some(i => i.id === probe), 'an upload that never finished is not in the library');
+    r = await call(bob, 'GET', '/api/images/' + vid);
+    ok(r.status === 404, 'nobody else can fetch it', r.status);
+    await call(dave, 'POST', '/api/notes/' + vNote + '/shares', { username: BOB, perm: 'read' });
+    r = await range(bob, vid, 'bytes=0-9');
+    ok(r.status === 206 && r.data.equals(VID.subarray(0, 10)), 'a share recipient can stream it', r.status);
+
+    // Backup: a chunked file is streamed into the zip and re-chunked on restore.
+    r = await call(dave, 'GET', '/api/backup?scope=mine', undefined, { buffer: true });
+    ok(r.status === 200, 'dave downloads a backup', r.status);
+    const daveZip = r.data;
+    const zf = path.join(os.tmpdir(), 'smoke-' + crypto.randomBytes(4).toString('hex') + '.zip');
+    fs.writeFileSync(zf, daveZip);
+    const zr = ZipReader.open(zf);
+    const fIdx = JSON.parse(zr.read('files.json', 1 << 26).toString('utf8'));
+    const fRow = fIdx.find(f => f.id === vid);
+    let zsum = crypto.createHash('sha256'), zlen = 0;
+    if (fRow) for await (const piece of zr.stream(fRow.file)) { zsum.update(piece); zlen += piece.length; }
+    ok(fRow && fRow.chunked === true && fRow.size === VID.length && zlen === VID.length && zsum.digest('hex') === sha(VID),
+      'the backup holds the chunked file byte for byte', fRow);
+    zr.close(); fs.unlinkSync(zf);
+
+    const daveId = (await call(dave, 'GET', '/api/me')).data.user.id;
+    await call(admin, 'DELETE', '/api/admin/users/' + daveId);
+    const dave2 = jar();
+    r = await call(dave2, 'POST', '/api/register', { username: 'dave', password: 'dave-password-123', invite: '' });
+    ok(r.status === 200 && (await call(dave2, 'GET', '/api/images/' + vid)).status === 404, 'dave is wiped, the file with him');
+    r = await call(dave2, 'POST', '/api/backup/upload', {});
+    const bId = r.data.id;
+    const STEP = Math.min(BODY_LIMIT, 16 * 1024 * 1024) - 1024;
+    for (let off = 0; off < daveZip.length; off += STEP) {
+      r = await call(dave2, 'PUT', '/api/backup/upload/' + bId + '?offset=' + off, daveZip.subarray(off, Math.min(daveZip.length, off + STEP)), RAW);
+      if (r.status !== 200) break;
+    }
+    ok(r.status === 200, 'the backup zip goes back up in pieces', r.status);
+    r = await call(dave2, 'POST', '/api/backup/upload/' + bId + '/restore', {});
+    let dJob = null;
+    for (let i = 0; i < 600 && r.data && r.data.job; i++) {
+      const s = await call(dave2, 'GET', '/api/backup/jobs/' + r.data.job);
+      if (s.data && s.data.finished) { dJob = s.data; break; }
+      await new Promise(res => setTimeout(res, 200));
+    }
+    ok(dJob && !dJob.error && dJob.report.files.created === 2 && dJob.report.notes.created === 1, 'restore recreates the files and the file note', dJob && (dJob.error || dJob.report));
+    r = await call(dave2, 'GET', '/api/images/' + vid, undefined, { buffer: true });
+    ok(r.status === 200 && sha(r.data) === sha(VID), 'the restored file is byte for byte', r.status);
+    r = await range(dave2, vid, 'bytes=' + (CS * 2 - 5) + '-' + (CS * 2 + 4));
+    ok(r.status === 206 && r.data.equals(VID.subarray(CS * 2 - 5, CS * 2 + 5)), 'and still seekable', r.status);
+
+    // Purging a file note takes its file along — unless another note still uses it.
+    r = await call(dave2, 'POST', '/api/notes', { title: '講義', area: 'course', folderId: dFolder, content: '影片在這：[錄影](file:' + vid + ')' });
+    const otherNote = r.data.note.id;
+    await call(dave2, 'DELETE', '/api/notes/' + vNote);
+    r = await call(dave2, 'DELETE', '/api/trash/' + vNote);
+    ok(r.status === 200 && (await call(dave2, 'GET', '/api/images/' + vid)).status === 200, 'purging the file note keeps a file another note still links', r.status);
+    await call(dave2, 'DELETE', '/api/notes/' + otherNote);
+    await call(dave2, 'DELETE', '/api/trash/' + otherNote);
+    ok((await call(dave2, 'GET', '/api/images/' + vid)).status === 200, 'purging an ordinary note never deletes uploads');
+    r = await fileNote(dave2, vid, 'x.mp4', VID.length, 'video/mp4');
+    await call(dave2, 'DELETE', '/api/notes/' + r.data.note.id);
+    ok((await call(dave2, 'GET', '/api/images/' + vid)).status === 200, 'a file note in the trash still has its file');
+    await call(dave2, 'DELETE', '/api/trash');
+    ok((await call(dave2, 'GET', '/api/images/' + vid)).status === 404, 'emptying the trash deletes the file with its note');
+  }
+
+  if (!OLD) {
     section('request limits and static allow-list (MariaDB build only)');
     const big = JSON.stringify({ title: 'x', content: 'y'.repeat(BODY_LIMIT + 1024) });
     r = await call(admin, 'POST', '/api/notes', big, { raw: true, contentType: 'application/json' });

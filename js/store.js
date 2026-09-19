@@ -52,7 +52,12 @@
         return r.blob();
       }
       return r.json().catch(function () { return {}; }).then(function (data) {
-        if (!r.ok) throw new Error(data.error || ('請求失敗 (' + r.status + ')'));
+        if (!r.ok) {
+          // status／data 給需要分辨錯誤種類的呼叫端用（uploadFile 靠 409 的 next 重新對齊）
+          const err = new Error(data.error || ('請求失敗 (' + r.status + ')'));
+          err.status = r.status; err.data = data;
+          throw err;
+        }
         return data;
       });
     });
@@ -143,7 +148,7 @@
       });
     },
     deleteNote: function (id) { return req('DELETE', '/api/notes/' + id); },
-    // 所有筆記／證照課程筆記／知識區 之間搬一篇筆記（js/app.js moveNoteToArea）；
+    // 所有筆記／課程筆記／知識區 之間搬一篇筆記（js/app.js moveNoteToArea）；
     // area 是 null 或 'course'/'knowledge' ——novel／quick 不走這條，伺服器會拒絕。
     moveNoteArea: function (id, area, folderId) {
       return req('PUT', '/api/notes/' + id + '/area', { area: area || null, folderId: folderId || null })
@@ -261,6 +266,51 @@
       const n = name != null ? name : blob.name;
       if (n) h['X-File-Name'] = encodeURIComponent(String(n));
       return req('POST', '/api/images', blob, { raw: true, headers: h }).then(r => r.id);
+    },
+    // Any file, any size (up to the server's UPLOAD_MAX_BYTES). A file that fits one
+    // request goes through putImage unchanged; anything bigger — a course video, a heavy
+    // deck — is cut into the chunk size the server names and PUT in order. A chunk that
+    // fails is retried a few times (the server recognises a repeat by its sequence number,
+    // so a retry can never append twice). onProgress(sentBytes, totalBytes). Resolves to
+    // the file id, the same id putImage would give.
+    uploadFile: function (file, onProgress, type) {
+      const mime = type || file.type || 'application/octet-stream';
+      const progress = function (n) { if (onProgress) onProgress(n, file.size); };
+      if (file.size <= 20 * 1024 * 1024) {
+        progress(0);
+        // 這台伺服器的 MAX_BODY_BYTES 可能調得比 20 MB 小：改走分塊，區塊大小由伺服器決定。
+        // 不能只認 413——伺服器一拒收就關連線，瀏覽器還在送 body，看到的是沒有 status 的
+        // 「Failed to fetch」。真的斷網的話，分塊的第一個請求一樣會失敗，錯誤照常浮上來。
+        return this.putImage(file, file.name, mime).then(function (id) { progress(file.size); return id; },
+          function (e) { if (e && (e.status === 413 || !e.status)) return chunked(); throw e; });
+      }
+      return chunked();
+      function chunked() { return req('POST', '/api/uploads', { name: file.name, mime: mime, size: file.size }).then(function (up) {
+        let seq = 0;
+        function putChunk(tries) {
+          const start = seq * up.chunkSize;
+          const piece = file.slice(start, Math.min(file.size, start + up.chunkSize));
+          return req('PUT', '/api/uploads/' + up.id + '/' + seq, piece, { raw: true, headers: { 'Content-Type': 'application/octet-stream' } })
+            .catch(function (e) {
+              // 409：伺服器手上的進度跟我們以為的不一樣（上一塊其實有收到），照它說的接下去
+              if (e && e.status === 409 && e.data && typeof e.data.next === 'number') return { next: e.data.next };
+              // 其他 4xx 是真的錯（太大、格式不對）；沒有 status 的是網路斷掉，重試幾次
+              if (tries >= 3 || (e && e.status && e.status < 500)) throw e;
+              return new Promise(function (r) { setTimeout(r, 1200 * (tries + 1)); }).then(function () { return putChunk(tries + 1); });
+            });
+        }
+        function next() {
+          if (seq >= up.chunks) return req('POST', '/api/uploads/' + up.id + '/finish', {}).then(function () { return up.id; });
+          return putChunk(0).then(function (r) {
+            // the server says which chunk it wants next — after a 409 that is how we resync
+            seq = (r && typeof r.next === 'number') ? r.next : seq + 1;
+            progress(Math.min(file.size, seq * up.chunkSize));
+            return next();
+          });
+        }
+        progress(0);
+        return next();
+      }); }
     },
     // Title / description / image for a {%preview url %} card, fetched once per
     // URL for the session. Never rejects: a site that cannot be read resolves to
