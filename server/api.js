@@ -820,10 +820,26 @@ async function saveOrder(user, body) {
   const notes = Array.isArray(b.notes) ? b.notes.map(String) : [];
   const folders = Array.isArray(b.folders) ? b.folders.map(String) : [];
   if (notes.length + folders.length > ORDER_MAX) return { status: 400, error: '一次排序的項目太多' };
+  // One level belongs to one area. A note or folder filed into another area's folder is shown
+  // by neither area's tree (each filters by area), i.e. it silently disappears — so the rows
+  // must match the parent folder's area, or, at the top level, each other's. Changing area is
+  // moveNoteArea's job, never a drag's.
+  let levelArea;   // undefined until the first owned row (or the parent) says which area this is
   if (parentId) {
     const parent = await q.folderById.get(parentId);
     if (!parent || parent.owner_id !== user.id) return { status: 404 };
+    levelArea = parent.area || null;
   }
+  for (const kind of [[notes, q.noteAreaById], [folders, q.folderById]]) {
+    for (const id of kind[0]) {
+      const r = await kind[1].get(id);
+      if (!r || r.owner_id !== user.id) continue;   // not mine: the UPDATE skips it as well
+      const a = r.area || null;
+      if (levelArea === undefined) levelArea = a;
+      else if (a !== levelArea) return { status: 400, error: '不能把筆記或資料夾排進別的區域' };
+    }
+  }
+  if (levelArea === undefined) levelArea = null;
   if (folders.length && parentId) {
     // Neither the notes nor the folders table has a foreign key on its parent,
     // so nothing else stops a folder being filed inside its own subtree, where it
@@ -837,8 +853,8 @@ async function saveOrder(user, body) {
     }
   }
   await tx(async function () {
-    for (let i = 0; i < notes.length; i++) await q.orderNote.run(parentId, i + 1, notes[i], user.id);
-    for (let i = 0; i < folders.length; i++) await q.orderFolder.run(parentId, i + 1, folders[i], user.id);
+    for (let i = 0; i < notes.length; i++) await q.orderNote.run(parentId, i + 1, notes[i], user.id, levelArea);
+    for (let i = 0; i < folders.length; i++) await q.orderFolder.run(parentId, i + 1, folders[i], user.id, levelArea);
   }, 'saveOrder');
   return { ok: true };
 }

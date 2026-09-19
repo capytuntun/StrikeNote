@@ -40,6 +40,7 @@
     'external-link':   '<path d="M14 4h6v6M20 4l-9 9M18 13v7H4V6h7"/>',
     film:              '<path d="M4 4h16v16H4z"/><path d="M8 4v16M16 4v16M4 9h4M4 15h4M16 9h4M16 15h4"/>',
     presentation:      '<path d="M2 4h20M4 4v11h16V4"/><path d="M12 15v5M8 20h8"/><path d="m8 11 3-3 2 2 3-3"/>',
+    'sticky-note':     '<path d="M4 4h16v10l-6 6H4z"/><path d="M14 20v-6h6"/>',
     maximize:          '<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/>',
     clock:             '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     'alert-triangle':  '<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/>',

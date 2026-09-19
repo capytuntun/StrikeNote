@@ -447,6 +447,30 @@ async function main() {
     ok(folderPos(ordFolder) === 1 && folderPos(fid) === 2 && folderPos(ordKid) === null, 'folder positions stored',
       [folderPos(ordFolder), folderPos(fid), folderPos(ordKid)]);
 
+    // One level is one area: a drag must never file a row into another area's folder,
+    // where neither area's tree would show it.
+    r = await call(admin, 'POST', '/api/folders', { name: '課程資料夾', area: 'course' });
+    const crsFolder = r.data.folder.id;
+    r = await call(admin, 'POST', '/api/notes', { title: '課程筆記一', area: 'course', folderId: crsFolder });
+    const crsNote = r.data.note.id;
+    r = await call(admin, 'POST', '/api/notes', { title: '課程筆記二', area: 'course' });
+    const crsTop = r.data.note.id;
+    r = await call(admin, 'PUT', '/api/order', { parentId: crsFolder, notes: [ord[0].id] });
+    ok(r.status === 400, "a general note cannot be ordered into a course folder", r.status);
+    r = await call(admin, 'PUT', '/api/order', { parentId: ordFolder, notes: [crsNote] });
+    ok(r.status === 400, "a course note cannot be ordered into a general folder", r.status);
+    r = await call(admin, 'PUT', '/api/order', { parentId: null, notes: [crsTop, ord[0].id] });
+    ok(r.status === 400, 'a top level cannot mix areas', r.status);
+    r = await call(admin, 'PUT', '/api/order', { parentId: ordFolder, folders: [crsFolder] });
+    ok(r.status === 400, "a course folder cannot be moved into a general folder", r.status);
+    r = await call(admin, 'GET', '/api/notes/' + crsNote);
+    ok(r.data.note.folderId === crsFolder && (await call(admin, 'GET', '/api/notes/' + ord[0].id)).data.note.folderId === ordFolder,
+      'nothing moved on a refused order', r.data.note.folderId);
+    r = await call(admin, 'PUT', '/api/order', { parentId: crsFolder, notes: [crsTop, crsNote] });
+    ok(r.status === 200, 'ordering inside one area works', r.data);
+    r = await call(admin, 'GET', '/api/notes/' + crsTop);
+    ok(r.data.note.folderId === crsFolder && r.data.note.position === 1 && r.data.note.area === 'course', 'the course note moved into the course folder', r.data.note);
+
     section('link preview guard');
     const refused = ['http://127.0.0.1:8090/', 'http://localhost/', 'http://localhost./', 'http://[::1]/',
       'http://[::ffff:127.0.0.1]/', 'http://[::ffff:7f00:1]/', 'http://169.254.169.254/latest/meta-data/',

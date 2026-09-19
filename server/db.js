@@ -569,9 +569,13 @@ const q = {
 
   // Manual order (api.js saveOrder): a drag rewrites one folder level's whole
   // order, and moves the dragged rows into that level in the same statement.
+  // `area <=> ?` (NULL-safe equals): a row is only ever filed into a level of its own area.
+  // saveOrder checks that up front and answers 400; the condition here is what makes it hold
+  // even if the row's area changed (moveNoteArea) between that check and this statement.
   orderNote: stmt(
-    'UPDATE notes SET folder_id = ?, position = ? WHERE id = ? AND owner_id = ? AND deleted_at IS NULL'),
-  orderFolder: stmt('UPDATE folders SET parent_id = ?, position = ? WHERE id = ? AND owner_id = ?'),
+    'UPDATE notes SET folder_id = ?, position = ? WHERE id = ? AND owner_id = ? AND deleted_at IS NULL AND area <=> ?'),
+  orderFolder: stmt('UPDATE folders SET parent_id = ?, position = ? WHERE id = ? AND owner_id = ? AND area <=> ?'),
+  noteAreaById: stmt('SELECT owner_id, area FROM notes WHERE id = ?'),
   // The one deliberate exception to "a note's area never changes" (api.js
   // moveNoteArea): reclassifying a note between 所有筆記／課程筆記／知識區.
   // Resets position to NULL — a manual order position made sense in the old

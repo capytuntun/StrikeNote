@@ -489,6 +489,14 @@
   global.QuickNotes = {
     render: render,
     refresh: function (opts) { if (lastOpts) render(lastOpts.container, opts); },
+    // 從側邊欄點一則隨筆：跟點卡片一樣用對話框開。找不到（已刪除、還沒畫過）回傳 false
+    open: function (id) {
+      if (!lastOpts || !lastOpts.opts) return false;
+      const n = (lastOpts.opts.notes || []).filter(function (x) { return x.id === id; })[0];
+      if (!n) return false;
+      openModal(n, lastOpts.opts);
+      return true;
+    },
     reset: function () {
       roList.forEach(function (ro) { ro.disconnect(); });
       roList = [];

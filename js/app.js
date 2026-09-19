@@ -53,8 +53,22 @@
   // markdown.js resolves [[…]] through this; editor.js autocompletes through it.
   MD.setNoteLookup(findNoteByTitle);
   // 樹狀清單／搜尋結果用的筆記圖示：分享來的看權限，自己的看筆記種類。
+  // 樹上顯示的名字。隨筆多半沒有標題（伺服器補的「未命名筆記」），整排都叫同一個名字沒有用，
+  // 改拿內文第一行（去掉 Markdown 的標記）當名字。
+  function treeLabel(note) {
+    if (note.area === 'quick' && (!note.title || note.title === '未命名筆記')) {
+      const line = String(note.content || '').split('\n').map(function (l) {
+        return l.replace(/^\s*(?:[-*+]\s+(?:\[[ xX]\]\s+)?|#{1,6}\s+|>\s*|\d+\.\s+)/, '').replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim();
+      }).filter(Boolean)[0];
+      return line ? line.slice(0, 40) : '（空白隨筆）';
+    }
+    return note.title || '未命名筆記';
+  }
   function noteIcon(note) {
     if (note.perm && note.perm !== 'owner') return note.perm === 'edit' ? 'pen-line' : 'lock';
+    if (isFileNote(note)) return (window.AreaBrowser && AreaBrowser.fileKind) ? AreaBrowser.fileKind(note.meta.file).icon : 'paperclip';
+    if (note.meta && note.meta.relMap) return 'network';
+    if (note.area === 'quick') return 'pin';
     if (note.meta && note.meta.perfReport) return 'chart';
     if (note.meta && note.meta.secReport) return 'shield';
     return 'file-text';
@@ -116,6 +130,9 @@
         if (window.Dashboard) Dashboard.openFolder(wantFolder);
       } else if (wantBook && state.folders.some(function (f) { return f.id === wantBook; })) {
         openBook(wantBook);
+      } else if (wantNote && isStickyNote(state.notes.find(function (n) { return n.id === wantNote; })) &&
+                 goToSticky(state.notes.find(function (n) { return n.id === wantNote; }))) {
+        // 便條紙的連結：goToSticky 已經把畫面帶到它的資料夾了
       } else if (wantNote && isFileNote(state.notes.find(function (n) { return n.id === wantNote; }))) {
         // 連結指到一個上傳的檔案：背景先停在它所在的區域／資料夾，再把檢視器疊上去
         const fn = state.notes.find(function (n) { return n.id === wantNote; });
@@ -135,19 +152,52 @@
 
   // ---- Tree rendering ----------------------------------------------------
   // 排序方式與手動順序跟首頁共用（js/sorting.js）
-  // 側邊欄樹跟首頁儀表板永遠只看一般區域（area 是 null／undefined）——課程筆記、
-  // 知識區、隨筆、小說都是各自獨立的分頁（見 areaNotes/areaFolders 與四個
-  // openXxx 函式），不會混進這裡，即使小說解鎖後它的筆記已經在 state.notes 裡。
-  function childFolders(parentId, mode) {
+  // 側邊欄的樹跟著「目前所在的區域」走（treeArea）：在首頁、垃圾桶、電子書或一般筆記裡是
+  // null＝所有筆記；進了課程筆記／知識區／小說／隨筆，或打開這些區域裡的一篇筆記，樹就換成
+  // 那個區域自己的資料夾與筆記。一次只顯示一個區域，所以拖放、批次選取、在此新增都只會碰到
+  // 同一個區域的東西——不同區域的項目永遠不會同時出現在樹上。首頁儀表板不看這個變數，它自己
+  // 永遠只篩 !x.area（見 dashOpts），所以別的區域的筆記不會混進首頁。
+  // childFolders/childNotes 的第三個參數可以指定區域（placeItems 用被拖的那一項自己的區域，
+  // 不靠畫面狀態）；不給就是 treeArea。
+  let treeArea = null;
+  function childFolders(parentId, mode, area) {
+    const a = area === undefined ? treeArea : (area || null);
     return state.folders
-      .filter(function (f) { return !f.area && (f.parentId || null) === parentId; })
-      .sort(function (a, b) { return Sorting.compareFolders(a, b, mode); });
+      .filter(function (f) { return (f.area || null) === a && (f.parentId || null) === parentId; })
+      .sort(function (a1, b1) { return Sorting.compareFolders(a1, b1, mode); });
   }
   const isMine = n => !n.perm || n.perm === 'owner';
-  function childNotes(folderId, mode) {
+  function childNotes(folderId, mode, area) {
+    const a = area === undefined ? treeArea : (area || null);
     return state.notes
-      .filter(function (n) { return !n.area && isMine(n) && (n.folderId || null) === folderId; })
-      .sort(function (a, b) { return Sorting.compareNotes(a, b, mode); });
+      // 便條紙不是文件，只活在它的資料夾頁面上；上傳的檔案是資料夾的內容，照樣列出來
+      .filter(function (n) { return (n.area || null) === a && isMine(n) && !isStickyNote(n) && (n.folderId || null) === folderId; })
+      .sort(function (a1, b1) { return Sorting.compareNotes(a1, b1, mode); });
+  }
+  // 換區域時清掉批次選取：選到的東西已經不在畫面上了，留著只會讓「刪除／移動」動到看不見的項目
+  function setTreeArea(area) {
+    area = area || null;
+    if (area !== treeArea) {
+      treeArea = area;
+      selected.clear();
+      selectedFolders.clear();
+    }
+    // 樹顯示哪個區域，側邊欄那一列就亮著——包括正在編輯那個區域裡的一篇筆記的時候
+    ['course', 'knowledge', 'novel', 'quick'].forEach(function (a) { setNavActive(a + '-open-btn', a === area); });
+    renderTree();
+  }
+  // 新東西要建在哪個區域：有目標資料夾就跟資料夾（伺服器的 resolveArea 也是這樣要求的），
+  // 沒有就是側邊欄現在所在的區域。隨筆沒有資料夾也不從側邊欄新增，當成一般區域。
+  function areaForNew(folderId) {
+    if (folderId) {
+      const f = state.folders.find(function (x) { return x.id === folderId; });
+      return f ? (f.area || null) : null;
+    }
+    return treeArea && treeArea !== 'quick' ? treeArea : null;
+  }
+  function withArea(folderId, opts) {
+    const a = areaForNew(folderId);
+    return a ? Object.assign({}, opts, { area: a }) : opts;
   }
   // 四個獨立區域各自的筆記／資料夾（永遠是自己的，不含分享來的）。
   function areaNotes(area) { return state.notes.filter(function (n) { return n.area === area && isMine(n); }); }
@@ -164,14 +214,25 @@
     // list is now stale — recompute it against the current notes.
     if (search.query.trim()) runSearch(search.query);
     treeEl.innerHTML = '';
+    // 在某個區域裡：樹的最上面標出這是哪個區域的內容，免得跟「所有筆記」的樹搞混
+    if (treeArea) {
+      const info = treeArea === 'quick' ? { title: '隨筆', icon: 'pin' } : AREA_INFO[treeArea];
+      const head = document.createElement('div');
+      head.className = 'tree-section tree-area-head';
+      head.innerHTML = Icons.svg(info.icon) + '<span>' + MD.escapeHtml(info.title) + '</span>';
+      treeEl.appendChild(head);
+    }
     treeEl.appendChild(buildLevel(null));
-    if (!state.folders.length && !state.notes.length) {
+    if (!childFolders(null).length && !childNotes(null).length) {
       const hint = document.createElement('div');
       hint.className = 'tree-hint';
-      hint.textContent = '尚無筆記，點上方「＋ 筆記」開始。';
+      hint.textContent = treeArea === 'quick' ? '還沒有隨筆。'
+        : treeArea ? '這個區域還沒有資料夾或筆記。'
+        : '尚無筆記，點上方「＋ 筆記」開始。';
       treeEl.appendChild(hint);
     }
-    const shared = sharedNotes();
+    // 別人分享給我的筆記不屬於我的任何區域，只跟「所有筆記」的樹放在一起
+    const shared = treeArea ? [] : sharedNotes();
     if (shared.length) {
       const head = document.createElement('div');
       head.className = 'tree-section';
@@ -230,7 +291,8 @@
     bBook.addEventListener('click', function (e) { e.stopPropagation(); openBook(folder.id); });
     actions.appendChild(bFolder);
     actions.appendChild(bNote);
-    actions.appendChild(bBook);
+    // 電子書是首頁那一區的功能（folders.is_book 會把資料夾列進首頁的「電子書」），區域的資料夾不給
+    if (!folder.area) actions.appendChild(bBook);
     row.appendChild(actions);
 
     row.addEventListener('click', function () { toggleFolder(folder.id); });
@@ -264,7 +326,7 @@
       : '';
     row.innerHTML = '<span class="twisty"></span>' +
       '<span class="lead"><span class="ic">' + Icons.svg(noteIcon(note)) + '</span>' + checkHtml + '</span>' +
-      '<span class="label">' + MD.escapeHtml(note.title || '未命名筆記') + '</span>' +
+      '<span class="label">' + MD.escapeHtml(treeLabel(note)) + '</span>' +
       (mine ? '' : '<span class="share-by">' + MD.escapeHtml(note.sharedBy || '') + '</span>');
     const cb = row.querySelector('.tree-check');
     if (cb) {
@@ -277,7 +339,11 @@
         updateBatchBar();
       });
     }
-    row.addEventListener('click', function () { openNote(note.id); });
+    row.addEventListener('click', function () {
+      // 隨筆在它自己那一頁是用 Keep 式的對話框開的，從側邊欄點也一樣，不進整頁編輯器
+      if (note.area === 'quick' && window.QuickNotes && QuickNotes.open && quickWrapEl && !quickWrapEl.hidden && QuickNotes.open(note.id)) return;
+      openNote(note.id);
+    });
     row.addEventListener('contextmenu', function (e) { showCtx(e, 'note', note); });
     attachDrag(row, 'note', note.id);
     if (mine) attachDrop(row, 'note', note);
@@ -436,10 +502,21 @@
       toast('資料夾不能移到自己或自己的子資料夾裡');
       return;
     }
+    // 區域看「被拖的那一項」自己，不看畫面狀態；目標資料夾必須是同一個區域的（伺服器的
+    // saveOrder 也會擋）——放進別的區域的資料夾，那一項在兩邊的樹上都會看不到。
+    const pool = kind === 'note' ? state.notes : state.folders;
+    const first = pool.find(function (x) { return x.id === mine[0]; });
+    const area = (first && first.area) || null;
+    const targetFolder = target ? state.folders.find(function (f) { return f.id === target; }) : null;
+    const mixed = mine.some(function (id) { const x = pool.find(function (y) { return y.id === id; }); return ((x && x.area) || null) !== area; });
+    if (mixed || (targetFolder && (targetFolder.area || null) !== area)) {
+      toast('不能移到別的區域的資料夾；要換區域請用筆記的「換區域…」');
+      return;
+    }
     const reordering = targetId != null;
     const toManual = reordering && Sorting.mode() !== 'manual';
     const base = reordering ? Sorting.mode() : 'manual';
-    const level = (kind === 'note' ? childNotes(target, base) : childFolders(target, base))
+    const level = (kind === 'note' ? childNotes(target, base, area) : childFolders(target, base, area))
       .map(function (x) { return x.id; });
     const order = Sorting.reorder(level, mine, targetId, after);
     const items = kind === 'note' ? state.notes : state.folders;
@@ -583,6 +660,21 @@
   // 附件送，塞進 <video>/<iframe> 也放不出來，所以只給下載。影片可以拖時間軸是因為
   // 伺服器支援 Range。
   function isFileNote(n) { return !!(n && n.meta && n.meta.file && n.meta.file.id); }
+  // 便條紙（meta.sticky）一樣不進編輯器：它住在課程筆記的資料夾頁面上，直接在卡片上打字。
+  function isStickyNote(n) { return !!(n && n.meta && n.meta.sticky); }
+  function stickyTitle(text) {
+    const line = String(text || '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean)[0] || '';
+    return line.slice(0, 60) || '便條紙';
+  }
+  // 從連結、搜尋結果點到一張便條紙：帶到它所在的區域／資料夾，把游標放到那張上面
+  function goToSticky(note) {
+    if (!note.area || note.area === 'novel' || !AREA_INFO[note.area] || !AREA_INFO[note.area].wrap || !window.AreaBrowser) return false;
+    saveNow();
+    openArea(note.area);
+    AreaBrowser.openFolder(note.folderId || null);
+    AreaBrowser.focusSticky(note.id);
+    return true;
+  }
   let fileViewerEl = null;
   function closeFileViewer() {
     const ov = fileViewerEl;
@@ -706,6 +798,34 @@
         }).then(function (n) { state.notes.push(n); return n; });
       } : null,
       onOpenFile: openFileViewer,
+      // 便條紙（課程筆記才有）：一篇 meta.sticky 的筆記，內文就是便條紙上的字，在資料夾頁面上
+      // 直接打字、自動儲存（js/areabrowser.js makeSticky）。標題取第一行，只是給垃圾桶、搜尋
+      // 這些列出標題的地方認得出是哪一張——卡片本身不顯示標題，所以不會像隨筆當初那樣
+      // 「第一行出現兩次」。
+      onNewSticky: area === 'course' ? function (folderId) {
+        return Store.createNote('便條紙', folderId, { area: area, content: '', meta: { sticky: { color: 'yellow' } } }).then(function (n) {
+          state.notes.push(n); return n;
+        }, function (e) { toast('新增失敗：' + (e && e.message || e)); return null; });
+      } : null,
+      onSaveSticky: area === 'course' ? function (note, fields) {
+        const next = Object.assign({}, note);
+        if (fields.content !== undefined) {
+          next.content = fields.content;
+          next.title = stickyTitle(fields.content);
+        }
+        if (fields.color !== undefined) {
+          // 顏色馬上寫回本機那份：不然「換顏色→立刻打字」時，第二個存檔帶的還是舊的 meta，
+          // 會在伺服器上把顏色蓋回去
+          note.meta = Object.assign({}, note.meta, { sticky: Object.assign({}, note.meta && note.meta.sticky, { color: fields.color }) });
+          next.meta = note.meta;
+        }
+        return Store.updateNote(next).then(function (n) {
+          // 只收伺服器那邊才知道的欄位。content 跟 meta 不回寫：使用者這時候可能又多打了幾個字
+          // 或又換了顏色，本機那份才是最新的
+          note.title = n.title; note.rev = n.rev; note.updatedAt = n.updatedAt;
+          return true;
+        }, function (e) { toast('儲存失敗：' + (e && e.message || e)); return false; });
+      } : null,
       onNewNote: function (folderId) {
         return Store.createNote('未命名筆記', folderId, { area: area }).then(function (n) {
           state.notes.push(n); renderTree(); return n;
@@ -871,7 +991,7 @@
     autoOpenSidebar();
     setHash(area);
     AreaBrowser.render(info.page, areaOpts(area));
-    renderTree();
+    setTreeArea(area);
   }
   function openQuick() {
     if (!quickWrapEl || !window.QuickNotes) return;
@@ -883,7 +1003,7 @@
     autoOpenSidebar();
     setHash('quick');
     QuickNotes.render(quickPageEl, quickOpts());
-    renderTree();
+    setTreeArea('quick');
   }
 
   // 小說的第二層密碼：彈窗重新輸入目前帳號的密碼，通過才把 novelIsUnlocked 打開、
@@ -1046,7 +1166,7 @@
     const what = [];
     if (folders.length) what.push(folders.length + ' 個資料夾');
     if (notes.length) what.push(notes.length + ' 篇筆記');
-    showFolderPicker('移動 ' + what.join('、') + '到…').then(function (res) {
+    showFolderPicker('移動 ' + what.join('、') + '到…', { folders: state.folders.filter(function (f) { return (f.area || null) === treeArea; }) }).then(function (res) {
       if (!res) return;                                  // 取消
       const target = res.folderId || null;
       const jobs = [];
@@ -1183,6 +1303,15 @@
   }
   // 點標題前的「資料夾/」前綴：回到首頁並直接走進那個資料夾
   function goToFolder(folderId) {
+    const gf = state.folders.find(function (f) { return f.id === folderId; });
+    if (gf && gf.area && AREA_INFO[gf.area] && window.AreaBrowser) {
+      // 區域裡的資料夾在那個區域自己的頁面上，首頁儀表板看不到它
+      saveNow();
+      LS.set('lastNote', '');
+      openArea(gf.area);
+      AreaBrowser.openFolder(folderId);
+      return;
+    }
     saveNow();
     LS.set('lastNote', '');
     showEmpty(true);        // render() 會回到最上層，再 navigate 進目標資料夾
@@ -1301,6 +1430,7 @@
     closeTrashView();
     closeAreaViews();
     closeRelMapView();
+    setTreeArea(null);    // 首頁＝所有筆記，側邊欄的樹也回到一般區域
     if (window.Dashboard) {
       Dashboard.render(dashOpts());
     }
@@ -1358,7 +1488,7 @@
     autoOpenSidebar();    // 跟首頁一樣開著抽屜，點頁面內容也不會收回
     setHash('trash');
     Trash.render(trashPageEl, trashOpts());
-    renderTree();
+    setTreeArea(null);
   }
 
   function openBook(folderId) {
@@ -1376,6 +1506,7 @@
     closeTrashView();
     closeAreaViews();
     closeRelMapView();
+    setTreeArea(null);
     bookWrapEl.hidden = false;
     setSidebarOpen(false);
     setHash('book/' + folderId);
@@ -1455,6 +1586,7 @@
     // 連結點到一個檔案，不該把正開著的那篇筆記的協作連線關掉。
     const known = state.notes.find(function (n) { return n.id === id; });
     if (isFileNote(known)) { openFileViewer(known); return; }
+    if (isStickyNote(known) && goToSticky(known)) return;
     closeStream();   // stop listening to the note we're leaving
     // 放下 Blog mode 裡正在編輯的區塊。它打的字早就寫進 #editor 了；要是等新筆記載入後
     // 才收尾，收尾的回寫會落到新筆記上。
@@ -1485,6 +1617,8 @@
       closeTrashView();
       closeAreaViews();
       closeRelMapView();
+      // 區域裡的筆記：側邊欄留在那個區域的樹（別人分享來的不屬於我的任何區域）
+      setTreeArea(isMine(note) ? (note.area || null) : null);
       setSidebarOpen(false);   // 從抽屜點開筆記後收回，把整個寬度留給筆記
 
       // 儲存後同步樹狀標題 / 記憶體中的筆記（給步驟式與表格式編輯器共用）。
@@ -1749,7 +1883,9 @@
     const title = a.getAttribute('data-note-title');
     if (!title) return;
     saveNow();
-    Store.createNote(title, state.current ? state.current.folderId : null).then(function (n) {
+    // 跟目前這篇同一個資料夾、同一個區域：少了 area，伺服器會因為資料夾的區域對不上而拒絕
+    const here = state.current && isMine(state.current) ? state.current : null;
+    Store.createNote(title, here ? here.folderId : null, here && here.area ? { area: here.area } : undefined).then(function (n) {
       state.notes.push(n);
       renderTree();
       openNote(n.id);
@@ -1914,6 +2050,7 @@
   function openRelMapNote(note) {
     if (!relmapWrapEl) return;
     showRelMapPage();
+    setTreeArea(isMine(note) ? (note.area || null) : null);
     LS.set('lastNote', note.id);
     setHash('note/' + note.id);
     function syncState(n) {
@@ -1936,7 +2073,13 @@
         const mine = relmapView === view;
         relmapView = null;
         relmapWrapEl.hidden = true;
-        if (mine) { LS.set('lastNote', ''); showEmpty(); }
+        if (!mine) return;
+        LS.set('lastNote', '');
+        // 返回：區域裡的關聯分析回到它那個區域的資料夾，不是首頁
+        if (isMine(note) && note.area && AREA_INFO[note.area] && AREA_INFO[note.area].wrap && window.AreaBrowser) {
+          openArea(note.area);
+          AreaBrowser.openFolder(note.folderId || null);
+        } else showEmpty();
       }
     });
     relmapView = view;
@@ -3080,7 +3223,7 @@
     e.stopPropagation();
     const actions = [];
     if (type === 'folder') {
-      actions.push({ icon: 'book-open', label: '以電子書閱讀', fn: function () { openBook(item.id); } });
+      if (!item.area) actions.push({ icon: 'book-open', label: '以電子書閱讀', fn: function () { openBook(item.id); } });
       actions.push({ icon: 'file-plus', label: '在此新增筆記', fn: function () { newNote(item.id); } });
       actions.push({ icon: 'folder-plus', label: '在此新增子資料夾', fn: function () { newFolder(item.id); } });
       actions.push({ icon: 'pencil', label: '重新命名', fn: function () { renameFolder(item); } });
@@ -3327,6 +3470,10 @@
   // 新增 → 筆記／證照範本／資安院報告／成效報告 都預設放進這裡，而不是丟到最上層；
   // 電子書不在此列（它本來就自己挑資料夾）。沒有打開資料夾時回 null = 最上層。
   function currentFolderId() {
+    if (treeArea && treeArea !== 'quick' && AREA_INFO[treeArea] && AREA_INFO[treeArea].wrap && !AREA_INFO[treeArea].wrap.hidden &&
+        window.AreaBrowser && AreaBrowser.currentFolder) {
+      return AreaBrowser.currentFolder() || null;
+    }
     if (emptyEl && !emptyEl.hidden && window.Dashboard && Dashboard.currentFolder) {
       return Dashboard.currentFolder() || null;
     }
@@ -3352,7 +3499,7 @@
   }
   function newNote(folderId) {
     createOnce('note', function () {
-      return Store.createNote('未命名筆記', folderId || null).then(function (n) {
+      return Store.createNote('未命名筆記', folderId || null, withArea(folderId)).then(function (n) {
         state.notes.push(n);
         if (folderId) state.expanded[folderId] = true;
         renderTree();
@@ -3369,7 +3516,7 @@
       blank.unit = info.unit; blank.domain = info.domain;
       blank.ip = info.ip; blank.vulnType = info.vulnType; blank.impact = info.impact;
       blank.title = SecEditor.titleFrom(info);
-      Store.createNote(blank.title, currentFolderId()).then(function (n) {
+      Store.createNote(blank.title, currentFolderId(), withArea(currentFolderId())).then(function (n) {
         n.meta = Object.assign({}, n.meta, { secReport: blank });
         n.content = (window.SecReport && SecReport.generate)
           ? SecReport.generate(blank, blank.steps).content : '';
@@ -3389,7 +3536,7 @@
       blank.unit = info.unit; blank.scope = info.scope;
       blank.periodStart = info.periodStart; blank.periodEnd = info.periodEnd;
       blank.title = PerfReport.titleFrom(info);
-      Store.createNote(blank.title, currentFolderId()).then(function (n) {
+      Store.createNote(blank.title, currentFolderId(), withArea(currentFolderId())).then(function (n) {
         n.meta = Object.assign({}, n.meta, { perfReport: blank });
         n.content = PerfReport.generate(blank).content;
         Store.updateNote(n).then(function () {
@@ -3403,7 +3550,7 @@
 
   function newFolder(parentId) {
     createOnce('folder', function () {
-      return Store.createFolder('新資料夾', parentId || null).then(function (f) {
+      return Store.createFolder('新資料夾', parentId || null, areaForNew(parentId) || undefined).then(function (f) {
         state.folders.push(f);
         if (parentId) state.expanded[parentId] = true;
         state.expanded[f.id] = true;
@@ -3499,7 +3646,8 @@
       // A copy of someone else's note lands at my root — its folderId belongs to
       // their tree and would leave the copy invisible in mine.
       const folder = full.perm === 'owner' ? full.folderId : null;
-      Store.createNote((full.title || '未命名筆記') + ' (複本)', folder).then(function (n) {
+      const dupOpts = full.perm === 'owner' && full.area ? { area: full.area } : undefined;   // 複本留在原本的區域
+      Store.createNote((full.title || '未命名筆記') + ' (複本)', folder, dupOpts).then(function (n) {
         n.content = full.content;
         Store.updateNote(n).then(function () {
           state.notes.push(n);
@@ -3908,7 +4056,7 @@
     const oscpBtn = $('#oscp-report');
     if (oscpBtn && window.OSCP) oscpBtn.addEventListener('click', function () {
       OSCP.showForm(function (title, md) {
-        Store.createNote(title, currentFolderId()).then(function (n) {
+        Store.createNote(title, currentFolderId(), withArea(currentFolderId())).then(function (n) {
           n.content = md;
           Store.updateNote(n).then(function () {
             state.notes.push(n);
@@ -3933,7 +4081,7 @@
     // 只更新側邊欄的話，新筆記在關掉編輯器後的 未歸類筆記 裡就是看不到。
     const relBtn = $('#rel-map');
     if (relBtn && window.RelMap) relBtn.addEventListener('click', function () {
-      Store.createNote('未命名關聯分析', currentFolderId(), { meta: { relMap: true }, content: RelMap.generate() })
+      Store.createNote('未命名關聯分析', currentFolderId(), withArea(currentFolderId(), { meta: { relMap: true }, content: RelMap.generate() }))
         .then(function (n) {
           state.notes.push(n);
           refreshViews();
@@ -4021,7 +4169,7 @@
       // 隨筆沒有標題、彼此也不會互連，進圖只是一堆「未命名筆記」的孤點；小說是
       // 刻意隔開的區域，也不該混進一般筆記的關聯圖。課程筆記／知識區是有標題、
       // 會互相 [[連結]] 的正經筆記，留著。
-      Graph.open(state.notes.filter(function (n) { return n.area !== 'quick' && n.area !== 'novel' && !isFileNote(n); }), {
+      Graph.open(state.notes.filter(function (n) { return n.area !== 'quick' && n.area !== 'novel' && !isFileNote(n) && !isStickyNote(n); }), {
         onOpenNote: function (note) { openNote(note.id); },
         onOpenTag: function (tag) { browseTag(tag); }
       });

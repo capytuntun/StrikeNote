@@ -116,6 +116,37 @@
   }
   global.addEventListener('scroll', hidePop, true);
 
+  // ---- 便條紙：meta.sticky = { color } ----
+  // 跟檔案一樣是「特殊的筆記」：內文就是便條紙上的字，所以垃圾桶／還原／搜尋／備份都不用
+  // 另外做。卡片永遠可以直接打字（沒有「進入編輯」這一步，跟真的便條紙一樣）：每次輸入
+  // 先寫回 note.content（本機的那份），再延遲 600ms 存檔；失焦立刻存。計時器以筆記 id 記在
+  // 模組裡而不是卡片上，畫面重畫（例如旁邊的上傳剛好完成）不會弄丟還沒送出的字。
+  const STICKY_COLORS = ['yellow', 'green', 'pink', 'purple', 'blue', 'gray'];
+  const STICKY_NAMES = { yellow: '黃色', green: '綠色', pink: '粉紅色', purple: '紫色', blue: '藍色', gray: '灰色' };
+  function stickyOf(n) { return n && n.meta && n.meta.sticky ? n.meta.sticky : null; }
+  function kindOf(n) { return fileOf(n) ? 'file' : stickyOf(n) ? 'sticky' : 'note'; }
+  const stickyTimers = new Map();   // note id -> { t, run }
+  function scheduleStickySave(note, save) {
+    const old = stickyTimers.get(note.id);
+    if (old) clearTimeout(old.t);
+    const run = function () { stickyTimers.delete(note.id); save(note, { content: note.content }); };
+    stickyTimers.set(note.id, { t: setTimeout(run, 600), run: run });
+  }
+  function flushStickySave(id) {
+    const p = stickyTimers.get(id);
+    if (p) { clearTimeout(p.t); p.run(); }
+  }
+  function autosize(ta) {
+    if (!ta.offsetParent) return;          // 頁面還藏著的時候量不到高度，留給下一次
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+  }
+  function autosizeAll() {
+    if (!lastOpts || !lastOpts.container) return;
+    Array.prototype.forEach.call(lastOpts.container.querySelectorAll('.ab-sticky-text'), autosize);
+  }
+  global.addEventListener('resize', autosizeAll);   // 欄寬變了，換行位置跟著變
+
   // 正在上傳的檔案（跨 render 保留：上傳中切資料夾、別處觸發 refresh 都不會讓進度列消失）。
   // 一次傳一個，其餘排隊——大影片同時開好幾條只會互搶頻寬。
   let uploads = [];   // { key, name, size, sent, folderId, error, bar, pct }
@@ -161,10 +192,10 @@
     return notes.filter(function (n) { return (n.folderId || null) === folderId; })
       .sort(function (a, b) { return Sorting.compareNotes(a, b); });
   }
-  // files=true 數檔案筆記，false 數一般筆記（資料夾方框上分開寫「N 筆記・M 檔案」）
-  function countDeep(notes, folders, folderId, files) {
-    let c = notesIn(notes, folderId).filter(function (n) { return !!fileOf(n) === !!files; }).length;
-    foldersIn(folders, folderId).forEach(function (f) { c += countDeep(notes, folders, f.id, files); });
+  // kind：'note' 一般筆記、'file' 檔案、'sticky' 便條紙（資料夾方框上分開寫「N 筆記・M 檔案・K 便條紙」）
+  function countDeep(notes, folders, folderId, kind) {
+    let c = notesIn(notes, folderId).filter(function (n) { return kindOf(n) === kind; }).length;
+    foldersIn(folders, folderId).forEach(function (f) { c += countDeep(notes, folders, f.id, kind); });
     return c;
   }
   function crumbPath(folders, id) {
@@ -233,15 +264,30 @@
 
     const subs = foldersIn(o.folders, curFolderId).length;
     const here = notesIn(o.notes, curFolderId);
-    const nFiles = here.filter(fileOf).length, ns = here.length - nFiles;
+    const nFiles = here.filter(fileOf).length, nSticky = here.filter(stickyOf).length, ns = here.length - nFiles - nSticky;
     const bits = [];
     if (subs) bits.push(subs + ' 個資料夾');
     bits.push(ns + ' 篇筆記');
     if (nFiles || o.onUploadFile) bits.push(nFiles + ' 個檔案');
+    if (nSticky) bits.push(nSticky + ' 張便條紙');
     main.appendChild(el('div', 'dash-subtitle', esc(bits.join('・'))));
     head.appendChild(main);
 
     const right = el('div', 'dash-head-right');
+    if (o.onNewSticky) {
+      const bs = el('button', 'btn', ic('sticky-note') + '<span>便條紙</span>');
+      bs.type = 'button';
+      bs.title = '在這個資料夾貼一張便條紙，直接打字就會自動儲存';
+      bs.addEventListener('click', function () {
+        o.onNewSticky(curFolderId).then(function (n) {
+          if (!n) return;
+          if (!o.notes.some(function (x) { return x.id === n.id; })) o.notes.push(n);
+          render(o, true);
+          focusSticky(n.id);
+        });
+      });
+      right.appendChild(bs);
+    }
     if (o.onUploadFile) {
       const bu = el('button', 'btn', ic('upload') + '<span>上傳檔案</span>');
       bu.type = 'button';
@@ -277,14 +323,17 @@
 
   // ---- 資料夾方框 -------------------------------------------------------------
   function makeFolderTile(folder, o) {
-    const deep = countDeep(o.notes, o.folders, folder.id, false);
-    const deepFiles = countDeep(o.notes, o.folders, folder.id, true);
+    const deep = countDeep(o.notes, o.folders, folder.id, 'note');
+    const deepFiles = countDeep(o.notes, o.folders, folder.id, 'file');
+    const deepStickies = countDeep(o.notes, o.folders, folder.id, 'sticky');
     const subs = foldersIn(o.folders, folder.id).length;
     const metaBits = [deep + ' 筆記'];
     if (deepFiles) metaBits.push(deepFiles + ' 檔案');
+    if (deepStickies) metaBits.push(deepStickies + ' 便條紙');
     if (subs) metaBits.push(subs + ' 子資料夾');
 
-    const tile = el('div', 'dash-folder-tile');
+    // ab-folder-tile：按鈕（改名／移動／刪除）放在方框底部，不疊在名稱右邊——三顆疊在右上角會把名稱擠掉
+    const tile = el('div', 'dash-folder-tile ab-folder-tile');
     tile.tabIndex = 0;
     tile.setAttribute('role', 'button');
     tile.title = '打開資料夾';
@@ -296,6 +345,17 @@
     tile.appendChild(el('div', 'dash-folder-meta', esc(metaBits.join('・'))));
 
     const acts = el('div', 'dash-folder-acts');
+    // 改名是一顆明確的按鈕。以前只掛在「雙擊方框」上，可是單擊就會進資料夾、整頁重畫，
+    // 第二下永遠落在新畫出來的東西上，dblclick 根本不會發生——等於沒有改名功能。
+    if (o.onRenameFolder) {
+      const rn = el('button', 'dash-folder-menu', ic('pencil'));
+      rn.type = 'button'; rn.title = '改名';
+      rn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        inlineRename(nameEl, folder.name || '', 'dash-folder-edit', function (val) { o.onRenameFolder(folder, val); });
+      });
+      acts.appendChild(rn);
+    }
     if (o.onMoveFolder) {
       const mv = el('button', 'dash-folder-menu', ic('folder-open'));
       mv.type = 'button'; mv.title = '移動到其他資料夾';
@@ -315,11 +375,6 @@
     }
     tile.appendChild(acts);
 
-    tile.addEventListener('dblclick', function (e) {
-      if (!o.onRenameFolder) return;
-      e.preventDefault(); e.stopPropagation();
-      inlineRename(nameEl, folder.name || '', 'dash-folder-edit', function (val) { o.onRenameFolder(folder, val); });
-    });
     tile.addEventListener('click', function () { go(folder.id); });
     tile.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(folder.id); }
@@ -422,6 +477,99 @@
     wrap.appendChild(acts);
     return wrap;
   }
+  // ---- 便條紙卡片：上緣一條色帶（滑過才出現顏色／移動／刪除），下面整張就是輸入區 --------
+  function makeSticky(note, o) {
+    const st = stickyOf(note) || {};
+    const readOnly = note.perm === 'read' || !o.onSaveSticky;
+    const card = el('div', 'ab-sticky');
+    card.dataset.id = note.id;
+    card.dataset.color = STICKY_COLORS.indexOf(st.color) >= 0 ? st.color : 'yellow';
+
+    const bar = el('div', 'ab-sticky-bar');
+    if (!readOnly) {
+      const dots = el('div', 'ab-sticky-colors');
+      STICKY_COLORS.forEach(function (c) {
+        const d = el('button', 'ab-sticky-dot' + (c === card.dataset.color ? ' on' : ''));
+        d.type = 'button'; d.dataset.color = c; d.title = STICKY_NAMES[c];
+        d.setAttribute('aria-label', STICKY_NAMES[c]);
+        d.addEventListener('click', function () {
+          if (card.dataset.color === c) return;
+          card.dataset.color = c;           // 先換顏色再存：不重畫，正在打的字跟游標都不動
+          Array.prototype.forEach.call(dots.children, function (x) { x.classList.toggle('on', x === d); });
+          o.onSaveSticky(note, { color: c });
+        });
+        dots.appendChild(d);
+      });
+      bar.appendChild(dots);
+    }
+    const acts = el('div', 'ab-sticky-acts');
+    function act(icon, title, fn) {
+      const b = el('button', 'ab-sticky-act', ic(icon));
+      b.type = 'button'; b.title = title; b.setAttribute('aria-label', title);
+      b.addEventListener('click', fn);
+      acts.appendChild(b);
+    }
+    if (!readOnly && o.onMoveNote) {
+      act('folder-open', '移動到其他資料夾', function () {
+        flushStickySave(note.id);
+        o.onMoveNote(note).then(function (ok) { if (ok) render(o, true); });
+      });
+    }
+    if (!readOnly && o.onDeleteNote) {
+      act('trash', '移到垃圾桶', function () {
+        flushStickySave(note.id);
+        o.onDeleteNote(note).then(function (ok) {
+          if (ok) { o.notes = o.notes.filter(function (n) { return n.id !== note.id; }); render(o, true); }
+        });
+      });
+    }
+    bar.appendChild(acts);
+    card.appendChild(bar);
+
+    const ta = el('textarea', 'ab-sticky-text');
+    ta.dataset.id = note.id;
+    ta.value = note.content || '';
+    ta.placeholder = '寫點什麼…';
+    ta.spellcheck = false;
+    ta.readOnly = readOnly;
+    ta.setAttribute('aria-label', '便條紙內容');
+    const time = el('div', 'ab-sticky-foot', esc(relTime(note.updatedAt)));
+    if (!readOnly) {
+      ta.addEventListener('input', function () {
+        note.content = ta.value;            // 本機的那份馬上更新：這時候重畫也是最新的字
+        autosize(ta);
+        time.textContent = '儲存中…';
+        scheduleStickySave(note, function (n, fields) {
+          Promise.resolve(o.onSaveSticky(n, fields)).then(function (ok) {
+            // 卡片可能已經被重畫換掉了；這個 time 不在畫面上的話寫了也無妨
+            time.textContent = ok === false ? '儲存失敗' : '已儲存';
+          });
+        });
+      });
+      ta.addEventListener('blur', function () { flushStickySave(note.id); });
+      // Esc 離開這張便條紙（存檔走 blur）；不攔其他按鍵，Tab 照常移到下一個控制項
+      ta.addEventListener('keydown', function (e) { if (e.key === 'Escape') { e.preventDefault(); ta.blur(); } });
+    }
+    card.appendChild(ta);
+    card.appendChild(time);
+    // 點到卡片的空白處（字的下面、色帶）也是要打字
+    card.addEventListener('mousedown', function (e) {
+      if (e.target === card || e.target === time) { e.preventDefault(); ta.focus(); }
+    });
+    return card;
+  }
+  function focusSticky(id, s, e) {
+    if (!lastOpts || !lastOpts.container || !id) return;
+    const ta = Array.prototype.filter.call(lastOpts.container.querySelectorAll('.ab-sticky-text'),
+      function (x) { return x.dataset.id === id; })[0];
+    if (!ta) return;
+    ta.focus({ preventScroll: true });
+    const end = ta.value.length;
+    try { ta.setSelectionRange(s == null ? end : s, e == null ? end : e); } catch (err) { /* ignore */ }
+    const card = ta.closest('.ab-sticky');
+    if (card && card.scrollIntoView) card.scrollIntoView({ block: 'nearest' });
+  }
+
   function makeUploadRow(u) {
     const wrap = el('div', 'ab-upload' + (u.error ? ' is-error' : ''));
     wrap.appendChild(el('span', 'dash-row-ic', ic(u.error ? 'alert-triangle' : 'upload')));
@@ -485,9 +633,21 @@
     if (curFolderId && !o.folders.some(function (f) { return f.id === curFolderId; })) curFolderId = null;
     const subs = foldersIn(o.folders, curFolderId);
     const here = notesIn(o.notes, curFolderId);
-    const ns = here.filter(function (n) { return !fileOf(n); });
+    const ns = here.filter(function (n) { return kindOf(n) === 'note'; });
     const files = here.filter(fileOf);
+    // 便條紙照建立時間排（新的在前），不照最後修改：不然一邊打字卡片一邊換位置
+    const stickies = here.filter(stickyOf).sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
     const ups = uploads.filter(function (u) { return u.area === (o.area || null) && (u.folderId || null) === curFolderId; });
+
+    // 便條紙貼在最上面：它就是要一進資料夾就看到的東西
+    if (stickies.length) {
+      const sec0 = el('section', 'dash-section');
+      sec0.appendChild(sectionHead('sticky-note', '便條紙', stickies.length));
+      const wall = el('div', 'ab-sticky-grid');
+      stickies.forEach(function (n) { wall.appendChild(makeSticky(n, o)); });
+      sec0.appendChild(wall);
+      frag.appendChild(sec0);
+    }
 
     if (subs.length) {
       const sec = el('section', 'dash-section');
@@ -499,7 +659,7 @@
     }
 
     // 只放檔案的資料夾（一週的投影片跟錄影）不需要一段「還沒有筆記」擋在檔案上面
-    if (ns.length || !(files.length || ups.length)) {
+    if (ns.length || !(files.length || ups.length || stickies.length)) {
       const sec2 = el('section', 'dash-section');
       sec2.appendChild(sectionHead('file-text', curFolderId ? '筆記' : '未歸類筆記', ns.length));
       const list = el('div', 'dash-list');
@@ -556,9 +716,15 @@
     const container = opts.container;
     hidePop();
     bindDrop(container);
+    // 正在打字的便條紙：重畫會換掉整個 DOM，記下是哪一張、游標在哪，畫完放回去
+    const act = document.activeElement;
+    const typing = act && act.classList && act.classList.contains('ab-sticky-text') && container.contains(act)
+      ? { id: act.dataset.id, s: act.selectionStart, e: act.selectionEnd } : null;
     container.innerHTML = '';
     container.appendChild(renderHead(opts));
     container.appendChild(renderBody(opts));
+    autosizeAll();
+    if (typing) focusSticky(typing.id, typing.s, typing.e);
   }
 
   global.AreaBrowser = {
@@ -566,8 +732,12 @@
     refresh: function (opts) { if (lastOpts) { opts.container = lastOpts.container; render(opts, true); } },
     // 直接進到某個資料夾（#note/<id> 連到一個檔案時，背景停在它所在的資料夾）
     openFolder: function (id) { go(id || null); },
+    // 側邊欄的「新增」要知道現在瀏覽到哪個資料夾，新筆記才會建在這裡
+    currentFolder: function () { return curFolderId; },
     // app.js 的檔案檢視器用同一套分類／大小寫法，列表跟檢視器才不會各說各話
     fileKind: fileKind, fmtSize: fmtSize,
+    // #note/<id> 或搜尋結果指到一張便條紙：app.js 先帶到它的資料夾，再叫這個把游標放上去
+    focusSticky: function (id) { focusSticky(id); },
     reset: function () { curFolderId = null; lastOpts = null; hidePop(); thumbCache.clear(); }
   };
 })(window);

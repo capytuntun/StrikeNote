@@ -516,6 +516,9 @@ input, select, textarea { transition: border-color var(--dur-1) var(--ease-out),
   letter-spacing: .08em; text-transform: uppercase;
   padding: 14px 10px 6px; margin-top: 6px;
 }
+/* 樹最上面的區域標題（側邊欄的樹跟著目前區域走，見 app.js 的 treeArea） */
+.tree-area-head { display: flex; align-items: center; gap: 6px; margin-top: 0; padding-top: 8px; color: var(--accent); }
+.tree-area-head .ic-svg { width: 13px; height: 13px; }
 .tree-row.shared-row .label { font-style: italic; }
 .tree-row .share-by {
   flex: 0 0 auto; font-size: var(--fs-xs); color: var(--text-faint);
@@ -1018,6 +1021,63 @@ a.dash-row-act { text-decoration: none; }
 /* 拖檔案進來：整頁一個內框，不擋操作 */
 .ab-dropping { box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-weak); }
 
+/* ---- 課程筆記的便條紙（js/areabrowser.js 的 makeSticky）----
+   顏色是 Windows 自黏便箋那一組（亮色主題：淡色紙＋深一階的上緣；深色主題：深色卡片＋
+   飽和的色帶，也是它的做法）。整張卡片就是一個 textarea，沒有「檢視／編輯」兩種狀態。 */
+.ab-sticky-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; align-items: start; }
+.ab-sticky {
+  --sk-bg: #fff7d1; --sk-bar: #fff2ab; --sk-ink: #2b2a27; --sk-dim: rgba(0, 0, 0, .45);
+  position: relative; display: flex; flex-direction: column; min-width: 0;
+  background: var(--sk-bg); color: var(--sk-ink); box-shadow: var(--shadow-raise);
+  transition: box-shadow .12s;
+}
+.ab-sticky:hover, .ab-sticky:focus-within { box-shadow: var(--shadow-sm); }
+.ab-sticky[data-color="green"]  { --sk-bg: #e4f9e0; --sk-bar: #cbf1c4; }
+.ab-sticky[data-color="pink"]   { --sk-bg: #ffe4f1; --sk-bar: #ffcce5; }
+.ab-sticky[data-color="purple"] { --sk-bg: #f2e6ff; --sk-bar: #e7cfff; }
+.ab-sticky[data-color="blue"]   { --sk-bg: #e2f1ff; --sk-bar: #cde9ff; }
+.ab-sticky[data-color="gray"]   { --sk-bg: #f3f2f1; --sk-bar: #e1dfdd; }
+:root[data-theme="dark"] .ab-sticky { --sk-bg: #2b2e35; --sk-bar: #e6b905; --sk-ink: #e6e8ec; --sk-dim: rgba(255, 255, 255, .42); }
+:root[data-theme="dark"] .ab-sticky[data-color="green"]  { --sk-bar: #6fd262; }
+:root[data-theme="dark"] .ab-sticky[data-color="pink"]   { --sk-bar: #ea86c2; }
+:root[data-theme="dark"] .ab-sticky[data-color="purple"] { --sk-bar: #c78eff; }
+:root[data-theme="dark"] .ab-sticky[data-color="blue"]   { --sk-bar: #5ac0e7; }
+:root[data-theme="dark"] .ab-sticky[data-color="gray"]   { --sk-bar: #aaaaaa; }
+.ab-sticky-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  height: 28px; padding: 0 4px 0 8px; background: var(--sk-bar);
+}
+/* 色帶上的東西平常收著，滑過或正在打字才出現——不打字的時候它就是一張乾淨的便條紙 */
+.ab-sticky-colors, .ab-sticky-acts { display: flex; align-items: center; opacity: 0; transition: opacity .12s; }
+.ab-sticky-colors { gap: 5px; }
+.ab-sticky-acts { gap: 1px; margin-left: auto; }
+.ab-sticky:hover .ab-sticky-colors, .ab-sticky:hover .ab-sticky-acts,
+.ab-sticky:focus-within .ab-sticky-colors, .ab-sticky:focus-within .ab-sticky-acts { opacity: 1; }
+.ab-sticky-dot {
+  width: 14px; height: 14px; padding: 0; border-radius: 50%; cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, .28); background: #fff7d1;
+}
+.ab-sticky-dot[data-color="green"]  { background: #cbf1c4; }
+.ab-sticky-dot[data-color="pink"]   { background: #ffcce5; }
+.ab-sticky-dot[data-color="purple"] { background: #e7cfff; }
+.ab-sticky-dot[data-color="blue"]   { background: #cde9ff; }
+.ab-sticky-dot[data-color="gray"]   { background: #e1dfdd; }
+.ab-sticky-dot.on { box-shadow: 0 0 0 2px rgba(0, 0, 0, .55); border-color: transparent; }
+.ab-sticky-dot:focus-visible { outline: 2px solid rgba(0, 0, 0, .7); outline-offset: 1px; }
+.ab-sticky-act {
+  display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0;
+  border: 0; background: transparent; color: rgba(0, 0, 0, .58); cursor: pointer;
+}
+.ab-sticky-act .ic-svg { width: 14px; height: 14px; }
+.ab-sticky-act:hover { background: rgba(0, 0, 0, .12); color: rgba(0, 0, 0, .85); }
+.ab-sticky-text {
+  display: block; width: 100%; min-height: 104px; max-height: 360px; resize: none; overflow-y: auto;
+  border: 0; outline: 0; background: transparent; color: inherit;
+  font: inherit; font-size: var(--fs-base); line-height: 1.6; padding: 10px 12px 4px;
+}
+.ab-sticky-text::placeholder { color: var(--sk-dim); }
+.ab-sticky-foot { padding: 0 12px 8px; font-size: var(--fs-micro); color: var(--sk-dim); cursor: text; user-select: none; }
+
 /* ---- 檔案檢視器（js/app.js 的 openFileViewer）----
    body 的子元素，所以一定是 position: fixed（app shell 不能被撐出捲軸）。底色固定是深的：
    看影片／投影片的場合，跟主題無關。 */
@@ -1107,6 +1167,9 @@ a.dash-row-act { text-decoration: none; }
 .dash-folder-book .ic-svg, .dash-folder-menu .ic-svg { width: 15px; height: 15px; }
 .dash-folder-book span { display: none; }
 .dash-folder-book:hover { color: var(--accent); background: var(--accent-weak); }
+/* 區域頁（js/areabrowser.js）的資料夾方框：三顆按鈕排在方框底部，名稱可以用滿整行 */
+.ab-folder-tile .dash-folder-head { padding-right: 0; }
+.ab-folder-tile .dash-folder-acts { position: static; margin-top: auto; justify-content: flex-end; margin-right: -4px; margin-bottom: -4px; }
 .dash-folder-menu:hover { color: var(--text); background: var(--bg-3); }
 /* 電子書方塊（首頁最上層獨立一區）：跟資料夾方塊同一套版型，左緣與圖示改用
    accent 色；右上角的 ✕ 只是移出電子書區，資料夾與筆記都還在 */
@@ -4089,6 +4152,9 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
   .topbar-right { gap: 2px; }
   /* 課程筆記的檔案列：大小收掉，留類型標籤；觸控沒有 hover，動作鈕常駐 */
   .ab-file-size { display: none; }
+  /* 便條紙：兩欄起跳；16px 免得 iOS 一點就放大 */
+  .ab-sticky-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .ab-sticky-text { font-size: 16px; }
   .ab-upload { padding-right: 8px; }
   .ab-file-wrap .dash-row-actions { opacity: 1; }
   /* 檔案檢視器：按鈕只留圖示，內容貼滿 */
