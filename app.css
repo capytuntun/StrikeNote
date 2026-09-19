@@ -1740,6 +1740,9 @@ body.tg-dragging { cursor: grabbing; user-select: none; }
   position: fixed; z-index: 1000; background: var(--bg); border: 1px solid var(--border);
   box-shadow: var(--shadow); padding: 6px; min-width: 192px;
 }
+/* 選單裡純說明用的一行（例如匯入選單的「→ 匯到「…」」），不能點 */
+.ctx-item.ctx-hint { color: var(--text-faint); font-size: var(--fs-xs); cursor: default; }
+.ctx-item.ctx-hint:hover { background: transparent; }
 .ctx-item {
   display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; border: none; background: transparent;
   color: var(--text); padding: 7px 10px; cursor: pointer; font-size: var(--fs-base);

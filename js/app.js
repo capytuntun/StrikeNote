@@ -3538,6 +3538,80 @@
       creating[kind] = false;
     });
   }
+  function importTarget() {
+    if (quickWrapEl && !quickWrapEl.hidden) return { folderId: null, area: 'quick', label: '隨筆' };
+    const folderId = currentFolderId();
+    const area = areaForNew(folderId);
+    const where = area && AREA_INFO[area] ? AREA_INFO[area].title : '所有筆記';
+    return { folderId: folderId, area: area, label: where + (folderId ? '／' + folderFullName(folderId) : '') };
+  }
+  function readText(file) {
+    return new Promise(function (resolve, reject) {
+      const fr = new FileReader();
+      fr.onload = function () { resolve(String(fr.result || '')); };
+      fr.onerror = function () { reject(fr.error || new Error('讀不到檔案')); };
+      fr.readAsText(file);
+    });
+  }
+  const MD_FILE = /\.(md|markdown)$/i;
+  // 一個檔：照舊直接打開（從區域頁開的，「上一頁」會回到那個資料夾）；好幾個或整個資料夾：留在
+  // 原本的頁面，列表當場長出來，最後一句話說匯了多少、到哪裡。
+  // 匯入整個資料夾（<input webkitdirectory>）時每個檔帶著 webkitRelativePath「根/子/檔.md」：
+  // 資料夾照原本的層次在目標底下重建（只建真的有 .md 的那幾層），其他類型的檔案略過不匯。
+  // 隨筆沒有資料夾，匯進隨筆就全部攤平。一個一個依路徑順序建，某個失敗不影響其他的；
+  // 資料夾建失敗的話，它底下的筆記改放到上一層，不會不見。
+  function importMarkdownFiles(files) {
+    const t = importTarget();
+    const flat = t.area === 'quick';
+    const list = files.map(function (f) {
+      const rel = String(f.webkitRelativePath || f.name).split('/').filter(Boolean);
+      return { file: f, dirs: flat ? [] : rel.slice(0, -1), path: rel.join('/') };
+    });
+    const mdOnes = list.filter(function (x) { return MD_FILE.test(x.file.name); })
+      .sort(function (a, b) { return a.path.localeCompare(b.path, 'zh-Hant', { numeric: true }); });
+    const skipped = list.length - mdOnes.length;
+    const made = [], foldersMade = [];
+    let failed = 0;
+    const dirIds = {};   // '根/子' -> 資料夾 id
+    function ensureDir(dirs) {
+      if (!dirs.length) return Promise.resolve(t.folderId);
+      const key = dirs.join('/');
+      if (dirIds[key] !== undefined) return Promise.resolve(dirIds[key]);
+      return ensureDir(dirs.slice(0, -1)).then(function (parentId) {
+        return Store.createFolder(dirs[dirs.length - 1], parentId, t.area || undefined).then(function (f) {
+          state.folders.push(f);
+          foldersMade.push(f);
+          dirIds[key] = f.id;
+          return f.id;
+        }, function () { dirIds[key] = parentId; return parentId; });
+      });
+    }
+    let chain = Promise.resolve();
+    mdOnes.forEach(function (x) {
+      chain = chain.then(function () {
+        return Promise.all([ensureDir(x.dirs), readText(x.file)]).then(function (r) {
+          const opts = { content: r[1] };
+          if (t.area) opts.area = t.area;
+          return Store.createNote(x.file.name.replace(MD_FILE, '') || '匯入的筆記', r[0], opts);
+        }).then(function (n) { state.notes.push(n); made.push(n); }, function () { failed++; });
+      });
+    });
+    return chain.then(function () {
+      if (made.length === 1 && !foldersMade.length && !failed && !skipped && t.area !== 'quick') {
+        renderTree(); openNote(made[0].id); return;
+      }
+      foldersMade.forEach(function (f) { state.expanded[f.id] = true; });
+      if (t.folderId) state.expanded[t.folderId] = true;
+      LS.set('expanded', JSON.stringify(state.expanded));
+      refreshViews();
+      let msg = made.length
+        ? '已匯入 ' + made.length + ' 篇' + (foldersMade.length ? '、' + foldersMade.length + ' 個資料夾' : '') + '到「' + t.label + '」'
+        : '沒有匯入任何筆記';
+      if (skipped) msg += '（略過 ' + skipped + ' 個不是 .md 的檔案）';
+      if (failed) msg += '，' + failed + ' 個檔案失敗';
+      toast(msg);
+    });
+  }
   function newNote(folderId) {
     createOnce('note', function () {
       return Store.createNote('未命名筆記', folderId || null, withArea(folderId)).then(function (n) {
@@ -4406,24 +4480,32 @@
       if (state.current && state.current.folderId) goToFolder(state.current.folderId);
     });
 
-    // import
-    $('#import-btn').addEventListener('click', function () { $('#import-input').click(); });
-    $('#import-input').addEventListener('change', function (e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      const fr = new FileReader();
-      fr.onload = function () {
-        Store.createNote(file.name.replace(/\.(md|markdown)$/i, ''), null).then(function (n) {
-          n.content = fr.result;
-          Store.updateNote(n).then(function () {
-            state.notes.push(n);
-            renderTree();
-            openNote(n.id);
-          });
-        });
-      };
-      fr.readAsText(file);
-      e.target.value = '';
+    // 匯入 .md：建到「現在所在的地方」——跟側邊欄的「新增」同一套判斷（currentFolderId /
+    // areaForNew）：課程筆記／知識區／小說正在看的資料夾、首頁正在看的資料夾、電子書的資料夾，
+    // 在隨筆頁就是隨筆。以前一律建在「所有筆記」最上層，在區域裡匯入的東西得自己再搬過去。
+    // 兩種：挑幾個 .md 檔，或挑一整個資料夾（連子資料夾一起）。選單上直接寫出會匯到哪裡。
+    $('#import-btn').addEventListener('click', function (e) {
+      e.stopPropagation();   // 跟其他 openMenuAt 的觸發鈕一樣，不然同一下點擊冒泡到 document 就把選單關掉了
+      const r = e.currentTarget.getBoundingClientRect();
+      const t = importTarget();
+      openMenuAt(r.left, r.top - 8, [
+        { icon: 'file-text', label: '匯入 .md 檔案（可多選）', fn: function () { $('#import-input').click(); } },
+        { icon: 'folder', label: '匯入整個資料夾', fn: function () { $('#import-dir-input').click(); } },
+        { icon: '', label: '→ 匯到「' + t.label + '」', fn: function () {} }
+      ]);
+      // 選單從按鈕往上長（按鈕在側邊欄最底下）
+      ctxMenu.style.top = Math.max(8, r.top - ctxMenu.offsetHeight - 4) + 'px';
+      const hint = ctxMenu.lastElementChild;
+      if (hint) { hint.disabled = true; hint.classList.add('ctx-hint'); }
+    });
+    ['#import-input', '#import-dir-input'].forEach(function (sel) {
+      const inp = $(sel);
+      if (!inp) return;
+      inp.addEventListener('change', function (e) {
+        const files = Array.prototype.slice.call(e.target.files || []);
+        e.target.value = '';
+        if (files.length) importMarkdownFiles(files);
+      });
     });
 
     initDivider();

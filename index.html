@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=147">
+  <link rel="stylesheet" href="app.css?v=148">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -191,8 +191,9 @@
         <button id="trash-open-btn" class="sidebar-nav-item" type="button" title="刪除的筆記會先放在這裡，保留期內可以復原或永久刪除" data-icon="trash">垃圾桶</button>
       </nav>
       <div class="sidebar-foot">
-        <button id="import-btn" class="link-btn">匯入 .md</button>
-        <input type="file" id="import-input" accept=".md,.markdown,text/markdown" hidden>
+        <button id="import-btn" class="link-btn" title="匯入 .md 檔案或整個資料夾，放到目前所在的區域和資料夾">匯入 .md</button>
+        <input type="file" id="import-input" accept=".md,.markdown,text/markdown" multiple hidden>
+        <input type="file" id="import-dir-input" webkitdirectory multiple hidden>
       </div>
     </aside>
 
@@ -391,6 +392,6 @@
   <script src="js/embedswitch.js?v=1"></script>
   <script src="js/blogwyg.js?v=4"></script>
   <script src="js/blogmode.js?v=10"></script>
-  <script src="js/app.js?v=106"></script>
+  <script src="js/app.js?v=108"></script>
 </body>
 </html>
