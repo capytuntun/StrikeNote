@@ -1167,9 +1167,6 @@ a.dash-row-act { text-decoration: none; }
 .dash-folder-book .ic-svg, .dash-folder-menu .ic-svg { width: 15px; height: 15px; }
 .dash-folder-book span { display: none; }
 .dash-folder-book:hover { color: var(--accent); background: var(--accent-weak); }
-/* 區域頁（js/areabrowser.js）的資料夾方框：三顆按鈕排在方框底部，名稱可以用滿整行 */
-.ab-folder-tile .dash-folder-head { padding-right: 0; }
-.ab-folder-tile .dash-folder-acts { position: static; margin-top: auto; justify-content: flex-end; margin-right: -4px; margin-bottom: -4px; }
 .dash-folder-menu:hover { color: var(--text); background: var(--bg-3); }
 /* 電子書方塊（首頁最上層獨立一區）：跟資料夾方塊同一套版型，左緣與圖示改用
    accent 色；右上角的 ✕ 只是移出電子書區，資料夾與筆記都還在 */

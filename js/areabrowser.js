@@ -1,8 +1,8 @@
 /* areabrowser.js — 課程筆記、知識區、小說共用的簡化檔案總管。
  *
- * 跟首頁儀表板（dashboard.js）長得像、用的是同一套 CSS class（.dash-*），但功能
- * 刻意精簡很多：只有「資料夾方框 + 筆記條列 + 麵包屑導覽 + 新增／改名／刪除／移動」，
- * 沒有標籤雲、沒有電子書區、沒有批次勾選多選、沒有拖拉排序。一篇筆記一旦點開，
+ * 資料夾方框、筆記條列跟首頁儀表板（dashboard.js）長得一模一樣：同一套 CSS class（.dash-*）、
+ * 同樣的「⋮」／釘選／「⋯」、同一份勾選（批次列在側邊欄），選單也是 app.js 同一個函式。
+ * 刻意沒有的：標籤雲、電子書區、拖拉（搬東西改由選單的「移動到…」）。一篇筆記一旦點開，
  * 分享／版本歷史／PDF／協作編輯全部照常運作——那些功能都在筆記編輯器本身，
  * 不需要這裡重做一份。
  *
@@ -14,8 +14,10 @@
  *   onNewNote(folderId)       新增筆記，回傳 Promise
  *   onNewFolder(parentId)     新增資料夾，回傳 Promise
  *   onRenameNote(note, title) / onRenameFolder(folder, name)
- *   onDeleteNote(note) / onDeleteFolder(folder)
- *   onMoveNote(note) / onMoveFolder(folder)   跳出資料夾選擇對話框（呼叫端做）
+ *   onFolderMenu(folder, anchor) / onMenu(note, anchor)   資料夾「⋮」、筆記「⋯」選單（跟首頁共用）
+ *   onPin(note, on) / selection {has, toggle} / onSortMenu(anchor)   跟首頁共用
+ *   onNavigate(folderId)      使用者自己點進／點出資料夾（呼叫端留一筆瀏覽紀錄）
+ *   onDeleteNote(note) / onMoveNote(note)   檔案列、便條紙自己的按鈕用
  *   onUploadFile(file, folderId, onProgress)  有給才會出現「上傳檔案」跟拖放上傳；回傳
  *                             Promise<note>——檔案在資料夾裡是一篇「檔案筆記」（meta.file），
  *                             所以改名／移動／垃圾桶／備份都走筆記既有的那一套
@@ -237,7 +239,15 @@
     input.addEventListener('blur', function () { finish(true); });
   }
 
-  function go(folderId) { curFolderId = folderId; if (lastOpts) render(lastOpts, true); }
+  // user=true：使用者自己點資料夾方框或麵包屑——回報給呼叫端留一筆瀏覽紀錄（跟首頁的 onNavigate 一樣），
+  // 瀏覽器的「上一頁」才會一層一層退回去。程式呼叫的 openFolder（例如跟著網址走）不回報，不然會重複留紀錄。
+  function go(folderId, user) {
+    folderId = folderId || null;
+    const moved = folderId !== curFolderId;
+    curFolderId = folderId;
+    if (lastOpts) render(lastOpts, true);
+    if (user && moved && lastOpts && lastOpts.onNavigate) lastOpts.onNavigate(folderId);
+  }
 
   // ---- 頁首：標題 + 麵包屑 + 新增按鈕 ----------------------------------------
   function renderHead(o) {
@@ -252,7 +262,7 @@
         (iconName ? ic(iconName) : '') + '<span>' + esc(label) + '</span>');
       c.type = 'button';
       if (isCurrent) c.setAttribute('aria-current', 'page');
-      else { c.title = '回到「' + label + '」'; c.addEventListener('click', function () { go(folderId); }); }
+      else { c.title = '回到「' + label + '」'; c.addEventListener('click', function () { go(folderId, true); }); }
       return c;
     }
     nav.appendChild(crumb(o.title || '筆記', o.icon, null, !curFolderId));
@@ -274,6 +284,16 @@
     head.appendChild(main);
 
     const right = el('div', 'dash-head-right');
+    // 排序：跟首頁同一顆（排序方式本身也是同一套，側邊欄、首頁、這裡一起變）
+    if (o.onSortMenu && global.Sorting) {
+      const s = el('button', 'btn dash-sort-btn', ic('arrow-up-down') + '<span>排序：</span>' +
+        '<span class="dash-sort-mode">' + esc(Sorting.info().short) + '</span>');
+      s.type = 'button';
+      s.title = '排序方式（側邊欄也用同一套）';
+      s.setAttribute('aria-haspopup', 'true');
+      s.addEventListener('click', function (e) { e.stopPropagation(); o.onSortMenu(s); });
+      right.appendChild(s);
+    }
     if (o.onNewSticky) {
       const bs = el('button', 'btn', ic('sticky-note') + '<span>便條紙</span>');
       bs.type = 'button';
@@ -332,8 +352,10 @@
     if (deepStickies) metaBits.push(deepStickies + ' 便條紙');
     if (subs) metaBits.push(subs + ' 子資料夾');
 
-    // ab-folder-tile：按鈕（改名／移動／刪除）放在方框底部，不疊在名稱右邊——三顆疊在右上角會把名稱擠掉
-    const tile = el('div', 'dash-folder-tile ab-folder-tile');
+    // 跟首頁（dashboard.js makeFolderTile）同一個樣子：右上角一顆直式「⋮」，改名／移動／
+    // 刪除都在選單裡（選單本身是 app.js 的 showFolderMenu，首頁跟這裡共用同一個）。
+    const tile = el('div', 'dash-folder-tile');
+    tile.dataset.id = folder.id;
     tile.tabIndex = 0;
     tile.setAttribute('role', 'button');
     tile.title = '打開資料夾';
@@ -345,85 +367,97 @@
     tile.appendChild(el('div', 'dash-folder-meta', esc(metaBits.join('・'))));
 
     const acts = el('div', 'dash-folder-acts');
-    // 改名是一顆明確的按鈕。以前只掛在「雙擊方框」上，可是單擊就會進資料夾、整頁重畫，
-    // 第二下永遠落在新畫出來的東西上，dblclick 根本不會發生——等於沒有改名功能。
-    if (o.onRenameFolder) {
-      const rn = el('button', 'dash-folder-menu', ic('pencil'));
-      rn.type = 'button'; rn.title = '改名';
-      rn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        inlineRename(nameEl, folder.name || '', 'dash-folder-edit', function (val) { o.onRenameFolder(folder, val); });
-      });
-      acts.appendChild(rn);
-    }
-    if (o.onMoveFolder) {
-      const mv = el('button', 'dash-folder-menu', ic('folder-open'));
-      mv.type = 'button'; mv.title = '移動到其他資料夾';
-      mv.addEventListener('click', function (e) { e.stopPropagation(); o.onMoveFolder(folder).then(function (ok) { if (ok) render(o, true); }); });
-      acts.appendChild(mv);
-    }
-    if (o.onDeleteFolder) {
-      const del = el('button', 'dash-folder-menu', ic('trash'));
-      del.type = 'button'; del.title = '刪除資料夾（裡面的筆記會移到垃圾桶）';
-      del.addEventListener('click', function (e) {
-        e.stopPropagation();
-        o.onDeleteFolder(folder).then(function (ok) {
-          if (ok) { o.folders = o.folders.filter(function (f) { return f.id !== folder.id; }); render(o, true); }
-        });
-      });
-      acts.appendChild(del);
+    if (o.onFolderMenu) {
+      const m = el('button', 'dash-folder-menu', ic('more-vertical'));
+      m.type = 'button';
+      m.title = '更多';
+      m.addEventListener('click', function (e) { e.stopPropagation(); o.onFolderMenu(folder, m); });
+      acts.appendChild(m);
     }
     tile.appendChild(acts);
 
-    tile.addEventListener('click', function () { go(folder.id); });
+    tile.addEventListener('click', function () { go(folder.id, true); });
     tile.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(folder.id); }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(folder.id, true); }
+      else if (e.key === 'F2') { e.preventDefault(); renameFolderTile(folder.id); }
     });
     return tile;
   }
+  // 選單的「重新命名」：在方框上就地改名（跟首頁的 Dashboard.renameFolderTile 一樣）
+  function renameFolderTile(id) {
+    if (!lastOpts || !lastOpts.container) return false;
+    const tile = Array.prototype.filter.call(lastOpts.container.querySelectorAll('.dash-folder-tile'),
+      function (t) { return t.dataset.id === id; })[0];
+    const folder = lastOpts.folders.filter(function (f) { return f.id === id; })[0];
+    const nameEl = tile && tile.querySelector('.dash-folder-name');
+    if (!folder || !nameEl || !lastOpts.onRenameFolder) return false;
+    const o = lastOpts;
+    inlineRename(nameEl, folder.name || '', 'dash-folder-edit', function (val) { o.onRenameFolder(folder, val); });
+    return true;
+  }
 
-  // ---- 筆記條列（沿用 dashboard.js 的 DOM 結構，同一套 .dash-row-* CSS）--------
+  // ---- 筆記條列：跟首頁（dashboard.js makeNoteRow）同一個樣子 ------------------
+  // 勾選框（跟首頁、側邊欄共用同一份選取與批次列）、類型圖示與標籤、釘選記號；
+  // 滑過出現 釘選／修改標題／「⋯」，「⋯」是 app.js 的 showNoteMenu，首頁跟這裡共用。
+  function noteKind(n) {
+    if (n.meta && n.meta.perfReport) return { icon: 'chart', label: '成效報告', cls: 'kind-perf' };
+    if (n.meta && n.meta.secReport) return { icon: 'shield', label: '資安院報告', cls: 'kind-sec' };
+    if (n.meta && n.meta.relMap) return { icon: 'network', label: '', cls: '' };
+    return { icon: 'file-text', label: '', cls: '' };
+  }
+  function isPinned(n) { return !!(n.meta && n.meta.pinned); }
   function makeNoteRow(note, o) {
-    const wrap = el('div', 'dash-note-wrap');
+    const k = noteKind(note);
+    const pinned = isPinned(note);
+    const wrap = el('div', 'dash-note-wrap' + (pinned ? ' pinned' : ''));
     wrap.dataset.id = note.id;
+
+    if (o.selection) {
+      if (o.selection.has(note.id)) wrap.className += ' selected';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'dash-note-check';
+      cb.checked = o.selection.has(note.id);
+      cb.title = '選取';
+      cb.addEventListener('click', function (e) { e.stopPropagation(); });
+      cb.addEventListener('change', function () {
+        o.selection.toggle(note.id, cb.checked);
+        wrap.classList.toggle('selected', cb.checked);
+      });
+      wrap.appendChild(cb);
+    }
 
     const row = el('div', 'dash-row');
     row.tabIndex = 0;
     row.setAttribute('role', 'button');
-    row.appendChild(el('span', 'dash-row-ic', ic('file-text')));
+    row.appendChild(el('span', 'dash-row-ic ' + k.cls, ic(k.icon)));
     const titleEl = el('span', 'dash-row-title', esc(note.title || '未命名筆記'));
     row.appendChild(titleEl);
+    if (pinned) row.appendChild(el('span', 'dash-row-pin', ic('pin')));
     const meta = el('span', 'dash-row-meta');
+    if (k.label) meta.appendChild(el('span', 'dash-row-kind ' + k.cls, k.label));
     meta.appendChild(el('span', 'dash-row-time', esc(relTime(note.updatedAt))));
     row.appendChild(meta);
-    row.addEventListener('click', function () { if (o.onOpen) o.onOpen(note.id); });
-    row.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); if (o.onOpen) o.onOpen(note.id); } });
+    function open() { if (o.onOpen) o.onOpen(note.id); }
+    function startRename() {
+      if (!o.onRenameNote) return;
+      inlineRename(titleEl, note.title || '', 'dash-row-edit', function (val) { o.onRenameNote(note, val); });
+    }
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); open(); }
+      else if (e.key === 'F2') { e.preventDefault(); startRename(); }
+    });
     wrap.appendChild(row);
 
     const acts = el('div', 'dash-row-actions');
-    if (o.onRenameNote) {
-      acts.appendChild(actBtn('pencil', '修改標題', function () {
-        inlineRename(titleEl, note.title || '', 'dash-row-edit', function (val) { o.onRenameNote(note, val); });
-      }));
+    if (o.onPin) {
+      const p = actBtn('pin', pinned ? '取消釘選' : '釘選到最上面', function () { o.onPin(note, !pinned); });
+      if (pinned) p.classList.add('on');
+      acts.appendChild(p);
     }
-    if (o.onMoveNote) {
-      acts.appendChild(actBtn('folder-open', '移動到其他資料夾', function () {
-        o.onMoveNote(note).then(function (ok) { if (ok) render(o, true); });
-      }));
-    }
-    if (o.onMoveArea) {
-      acts.appendChild(actBtn('layout-grid', '換到其他區域', function (btn) {
-        const r = btn.getBoundingClientRect();
-        o.onMoveArea(note, r.right, r.bottom + 4);
-      }));
-    }
-    if (o.onDeleteNote) {
-      acts.appendChild(actBtn('trash', '移到垃圾桶', function () {
-        o.onDeleteNote(note).then(function (ok) {
-          if (ok) { o.notes = o.notes.filter(function (n) { return n.id !== note.id; }); render(o, true); }
-        });
-      }));
-    }
+    if (o.onRenameNote) acts.appendChild(actBtn('pencil', '修改標題', startRename));
+    if (o.onMenu) acts.appendChild(actBtn('more-horizontal', '更多', function (btn) { o.onMenu(note, btn); }));
     wrap.appendChild(acts);
     return wrap;
   }
@@ -734,6 +768,7 @@
     openFolder: function (id) { go(id || null); },
     // 側邊欄的「新增」要知道現在瀏覽到哪個資料夾，新筆記才會建在這裡
     currentFolder: function () { return curFolderId; },
+    renameFolderTile: renameFolderTile,
     // app.js 的檔案檢視器用同一套分類／大小寫法，列表跟檢視器才不會各說各話
     fileKind: fileKind, fmtSize: fmtSize,
     // #note/<id> 或搜尋結果指到一張便條紙：app.js 先帶到它的資料夾，再叫這個把游標放上去

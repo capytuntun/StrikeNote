@@ -115,15 +115,16 @@
       const last = wantNote || LS.get('lastNote', null);
       if (location.hash === '#trash') {
         openTrash();
-      } else if (location.hash === '#course') {
-        openArea('course');
-      } else if (location.hash === '#knowledge') {
-        openArea('knowledge');
+      } else if (areaFromHash() && areaFromHash().area !== 'novel') {
+        // #course、#course/<資料夾>（知識區同理）：重新整理停在原本那一層
+        openArea(areaFromHash().area, { folderId: areaFromHash().folderId, keepHash: true });
       } else if (location.hash === '#quick') {
         openQuick();
-      } else if (location.hash === '#novel') {
+      } else if (areaFromHash() && areaFromHash().area === 'novel') {
         // 一定要先問過密碼才能進去，重新整理也一樣——openArea('novel') 本身就會擋下來彈窗。
-        openArea('novel');
+        // 還沒解鎖時小說的資料夾不在 state.folders 裡，所以資料夾 id 直接從網址拿
+        const nm = location.hash.match(AREA_HASH);
+        openArea('novel', { folderId: nm[2] ? decodeURIComponent(nm[2]) : null, keepHash: true });
       } else if (wantFolder && state.folders.some(function (f) { return f.id === wantFolder; })) {
         // 在資料夾裡重新整理：留在那個資料夾，網址不動
         showEmpty(true);
@@ -137,8 +138,8 @@
         // 連結指到一個上傳的檔案：背景先停在它所在的區域／資料夾，再把檢視器疊上去
         const fn = state.notes.find(function (n) { return n.id === wantNote; });
         if (fn.area && fn.area !== 'novel' && AREA_INFO[fn.area] && AREA_INFO[fn.area].wrap) {
-          openArea(fn.area);
-          if (fn.folderId && window.AreaBrowser) AreaBrowser.openFolder(fn.folderId);
+          // 網址留著 #note/<檔案>（重新整理還是這個檔案），背景停在它的資料夾
+          openArea(fn.area, { folderId: fn.folderId || null, keepHash: true });
         } else showEmpty();
         openFileViewer(fn);
       } else if (last && state.notes.some(function (n) { return n.id === last; })) {
@@ -592,10 +593,12 @@
   }
   // 儀表板「所有筆記」那邊該筆記的勾選狀態同步（供側邊欄改動時反映）
   function syncDashCheck(id, on) {
-    const w = document.querySelector('#dashboard .dash-note-wrap[data-id="' + id + '"]');
-    if (!w) return;
-    w.classList.toggle('selected', on);
-    const c = w.querySelector('.dash-note-check'); if (c) c.checked = on;
+    // 首頁，以及課程筆記／知識區／小說的頁面（同一套 .dash-note-wrap）
+    document.querySelectorAll('#dashboard .dash-note-wrap, .area-wrap .dash-note-wrap').forEach(function (w) {
+      if (w.dataset.id !== id) return;
+      w.classList.toggle('selected', on);
+      const c = w.querySelector('.dash-note-check'); if (c) c.checked = on;
+    });
   }
   // 給儀表板用的選取 API（讓「所有筆記」也能勾選、共用同一份選取與批次列）
   const selectionApi = {
@@ -670,8 +673,8 @@
   function goToSticky(note) {
     if (!note.area || note.area === 'novel' || !AREA_INFO[note.area] || !AREA_INFO[note.area].wrap || !window.AreaBrowser) return false;
     saveNow();
-    openArea(note.area);
-    AreaBrowser.openFolder(note.folderId || null);
+    // 從連結／重新整理（網址是 #note/<便條紙>）進來就改寫那一筆，不然「上一頁」會一直被帶回這裡
+    openArea(note.area, { folderId: note.folderId || null, replaceHash: noteIdFromHash() === note.id });
     AreaBrowser.focusSticky(note.id);
     return true;
   }
@@ -779,6 +782,11 @@
       title: info.title, icon: info.icon,
       notes: areaNotes(area), folders: areaFolders(area),
       onOpen: openNote,
+      // 資料夾方框的「⋮」、筆記列的釘選／「⋯」、勾選、排序：跟首頁（dashOpts）是同一套函式，
+      // 兩邊長得一樣、選單內容也一樣（showFolderMenu/showNoteMenu 自己依區域增減幾項）
+      onFolderMenu: showFolderMenu, onMenu: showNoteMenu, onPin: pinNote,
+      onSortMenu: showSortMenu, selection: selectionApi,
+      onNavigate: function (folderId) { setHash(areaHash(area, folderId)); },
       // 課程筆記可以把 PPTX／PDF／影片直接放進資料夾：檔案本體走 Store.uploadFile（大檔自動
       // 分塊），在資料夾裡則是一篇 meta.file 的「檔案筆記」，內文就是那個檔案的引用——所以
       // 改名、移動、垃圾桶、還原、備份、檔案管理的「使用中」判斷全部沿用筆記既有的機制。
@@ -845,36 +853,25 @@
           return true;
         }, function (e) { toast('刪除失敗：' + (e && e.message || e)); return false; });
       },
-      onDeleteFolder: function (folder) {
-        const subNoteIds = areaNotes(area).filter(function (n) { return (n.folderId || null) === folder.id; }).map(function (n) { return n.id; });
-        return Promise.all(subNoteIds.map(function (id) { return Store.deleteNote(id); })).then(function () {
-          state.notes = state.notes.filter(function (n) { return subNoteIds.indexOf(n.id) < 0; });
-          return Store.deleteFolder(folder.id);
-        }).then(function () {
-          state.folders = state.folders.filter(function (f) { return f.id !== folder.id; });
-          renderTree();
-          return true;
-        }, function (e) { toast('刪除失敗：' + (e && e.message || e)); return false; });
-      },
-      onMoveNote: function (note) {
-        return showFolderPicker('移動「' + (note.title || '筆記') + '」', { folders: areaFolders(area) }).then(function (r) {
-          if (!r) return false;
-          return Store.updateNote(Object.assign({}, note, { folderId: r.folderId })).then(function (n) {
-            note.folderId = n.folderId; return true;
-          }, function (e) { toast('移動失敗：' + (e && e.message || e)); return false; });
-        });
-      },
-      // 換到 所有筆記／另一個區域——不是在同一個區域內搬資料夾，見 moveNoteToArea。
-      onMoveArea: function (note, x, y) { moveNoteToArea(note, x, y); },
-      onMoveFolder: function (folder) {
-        return showFolderPicker('移動「' + (folder.name || '資料夾') + '」', { folders: areaFolders(area).filter(function (f) { return f.id !== folder.id; }) }).then(function (r) {
-          if (!r) return false;
-          return Store.updateFolder(Object.assign({}, folder, { parentId: r.folderId })).then(function (f) {
-            folder.parentId = f.parentId; return true;
-          }, function (e) { toast('移動失敗：' + (e && e.message || e)); return false; });
-        });
-      }
+      onMoveNote: moveNoteInArea,
     };
+  }
+  // 區域裡沒有拖放（首頁靠拖放搬東西），所以選單多一項「移動到…」。清單只列同一個區域的資料夾；
+  // 移資料夾時連它自己的子資料夾也不列，免得把自己搬進自己裡面。回傳 Promise<boolean>。
+  function moveNoteInArea(note) {
+    return showFolderPicker('移動「' + (note.title || '筆記') + '」', { folders: areaFolders(note.area) }).then(function (r) {
+      if (!r) return false;
+      return Promise.resolve(placeItems('note', [note.id], r.folderId || null, null, true)).then(function () { return true; });
+    });
+  }
+  function moveFolderInArea(folder) {
+    const inside = descendantFolderIds(folder.id);
+    return showFolderPicker('移動「' + (folder.name || '資料夾') + '」', {
+      folders: areaFolders(folder.area).filter(function (f) { return inside.indexOf(f.id) < 0; })
+    }).then(function (r) {
+      if (!r) return false;
+      return Promise.resolve(placeItems('folder', [folder.id], r.folderId || null, null, true)).then(function () { return true; });
+    });
   }
 
   function quickOpts() {
@@ -975,12 +972,40 @@
     setSidebarOpen(false);   // 畫布要整個寬度
   }
 
-  function openArea(area) {
+  // 區域頁的網址：#course 是最上層，#course/<資料夾 id> 是裡面某個資料夾（knowledge、novel 同理）。
+  // 跟首頁的 #folder/<id> 同一個用意：點進資料夾、打開筆記都各留一筆瀏覽紀錄，「上一頁」一路退得回去。
+  const AREA_HASH = /^#(course|knowledge|novel)(?:\/([^\/?#]+))?$/;
+  function areaHash(area, folderId) { return area + (folderId ? '/' + encodeURIComponent(folderId) : ''); }
+  function areaFromHash() {
+    const m = location.hash.match(AREA_HASH);
+    if (!m) return null;
+    let fid = m[2] ? decodeURIComponent(m[2]) : null;
+    // 資料夾已經刪了（或不是這個區域的）：退回那個區域的最上層
+    if (fid && !state.folders.some(function (f) { return f.id === fid && f.area === m[1]; })) fid = null;
+    return { area: m[1], folderId: fid };
+  }
+  function replaceHash(h) {
+    try { history.replaceState(null, '', location.pathname + location.search + (h ? '#' + h : '')); } catch (e) { /* ignore */ }
+  }
+  // 現在畫面上是哪個區域頁（課程筆記／知識區／小說），沒有就是 null
+  function visibleAreaPage() {
+    return ['course', 'knowledge', 'novel'].filter(function (x) { return AREA_INFO[x].wrap && !AREA_INFO[x].wrap.hidden; })[0] || null;
+  }
+  // 從區域頁打開那個區域裡的一篇筆記：先把「目前這一筆」瀏覽紀錄改成筆記所在的資料夾，再 push 筆記。
+  // 不管是從資料夾頁點進來、從側邊欄的樹點、還是停在最上層直接點，「上一頁」都回到筆記所屬的資料夾。
+  function anchorBackToFolder(fromArea, note) {
+    if (!fromArea || !note || note.area !== fromArea || !isMine(note)) return;
+    replaceHash(areaHash(fromArea, note.folderId || null));
+  }
+  // o.folderId：直接進到那個資料夾；o.keepHash：跟著網址走（上一頁、重新整理），不再動網址；
+  // o.replaceHash：改寫目前這一筆紀錄而不是新增一筆（從 #note/<便條紙／檔案> 的連結進來時用）。
+  function openArea(area, o) {
+    o = o || {};
     const info = AREA_INFO[area];
     if (!info || !info.wrap || !window.AreaBrowser) return;
     if (area === 'novel' && !novelIsUnlocked) {
       // 取消就退回首頁，不要留著一片空白（例如帶著 #novel 重新整理又按取消）。
-      promptNovelPassword().then(function (ok) { if (ok) openArea('novel'); else showEmpty(); });
+      promptNovelPassword().then(function (ok) { if (ok) openArea('novel', o); else showEmpty(); });
       return;
     }
     leaveOtherViews();
@@ -989,8 +1014,11 @@
     info.wrap.scrollTop = 0;
     setNavActive(area + '-open-btn', true);
     autoOpenSidebar();
-    setHash(area);
+    const h = areaHash(area, o.folderId);
+    if (o.replaceHash) replaceHash(h);
+    else if (!o.keepHash) setHash(h);
     AreaBrowser.render(info.page, areaOpts(area));
+    if (o.folderId) AreaBrowser.openFolder(o.folderId);
     setTreeArea(area);
   }
   function openQuick() {
@@ -1308,8 +1336,7 @@
       // 區域裡的資料夾在那個區域自己的頁面上，首頁儀表板看不到它
       saveNow();
       LS.set('lastNote', '');
-      openArea(gf.area);
-      AreaBrowser.openFolder(folderId);
+      openArea(gf.area, { folderId: folderId });
       return;
     }
     saveNow();
@@ -1596,12 +1623,13 @@
     // （見 novelIsUnlocked 宣告處）——跟一般「筆記不見了」分開處理，讓使用者知道
     // 只是要再輸入一次密碼，不是筆記真的不見。
     const wasNovel = state.notes.some(function (n) { return n.id === id && n.area === 'novel'; });
+    const fromArea = visibleAreaPage();   // 要在畫面被切換掉之前記下來
     Store.getNote(id).then(function (note) {
       if (!note) { showEmpty(); return; }
       // 關聯分析（meta.relMap）是疊在目前畫面上的工具，不是像一般筆記那樣「開啟」
       // 它——不動 state.currentId、不收起首頁，取消或存檔都只是把疊層收掉，見
       // openRelMapNote 開頭的說明。一定要在任何畫面狀態被改掉之前判斷。
-      if (window.RelMap && RelMap.isRelNote(note)) { openRelMapNote(note); return; }
+      if (window.RelMap && RelMap.isRelNote(note)) { anchorBackToFolder(fromArea, note); openRelMapNote(note); return; }
       // 不在 state.notes 裡的檔案筆記（理論上不會發生）：同樣只疊檢視器，背景沒東西就回首頁
       if (isFileNote(note)) { if (!state.currentId) showEmpty(); openFileViewer(note); return; }
       state.currentId = id;
@@ -1610,6 +1638,7 @@
       note._syncRev = note.rev || 0;
       note._syncContent = note.content || '';
       LS.set('lastNote', id);
+      anchorBackToFolder(fromArea, note);
       setHash('note/' + id);
       tocOpen.clear();         // 目錄的展開狀態是每篇筆記各自的
       emptyEl.hidden = true;
@@ -2077,8 +2106,7 @@
         LS.set('lastNote', '');
         // 返回：區域裡的關聯分析回到它那個區域的資料夾，不是首頁
         if (isMine(note) && note.area && AREA_INFO[note.area] && AREA_INFO[note.area].wrap && window.AreaBrowser) {
-          openArea(note.area);
-          AreaBrowser.openFolder(note.folderId || null);
+          openArea(note.area, { folderId: note.folderId || null });
         } else showEmpty();
       }
     });
@@ -3103,11 +3131,17 @@
   // 儀表板筆記列的「⋯」：貼著按鈕右下角打開
   function showNoteMenu(note, anchor) {
     const r = anchor.getBoundingClientRect();
-    const actions = [
-      { icon: 'link', label: '複製連結', fn: function () { copyNoteLink(note); } },
-      { icon: 'users', label: '分享…', fn: function () { showShareDialog(note); } },
-      { icon: 'copy', label: '複製筆記', fn: function () { duplicateNote(note); } }
-    ];
+    const actions = [];
+    // 小說不能分享（伺服器也擋），連結給別人也打不開
+    if (note.area !== 'novel') {
+      actions.push({ icon: 'link', label: '複製連結', fn: function () { copyNoteLink(note); } });
+      actions.push({ icon: 'users', label: '分享…', fn: function () { showShareDialog(note); } });
+    }
+    actions.push({ icon: 'copy', label: '複製筆記', fn: function () { duplicateNote(note); } });
+    // 首頁靠拖放把筆記搬進資料夾；區域頁沒有拖放，改由這裡搬
+    if (note.area && note.area !== 'quick') {
+      actions.push({ icon: 'folder-open', label: '移動到…', fn: function () { moveNoteInArea(note); } });
+    }
     if (MOVABLE_AREAS.indexOf(note.area || null) >= 0) {
       actions.push({ icon: 'layout-grid', label: '換區域…', fn: function () { moveNoteToArea(note, r.right, r.bottom + 4); } });
     }
@@ -3152,17 +3186,20 @@
   // 資料夾方框右上的「⋮」
   function showFolderMenu(folder, anchor) {
     const r = anchor.getBoundingClientRect();
-    const actions = [
-      { icon: 'book-open', label: '以電子書閱讀', fn: function () { openBook(folder.id); } },
-      { icon: 'file-plus', label: '在此新增筆記', fn: function () { newNote(folder.id); } },
-      { icon: 'folder-plus', label: '在此新增子資料夾', fn: function () { newFolder(folder.id); } },
-      { icon: 'pencil', label: '重新命名', fn: function () { startFolderRename(folder); } },
-      { icon: 'trash', label: '刪除資料夾', fn: function () { deleteFolder(folder); }, danger: true }
-    ];
+    const actions = [];
+    // 電子書是首頁那一區的功能（folders.is_book 會把資料夾列進首頁的「電子書」），區域的資料夾不給
+    if (!folder.area) actions.push({ icon: 'book-open', label: '以電子書閱讀', fn: function () { openBook(folder.id); } });
+    actions.push({ icon: 'file-plus', label: '在此新增筆記', fn: function () { newNote(folder.id); } });
+    actions.push({ icon: 'folder-plus', label: '在此新增子資料夾', fn: function () { newFolder(folder.id); } });
+    actions.push({ icon: 'pencil', label: '重新命名', fn: function () { startFolderRename(folder); } });
+    // 首頁靠拖放搬資料夾；區域頁沒有拖放，改由這裡搬
+    if (folder.area) actions.push({ icon: 'folder-open', label: '移動到…', fn: function () { moveFolderInArea(folder); } });
+    actions.push({ icon: 'trash', label: '刪除資料夾', fn: function () { deleteFolder(folder); }, danger: true });
     openMenuAt(r.right, r.bottom + 4, actions, { alignRight: true });
   }
   // 儀表板方框上就地改名（找不到方框就退回側邊欄的樹狀改名）
   function startFolderRename(folder) {
+    if (folder.area && window.AreaBrowser && AreaBrowser.renameFolderTile && AreaBrowser.renameFolderTile(folder.id)) return;
     const tile = document.querySelector('#dashboard .dash-folder-tile[data-id="' + folder.id + '"]');
     if (tile && window.Dashboard && Dashboard.renameFolderTile) Dashboard.renameFolderTile(folder.id);
     else { setSidebarOpen(true); startRename('folder', folder.id); }
@@ -4131,10 +4168,16 @@
         if (trashWrapEl && trashWrapEl.hidden) openTrash();
         return;
       }
-      if (location.hash === '#course') { if (courseWrapEl && courseWrapEl.hidden) openArea('course'); return; }
-      if (location.hash === '#knowledge') { if (knowledgeWrapEl && knowledgeWrapEl.hidden) openArea('knowledge'); return; }
+      // #course、#course/<資料夾>（知識區、小說同理）：只切畫面，不再 pushState
+      const am = location.hash.match(AREA_HASH);
+      if (am) {
+        const ar = areaFromHash();
+        const fid = am[1] === 'novel' && !novelIsUnlocked ? (am[2] ? decodeURIComponent(am[2]) : null) : ar.folderId;
+        if (AREA_INFO[am[1]].wrap.hidden) openArea(am[1], { folderId: fid, keepHash: true });
+        else if (window.AreaBrowser && AreaBrowser.currentFolder() !== fid) AreaBrowser.openFolder(fid);
+        return;
+      }
       if (location.hash === '#quick') { if (quickWrapEl && quickWrapEl.hidden) openQuick(); return; }
-      if (location.hash === '#novel') { if (novelWrapEl && novelWrapEl.hidden) openArea('novel'); return; }
       const bid = bookIdFromHash();
       if (bid) {
         if (state.folders.some(function (f) { return f.id === bid; })) openBook(bid);
