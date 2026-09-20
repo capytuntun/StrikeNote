@@ -164,6 +164,7 @@
       onSave: function () { if (opts.onSave) opts.onSave(); },
       onLeave: function (dir) { return wygLeave(dir); },
       onSplit: function (afterMd) { wygSplit(afterMd); },
+      onBlank: function () { wygBlank(); },
       onMerge: function () { wygMerge(); },
       onRetype: function (newMd, newKind) { wygRetype(newMd, newKind); },
       onFiles: function (files) { wygPasteFiles(files); }
@@ -232,6 +233,19 @@
     if (opts.onChange) opts.onChange(src);
     render();
     editAtLine(at + 2, 'start');   // 空行後那一行（end 行 + 空行 + 內容）
+  }
+  // 在空的 WYSIWYG 區塊上按 Enter：留下一段空白（一行 &nbsp;），再在它後面開一個新的空區塊，
+  // 連按就能一直往下——跟 textarea 路徑的 blankHere() 同一套。少了這段的話，空塊按 Enter 只會
+  // 在原地重建空塊（Markdown 會把連續空行併掉，所以沒真的落下一個段落），看起來就是「往不下去」。
+  function wygBlank() {
+    if (readOnly || !ed || !ed.wyg) return;
+    commitText(BLANK);                       // 把目前這個空塊固化成一行 &nbsp;
+    const at = ed.line0 + ed.prefix.length;  // 那一行 &nbsp; 在原始碼裡的行號
+    detach();                                // 直接收掉編輯框，不走 finishWyg（那會把空塊當空的再刪掉）
+    render();
+    let k = -1;
+    for (let i = 0; i < blocks.length; i++) if (blocks[i].start <= at) k = i;
+    startNew(k);
   }
   // Backspace 在區塊開頭：空區塊就拿掉並回到上一塊尾；上下都是段落就併進上一塊；其餘只是跳到上一塊尾。
   function wygMerge() {

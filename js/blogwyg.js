@@ -485,6 +485,9 @@
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         if (inList) { listEnter(); return; }
+        // 整塊是空的：交給 blogmode 留一段空白（&nbsp;）再往下開新塊，連按 Enter 就一直往下
+        // （跟 textarea 路徑的 blankHere 一致）；不然空塊按 Enter 只會在原地重建，看起來卡住。
+        if (opts.onBlank && serialize(block).replace(/[​ \s]/g, '') === '') { opts.onBlank(); return; }
         // 標題／內文／引言：切成兩塊，游標後面的內容移到新塊
         const afterMd = splitInlineAfterCaret(inner);
         fireChange();
