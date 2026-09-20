@@ -1120,6 +1120,13 @@ a.dash-row-act { text-decoration: none; }
 .fv-video { max-width: 100%; max-height: 100%; background: #000; outline: none; }
 .fv-audio { width: min(560px, 100%); }
 .fv-img { max-width: 100%; max-height: 100%; object-fit: contain; background: #fff; }
+/* Markdown 檔在檢視器裡直接渲染成可讀頁面：跟著頁面主題（--bg/--text），置中、內部捲動 */
+.fv-md {
+  align-self: stretch; width: min(880px, 100%); max-width: 100%; max-height: 100%;
+  margin: 0 auto; overflow: auto; padding: 32px 40px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+}
+@media (max-width: 640px) { .fv-md { padding: 20px 16px; } }
 .fv-nopreview { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; max-width: 420px; }
 .fv-big { display: inline-flex; align-items: center; justify-content: center; width: 84px; height: 84px; }
 .fv-big .ic-svg { width: 38px; height: 38px; }

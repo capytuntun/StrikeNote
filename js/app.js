@@ -740,8 +740,27 @@
     }
     const stage = document.createElement('div');
     stage.className = 'fv-stage';
-    let inline = true;
-    if (mime === 'application/pdf') {
+    let inline = true;         // 有沒有在檢視器裡放出可看的東西
+    let rawViewable = true;    // 這型別能不能在新分頁直接看原始檔（md 是當附件送的，不行）
+    // Markdown（text/markdown 或副檔名 .md）：抓文字、用跟預覽同一套 MD.render 直接渲染成
+    // 可讀頁面，而不是只給「無法預覽請下載」。伺服器把 .md 當 octet-stream 附件送，但同源
+    // fetch 照樣讀得到內文；渲染後也跑一次 resolveImages，讓內文若有站內 img:/pdf: 也顯示。
+    const isMd = mime === 'text/markdown' || mime === 'text/x-markdown' ||
+      /\.(md|markdown|mdown|mkd)$/i.test(f.name || name);
+    if (isMd) {
+      rawViewable = false;
+      const doc = document.createElement('div');
+      doc.className = 'fv-md markdown-body';
+      doc.textContent = '載入中…';
+      stage.appendChild(doc);
+      fetch(url).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+        .then(function (text) {
+          if (fileViewerEl !== ov) return;   // 已經關掉或換了別的檔
+          doc.innerHTML = MD.render(text);
+          if (MD.resolveImages) MD.resolveImages(doc);
+        })
+        .catch(function (e) { if (fileViewerEl === ov) doc.textContent = '無法載入：' + (e && e.message || e); });
+    } else if (mime === 'application/pdf') {
       const fr = document.createElement('iframe');
       fr.className = 'fv-frame'; fr.title = name; fr.src = url;
       stage.appendChild(fr);
@@ -760,7 +779,7 @@
       stage.appendChild(im);
     } else {
       // PPTX、MOV／MKV、壓縮檔……瀏覽器自己開不了：給個清楚的下載入口，不要留一片黑
-      inline = false;
+      inline = false; rawViewable = false;
       const box = document.createElement('div');
       box.className = 'fv-nopreview';
       box.innerHTML = '<span class="fv-big ab-file-ic ab-file-' + kind.cls + '">' + Icons.svg(kind.icon) + '</span>' +
@@ -769,7 +788,7 @@
       box.appendChild(link('fv-btn-primary', 'download', '下載檔案', { download: f.name || name }));
       stage.appendChild(box);
     }
-    if (inline) bar.appendChild(link('', 'external-link', '新分頁開啟', { target: '_blank', rel: 'noopener' }));
+    if (inline && rawViewable) bar.appendChild(link('', 'external-link', '新分頁開啟', { target: '_blank', rel: 'noopener' }));
     bar.appendChild(link('', 'download', '下載', { download: f.name || name }));
     const close = document.createElement('button');
     close.type = 'button'; close.className = 'fv-btn fv-close'; close.title = '關閉（Esc）';

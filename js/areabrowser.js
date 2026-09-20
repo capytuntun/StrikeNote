@@ -54,6 +54,7 @@
     if (/^(pptx?|key|odp)$/.test(e) || mime.indexOf('presentation') >= 0) return { icon: 'presentation', tag: (e || 'ppt').toUpperCase(), cls: 'ppt' };
     if (mime.indexOf('image/') === 0) return { icon: 'image', tag: (e || 'img').toUpperCase(), cls: 'img' };
     if (mime.indexOf('audio/') === 0) return { icon: 'film', tag: (e || 'audio').toUpperCase(), cls: 'video' };
+    if (/^(md|markdown|mdown|mkd)$/.test(e) || mime.indexOf('markdown') >= 0) return { icon: 'file-text', tag: 'MD', cls: 'other' };
     return { icon: 'paperclip', tag: (e || 'file').toUpperCase().slice(0, 5), cls: 'other' };
   }
   function fmtSize(n) {
