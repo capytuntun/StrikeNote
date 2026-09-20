@@ -903,6 +903,51 @@ async function main() {
     }
   }
 
+  // 匯入外面的 Markdown：掃引用、改寫成站上的寫法。瀏覽器的「匯入 .md」跟命令列的
+  // server/tools/import-md.js 用的是同一份 js/mdimport.js，所以這裡驗一次兩邊都算驗到。
+  section('markdown import (js/mdimport.js)');
+  {
+    const MdImport = require('../../js/mdimport.js');
+    const src = [
+      '---', 'title: 匯入測試', '---', '',
+      '![封面](images/cover.png)',
+      '<img src="images/cover.png" alt="同一張">',
+      '[規格](files/spec.pdf) ｜ [官網](https://example.com/docs)',
+      '![內嵌](data:image/png;base64,iVBORw0KGgo=)',
+      '![有空白的路徑](img/step 1.png)',
+      '```', '![不可以動](images/cover.png)', '```',
+      '[s1]: guide/img/step 1.png'
+    ].join('\n');
+    const fm = MdImport.frontMatter(src);
+    ok(fm.title === '匯入測試' && fm.body.indexOf('---') !== 0, 'front matter gives the title and is stripped', fm.title);
+    const refs = MdImport.scan(fm.body);
+    const targets = refs.map(function (r) { return r.target; });
+    ok(targets.indexOf('images/cover.png') >= 0 && refs.filter(function (r) { return r.syntax === 'html'; }).length === 1,
+      'scan finds markdown images and <img src>', targets);
+    ok(targets.indexOf('img/step 1.png') >= 0 && targets.indexOf('guide/img/step 1.png') >= 0,
+      'scan handles raw spaces in a path and in a reference definition', targets);
+    ok(refs.filter(function (r) { return r.kind === 'data'; }).length === 1, 'scan finds the inline data: image');
+    ok(targets.filter(function (t) { return t === 'images/cover.png'; }).length === 2, 'the fenced copy is not scanned', targets);
+    const seen = {};
+    const outText = MdImport.rewrite(fm.body, function (ref) {
+      if (ref.kind === 'data') return { id: 'img_d', scheme: 'img', name: 'inline.png' };
+      if (ref.target === 'https://example.com/docs') return null;     // 外部連結不動
+      if (ref.target === 'files/spec.pdf') return { id: 'img_p', scheme: 'pdf', name: 'spec.pdf' };
+      const p = MdImport.resolvePath([], ref.target);
+      seen[p] = true;
+      return { id: 'img_1', scheme: 'img', name: 'cover.png' };
+    });
+    ok(outText.indexOf('![封面](img:img_1)') >= 0 && outText.indexOf('![同一張](img:img_1)') >= 0,
+      'rewrite turns both image forms into img:', outText.split('\n')[0]);
+    ok(outText.indexOf('[規格](pdf:img_p)') >= 0 && outText.indexOf('[官網](https://example.com/docs)') >= 0,
+      'a pdf link becomes pdf:, an external link is left alone');
+    ok(outText.indexOf('![內嵌](img:img_d)') >= 0 && outText.indexOf('data:image') < 0, 'the data: image is replaced');
+    ok(/\[s1\]: img:img_1/.test(outText), 'reference definition rewritten', outText.split('\n').pop());
+    ok(outText.indexOf('![不可以動](images/cover.png)') >= 0, 'the fenced copy is untouched');
+    ok(seen['img/step 1.png'] === true, 'a percent-free path with a space resolves', Object.keys(seen));
+    ok(MdImport.rewrite(fm.body, function () { return null; }) === fm.body, 'resolving nothing changes nothing');
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 }

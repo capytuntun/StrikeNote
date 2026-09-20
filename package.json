@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node server/server.js",
     "migrate": "node server/tools/migrate-sqlite-to-mariadb.js",
+    "import-md": "node server/tools/import-md.js",
     "smoke": "node server/tools/smoke.js"
   },
   "dependencies": {

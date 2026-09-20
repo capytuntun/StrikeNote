@@ -3609,21 +3609,40 @@
   // 一個檔：照舊直接打開（從區域頁開的，「上一頁」會回到那個資料夾）；好幾個或整個資料夾：留在
   // 原本的頁面，列表當場長出來，最後一句話說匯了多少、到哪裡。
   // 匯入整個資料夾（<input webkitdirectory>）時每個檔帶著 webkitRelativePath「根/子/檔.md」：
-  // 資料夾照原本的層次在目標底下重建（只建真的有 .md 的那幾層），其他類型的檔案略過不匯。
+  // 資料夾照原本的層次在目標底下重建（只建真的有 .md 的那幾層）。
   // 隨筆沒有資料夾，匯進隨筆就全部攤平。一個一個依路徑順序建，某個失敗不影響其他的；
   // 資料夾建失敗的話，它底下的筆記改放到上一層，不會不見。
+  //
+  // 圖片（js/mdimport.js，跟命令列的 server/tools/import-md.js 同一份）：選到的非 .md 檔案就是
+  // 這批 Markdown 的素材庫——被 ![](相對路徑) 引用到的先上傳，再把連結改寫成站上的 img:／pdf:／
+  // file:（一張圖被好幾篇引用只上傳一次），內嵌的 data: base64 圖片一樣解出來上傳。外部網址的
+  // 圖片這裡抓不到（站台的 CSP 只允許同源連線），連結原樣保留，最後那句話會說可以用命令列工具。
+  // 沒被引用到的檔案只有在課程筆記才會一起匯入（那裡才有「檔案」的概念），其他區域略過。
   function importMarkdownFiles(files) {
     const t = importTarget();
     const flat = t.area === 'quick';
     const list = files.map(function (f) {
       const rel = String(f.webkitRelativePath || f.name).split('/').filter(Boolean);
-      return { file: f, dirs: flat ? [] : rel.slice(0, -1), path: rel.join('/') };
+      return { file: f, srcDirs: rel.slice(0, -1), dirs: flat ? [] : rel.slice(0, -1), path: rel.join('/') };
     });
     const mdOnes = list.filter(function (x) { return MD_FILE.test(x.file.name); })
       .sort(function (a, b) { return a.path.localeCompare(b.path, 'zh-Hant', { numeric: true }); });
-    const skipped = list.length - mdOnes.length;
-    const made = [], foldersMade = [];
-    let failed = 0;
+    const assets = list.filter(function (x) { return !MD_FILE.test(x.file.name); });
+    const byPath = {}, byName = {};
+    assets.forEach(function (a) {
+      byPath[a.path] = a;
+      const base = a.file.name;
+      if (byName[base] === undefined) byName[base] = a;
+    });
+    // 一個引用 → 素材庫裡的哪個檔案（找不到就 null，連結原樣保留）
+    function assetFor(dirs, target) {
+      const p = MdImport.resolvePath(dirs, target);
+      return byPath[p] || byName[p.split('/').pop()] || null;
+    }
+    const made = [], foldersMade = [], docs = [];
+    const uploaded = {};    // 素材的 path → { id, scheme, name }
+    const usedAssets = [];  // 真的被引用到的素材（照第一次出現的順序）
+    let failed = 0, missing = 0, remoteLeft = 0, mediaMade = 0, fileNotes = 0;
     const dirIds = {};   // '根/子' -> 資料夾 id
     function ensureDir(dirs) {
       if (!dirs.length) return Promise.resolve(t.folderId);
@@ -3638,18 +3657,91 @@
         }, function () { dirIds[key] = parentId; return parentId; });
       });
     }
-    let chain = Promise.resolve();
-    mdOnes.forEach(function (x) {
-      chain = chain.then(function () {
-        return Promise.all([ensureDir(x.dirs), readText(x.file)]).then(function (r) {
-          const opts = { content: r[1] };
-          if (t.area) opts.area = t.area;
-          return Store.createNote(x.file.name.replace(MD_FILE, '') || '匯入的筆記', r[0], opts);
-        }).then(function (n) { state.notes.push(n); made.push(n); }, function () { failed++; });
+    function upload(file, name) {
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(name || '');
+      const mime = isPdf ? 'application/pdf' : (file.type || MdImport.mimeOf(name));
+      return Store.uploadFile(file, null, mime).then(function (id) {
+        return { id: id, scheme: MdImport.schemeFor(mime, name), name: name, mime: mime, size: file.size };
       });
+    }
+    // 一篇：內嵌圖片上傳 → 改寫連結 → 建資料夾 → 建筆記
+    function makeNote(doc) {
+      let inner = Promise.resolve({});
+      doc.data.forEach(function (uri, i) {
+        inner = inner.then(function (map) {
+          const dec = MdImport.decodeDataUri(uri, i);
+          if (!dec) return map;
+          const f = new File([dec.bytes], dec.name, { type: dec.mime });
+          return upload(f, dec.name).then(function (res) {
+            map[uri] = res; mediaMade++; return map;
+          }, function () { return map; });
+        });
+      });
+      return inner.then(function (dataMap) {
+        const content = MdImport.rewrite(doc.body, function (ref) {
+          if (ref.kind === 'local') {
+            const a = assetFor(doc.x.srcDirs, ref.target);
+            return (a && uploaded[a.path]) || null;
+          }
+          if (ref.kind === 'data') return dataMap[ref.target] || null;
+          return null;      // 外部網址在瀏覽器裡抓不到，留著原本的連結
+        });
+        return ensureDir(doc.x.dirs).then(function (parentId) {
+          const opts = { content: content };
+          if (t.area) opts.area = t.area;
+          return Store.createNote(doc.title, parentId, opts);
+        });
+      }).then(function (n) { state.notes.push(n); made.push(n); }, function () { failed++; });
+    }
+    // 沒被引用到的檔案：課程筆記才有「檔案」可以放（areaOpts 的 onUploadFile 同一套）
+    function makeFileNote(a) {
+      return upload(a.file, a.file.name).then(function (res) {
+        const ref = MdImport.siteRef({ alt: res.name, embed: true }, res);
+        return ensureDir(a.dirs).then(function (parentId) {
+          return Store.createNote(res.name, parentId, {
+            area: 'course', content: ref + '\n',
+            meta: { file: { id: res.id, name: res.name, mime: res.mime, size: res.size } }
+          });
+        });
+      }).then(function (n) { state.notes.push(n); fileNotes++; }, function () { failed++; });
+    }
+    // 1) 先把每一篇讀進來、掃出引用到什麼，才知道哪些素材真的要上傳（掃完才排得出後面那串工作，
+    //    usedAssets／docs 都是在這裡面才填好的）
+    const chain = Promise.all(mdOnes.map(function (x) {
+      return readText(x.file).then(function (text) {
+        const fm = MdImport.frontMatter(text);
+        const doc = { x: x, title: fm.title || x.file.name.replace(MD_FILE, '') || '匯入的筆記', body: fm.body, data: [] };
+        MdImport.scan(fm.body).forEach(function (ref) {
+          if (ref.kind === 'local') {
+            const a = assetFor(x.srcDirs, ref.target);
+            if (!a) { missing++; return; }
+            if (uploaded[a.path] === undefined) { uploaded[a.path] = null; usedAssets.push(a); }
+          } else if (ref.kind === 'remote') {
+            if (ref.embed) remoteLeft++;
+          } else if (ref.kind === 'data' && doc.data.indexOf(ref.target) < 0) doc.data.push(ref.target);
+        });
+        docs.push(doc);
+      }, function () { failed++; });
+    })).then(function () {
+      docs.sort(function (a, b) { return a.x.path.localeCompare(b.x.path, 'zh-Hant', { numeric: true }); });
+      const extras = t.area === 'course' ? assets.filter(function (a) { return uploaded[a.path] === undefined; }) : [];
+      const jobs = usedAssets.length + extras.length;
+      if (jobs) toast('匯入中…上傳 ' + jobs + ' 個圖片／檔案');
+      // 2) 被引用到的素材先上傳（同一張圖只上傳一次），3) 再一篇一篇建，4) 最後才是沒用到的檔案
+      let c = Promise.resolve();
+      usedAssets.forEach(function (a) {
+        c = c.then(function () {
+          return upload(a.file, a.file.name).then(function (res) {
+            uploaded[a.path] = res; mediaMade++;
+          }, function () { /* 上傳失敗：連結原樣保留 */ });
+        });
+      });
+      docs.forEach(function (doc) { c = c.then(function () { return makeNote(doc); }); });
+      extras.forEach(function (a) { c = c.then(function () { return makeFileNote(a); }); });
+      return c;
     });
     return chain.then(function () {
-      if (made.length === 1 && !foldersMade.length && !failed && !skipped && t.area !== 'quick') {
+      if (made.length === 1 && !foldersMade.length && !fileNotes && !failed && t.area !== 'quick') {
         renderTree(); openNote(made[0].id); return;
       }
       foldersMade.forEach(function (f) { state.expanded[f.id] = true; });
@@ -3657,9 +3749,12 @@
       LS.set('expanded', JSON.stringify(state.expanded));
       refreshViews();
       let msg = made.length
-        ? '已匯入 ' + made.length + ' 篇' + (foldersMade.length ? '、' + foldersMade.length + ' 個資料夾' : '') + '到「' + t.label + '」'
+        ? '已匯入 ' + made.length + ' 篇' + (foldersMade.length ? '、' + foldersMade.length + ' 個資料夾' : '') +
+          (mediaMade ? '、' + mediaMade + ' 個圖片／檔案' : '') + (fileNotes ? '、' + fileNotes + ' 個檔案' : '') +
+          '到「' + t.label + '」'
         : '沒有匯入任何筆記';
-      if (skipped) msg += '（略過 ' + skipped + ' 個不是 .md 的檔案）';
+      if (missing) msg += '（' + missing + ' 個圖片找不到檔案）';
+      if (remoteLeft) msg += '，' + remoteLeft + ' 個外部網址的圖片沒有下載（命令列的 import-md 可以）';
       if (failed) msg += '，' + failed + ' 個檔案失敗';
       toast(msg);
     });
@@ -4546,7 +4641,7 @@
       const r = e.currentTarget.getBoundingClientRect();
       const t = importTarget();
       openMenuAt(r.left, r.top - 8, [
-        { icon: 'file-text', label: '匯入 .md 檔案（可多選）', fn: function () { $('#import-input').click(); } },
+        { icon: 'file-text', label: '匯入 .md（圖片可一起選）', fn: function () { $('#import-input').click(); } },
         { icon: 'folder', label: '匯入整個資料夾', fn: function () { $('#import-dir-input').click(); } },
         { icon: '', label: '→ 匯到「' + t.label + '」', fn: function () {} }
       ]);
