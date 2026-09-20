@@ -1593,6 +1593,20 @@ body.tg-dragging { cursor: grabbing; user-select: none; }
 }
 #editor::placeholder { color: var(--ed-placeholder); }
 #editor::selection { background: var(--ed-select); }
+
+/* ---- 多行編輯（js/multicursor.js）----
+   textarea 只有一個游標：主游標是原生的（閃爍、捲動跟隨都交給瀏覽器），其餘的畫在這一層。
+   編輯器永遠是深色，所以用 --ed-* 那一組，不跟主題走。 */
+.mc-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 3; }
+.mc-caret {
+  position: absolute; top: 0; left: 0; width: 2px; background: var(--ed-caret);
+  animation: mc-blink 1.06s steps(1) infinite;
+}
+@keyframes mc-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .15; } }
+.mc-sel { position: absolute; top: 0; left: 0; background: var(--ed-select); }
+/* 狀態列的「N 個游標」提示 */
+.status-cursors { color: var(--ed-accent); font-variant-numeric: tabular-nums; }
+.status-cursors:empty { display: none; }
 #editor.drag-over { outline: 2px dashed var(--ed-accent); outline-offset: -8px; }
 
 /* ---------- 共筆：他人的即時游標 ---------- */

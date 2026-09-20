@@ -31,6 +31,8 @@
   const wrapEl = $('#editor-wrap');
   const statusInfo = $('#status-info');
   const statusSave = $('#status-save');
+  const statusCursors = $('#status-cursors');
+  let multi = null;   // js/multicursor.js：多行（多游標）編輯
   const ctxMenu = $('#ctx-menu');
   const backlinksEl = $('#backlinks');
   const searchInput = $('#search-input');
@@ -1639,6 +1641,7 @@
     // 放下 Blog mode 裡正在編輯的區塊。它打的字早就寫進 #editor 了；要是等新筆記載入後
     // 才收尾，收尾的回寫會落到新筆記上。
     if (window.BlogMode) BlogMode.reset();
+    if (multi) multi.clear();
     blogNoteId = null;
     // 小說筆記在 state.notes 裡卻打不開，八成是 server/api.js 的一小時解鎖過期了
     // （見 novelIsUnlocked 宣告處）——跟一般「筆記不見了」分開處理，讓使用者知道
@@ -2308,6 +2311,7 @@
     const scroll = editorEl.scrollTop;
     editorEl.value = merged;
     shiftRemoteCarets(merged);
+    if (multi) multi.remap(oldV, merged);   // 多行編輯的其他游標也跟著搬
     // Blog mode 要馬上知道，不能等 renderPreview 的 120ms：那段時間裡再打一個字，
     // blogmode.js 會拿舊內容去換行，把這次合併進來的修改蓋掉。
     if (state.mode === 'blog' && window.BlogMode) {
@@ -4408,6 +4412,10 @@
     if (window.LineSync) LineSync.init(editorEl, previewEl);
     // Markdown editing helpers + autocomplete (auto-pairs, list continuation, suggestions)
     if (window.Editor) Editor.attach(editorEl);
+    // 多行編輯（Alt 拖曳直欄、Ctrl+Alt+↑↓、Ctrl+D），見 js/multicursor.js
+    if (window.MultiCursor) multi = MultiCursor.attach(editorEl, {
+      onChange: function (n) { if (statusCursors) statusCursors.textContent = n > 1 ? n + ' 個游標（Esc 取消）' : ''; }
+    });
     // Mind maps are editable directly in the preview; every change writes the
     // outline straight back into the fenced block, so the markdown in the editor
     // updates as the map is edited.
