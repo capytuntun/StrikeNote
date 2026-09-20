@@ -390,7 +390,9 @@
         md = items.map(function (l, i) { return listMarker(type, i + 1) + l; }).join('\n');
         kind = 'list';
       }
-      else { md = '#'.repeat(+type[1]) + ' ' + one; kind = 'heading'; }
+      // 空標題也要留一個零寬佔位（跟引言／清單一樣），不然 <h3></h3> 沒有可放游標的內容，
+      // 在 Blog 裡看起來就「消失」了、沒辦法繼續打字。打字時 dropPlaceholder 會把佔位拿掉。
+      else { md = '#'.repeat(+type[1]) + ' ' + (one || EMPTY); kind = 'heading'; }
     }
     hideFmt();
     active.retype(md, kind);
@@ -649,7 +651,8 @@
       closeSlash();
       // 這個區塊目前的行內內容（去掉可能打進去的 /）
       const cur = serialize(block).replace(/\/+\s*$/, '').replace(/^\/+/, '').trim();
-      const needsSlot = cur === '' && (it.k === 'quote' || (it.k === 'list' && it.md('').indexOf('[ ]') < 0));
+      // 空的標題／引言／（非待辦）清單都要留一個零寬佔位，才有地方放游標繼續打字（見 retypeTo）
+      const needsSlot = cur === '' && (it.k === 'heading' || it.k === 'quote' || (it.k === 'list' && it.md('').indexOf('[ ]') < 0));
       opts.onRetype(it.md(needsSlot ? EMPTY : cur), it.k);
     }
 

@@ -4133,6 +4133,9 @@
       onSaved: function () {
         statusSave.textContent = '標註已儲存 ✓';
         renderPreviewNow(); // re-read the blob through the invalidated URL cache
+        // Blog 模式：markdown 沒變，BlogMode.update() 會直接 return 不重繪，所以另外叫它把
+        // 被 invalidate 的圖當場重抓——不然標註畫完不會顯示，要再點一次圖才更新。
+        if (window.BlogMode && BlogMode.refreshImages) BlogMode.refreshImages();
       }
     });
   }

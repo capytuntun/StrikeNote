@@ -44,6 +44,7 @@
   // ---- 排版 ----------------------------------------------------------------
   function render() {
     if (!root) return;
+    if (imgSel) imgSel = null;   // 整個 root 要重建，選取的那個 element 馬上會失效
     if (global.TableGrid) TableGrid.closeAll();   // 丟掉舊表格的疊層與就地編輯框，等一下重建
     const keep = scroller ? scroller.scrollTop : 0;
     const ls = splitLines(src);
@@ -681,6 +682,53 @@
     render();
   }
 
+  // ---- 圖片／嵌入區塊：點一下是「選取」而不是進編輯 ----------------------------
+  // 一張圖（![alt](img:id)）或嵌入的 PDF（![name](pdf:id)）自成一塊時，因為含 <img>/<iframe>
+  // 過不了 WYSIWYG 的安全閘，本來點下去會退回原始碼 textarea，畫面就變成一串 ![](img:...)。
+  // 使用者要的是保留圖片的樣子，所以改成：點一下選取它（外框），保留排版；要刪就按 Delete／
+  // Backspace，按 Enter 在它後面接一個新段落。編輯圖片本身（改 alt／換圖）到「編輯」原始碼模式做。
+  let imgSel = null;    // 目前被選取的圖片區塊 element（或 null）
+  const LONE_MEDIA = /^!\[[^\]]*\]\([^)]*\)$/;
+  function isImageBlock(b) { return !!(b && b.kind === 'para' && LONE_MEDIA.test(blockText(b).trim())); }
+  function clearImgSel() {
+    if (!imgSel) return;
+    imgSel.classList.remove('blog-img-sel');
+    imgSel.removeAttribute('tabindex');
+    imgSel = null;
+  }
+  function selectImageAtLine(startLine) {
+    clearImgSel();
+    let idx = -1;
+    for (let k = 0; k < blocks.length; k++) if (blocks[k].start <= startLine && blocks[k].end >= startLine) { idx = k; break; }
+    const el = idx >= 0 ? elOf(idx) : null;
+    if (!el) return;
+    el.classList.add('blog-img-sel');
+    el.setAttribute('tabindex', '-1');
+    el.focus({ preventScroll: true });
+    imgSel = el;
+  }
+  function deleteSelectedImage() {
+    if (!imgSel) return;
+    const b = blocks[Number(imgSel.getAttribute('data-i'))];
+    clearImgSel();
+    if (!b) return;
+    const ls = splitLines(src);
+    ls.splice(b.start - 1, b.end - b.start + 1);
+    const at = b.start - 1;   // 收合接縫的空行、去掉開頭/結尾的空行，不然會留下多餘的空段落
+    if (at > 0 && at < ls.length && ls[at - 1].trim() === '' && ls[at].trim() === '') ls.splice(at, 1);
+    while (ls.length && ls[0].trim() === '') ls.shift();
+    while (ls.length && ls[ls.length - 1].trim() === '') ls.pop();
+    src = ls.join('\n');
+    if (opts.onChange) opts.onChange(src);
+    render();
+  }
+  function onImgKey(e) {
+    if (!imgSel || readOnly) return;
+    if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); deleteSelectedImage(); return; }
+    if (e.key === 'Enter') { e.preventDefault(); const i = Number(imgSel.getAttribute('data-i')); clearImgSel(); startNew(i); return; }
+    if (e.key === 'Escape' || e.key.indexOf('Arrow') === 0) clearImgSel();
+  }
+
   function onClick(e) {
     const t = e.target;
     if (!t.closest || t === ta) return;
@@ -722,6 +770,15 @@
     if (el.classList.contains('blog-block-empty')) { startNew(-1); return; }
     const b = blocks[Number(el.getAttribute('data-i'))];
     if (!b) return;
+    // 圖片／PDF 嵌入自成一塊：點一下選取（保留圖片樣子），不進原始碼編輯
+    if (isImageBlock(b)) {
+      e.preventDefault();
+      const line = b.start;
+      if (ed) { const at0 = ed.line0; const sh = finish(); selectImageAtLine(line > at0 ? line + sh : line); }
+      else selectImageAtLine(line);
+      return;
+    }
+    clearImgSel();
     const caret = { x: e.clientX, y: e.clientY, offset: caretFromPoint(el, blockText(b), e.clientX, e.clientY) };
     if (!ed) { editAtLine(b.start, caret); return; }
     const at = ed.line0;
@@ -742,10 +799,11 @@
   // 點到頁面以外（側邊欄、頂列、別的面板）就結束編輯；自動完成選單、格式工具列不算，
   // 不然按格式鈕的那一下會先把編輯收掉、選取消失。
   function onDocDown(e) {
-    if (!ed || !scroller) return;
+    if (!scroller) return;
     const t = e.target;
     if (scroller.contains(t) || (t.closest && t.closest('.ac-popup, .blog-fmt, .wyg-slash, .wyg-fmt, .tg-menu'))) return;
-    finish();
+    clearImgSel();   // 點到頁面以外：取消圖片選取
+    if (ed) finish();
   }
 
   // 在新內容裡找回正在編輯的那幾行（離原本位置最近的一處）。
@@ -1106,6 +1164,7 @@
     scroller.addEventListener('dragleave', onDragLeave);
     scroller.addEventListener('drop', onDrop);
     document.addEventListener('mousedown', onDocDown, true);
+    document.addEventListener('keydown', onImgKey, true);   // 選取圖片後的 Delete／Enter／Esc
     // PDF「檔案｜預覽」、連結「連結｜預覽卡片」的切換鈕（js/embedswitch.js）。正在編輯的區塊是
     // textarea，不會出現；改寫走 update()，開在別的區塊的編輯框原地保留。
     if (global.EmbedSwitch) EmbedSwitch.attach(root, {
@@ -1183,12 +1242,17 @@
     remount(caret);
   }
 
+  // 圖片被就地改寫（標註）之後：markdown 沒變，所以 update() 不會重繪，但 MD.invalidateImage
+  // 已經把舊的清掉了，對現有的 <img> 重跑一次 resolveImages 就會重抓標註後的版本、當場換上。
+  function refreshImages() { if (root && global.MD) MD.resolveImages(root); }
+
   global.BlogMode = {
     init: init,
     show: show,
     hide: hide,
     reset: detach,
     update: update,
+    refreshImages: refreshImages,
     insertFiles: insertFiles,
     isEditing: function () { return !!ed; }
   };

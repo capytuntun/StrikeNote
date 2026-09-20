@@ -1394,6 +1394,10 @@ a.dash-row-act { text-decoration: none; }
 .blog-doc .blog-block.editing::before,
 .blog-doc:not(.is-readonly) .blog-block.editing:hover::before { background: var(--accent); }
 .blog-doc.is-readonly .blog-block { cursor: auto; }
+/* 選取的圖片區塊：外框標示（保留圖片，不變回原始碼），Delete 可刪、Enter 在後面接新段落 */
+.blog-block.blog-img-sel { outline: none; }
+.blog-block.blog-img-sel > p, .blog-block.blog-img-sel > figure,
+.blog-block.blog-img-sel img { box-shadow: 0 0 0 2px var(--accent); border-radius: 2px; }
 .blog-block-empty { color: var(--text-faint); padding: 2px 0 14px; }
 .blog-doc .mm-edit-btn { display: none; }
 .blog-src {
