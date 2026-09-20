@@ -42,6 +42,29 @@
   function elOf(i) { return root.querySelector('.blog-block[data-i="' + i + '"]'); }
 
   // ---- 排版 ----------------------------------------------------------------
+  // 「整行就是一張圖／嵌入」的行要自成一個區塊。marked 會把「文字\n![](img:id)」（中間只有
+  // 單一換行）當成同一個 paragraph，而含 <img> 的段落過不了 WYSIWYG 安全閘，整段就退回原始碼
+  // textarea、把 ![](img:...) 當文字顯示。把這種行從段落裡切出來，文字段落照常 WYSIWYG、
+  // 圖片自成一塊照常渲染（也吃得到「點一下選取」）。只切 para，清單／引言／callout 裡的圖不動。
+  function splitMediaBlocks(bs, ls) {
+    const out = [];
+    bs.forEach(function (b) {
+      if (b.kind !== 'para') { out.push(b); return; }
+      let seg = b.start, hit = false;
+      for (let line = b.start; line <= b.end; line++) {
+        if (LONE_MEDIA.test((ls[line - 1] || '').trim())) {
+          hit = true;
+          if (line > seg) out.push({ kind: 'para', start: seg, end: line - 1 });
+          out.push({ kind: 'para', start: line, end: line });
+          seg = line + 1;
+        }
+      }
+      if (!hit) { out.push(b); return; }
+      if (seg <= b.end) out.push({ kind: 'para', start: seg, end: b.end });
+    });
+    return out;
+  }
+
   function render() {
     if (!root) return;
     if (imgSel) imgSel = null;   // 整個 root 要重建，選取的那個 element 馬上會失效
@@ -49,6 +72,7 @@
     const keep = scroller ? scroller.scrollTop : 0;
     const ls = splitLines(src);
     blocks = (global.LineSync && LineSync.sourceBlocks) ? LineSync.sourceBlocks(src) : [];
+    blocks = splitMediaBlocks(blocks, ls);
     const frag = document.createDocumentFragment();
     let tocHtml = null;
     blocks.forEach(function (b, i) {
