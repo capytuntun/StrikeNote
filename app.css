@@ -156,6 +156,20 @@
   --ed-icode: #a6c78a;
   --ed-tag: #89dceb;
   --ed-container: #cba6f7;
+  /* Blog 模式（js/blogmode.js）：比照 Medium 編輯器的閱讀排版——襯線內文、680px 欄寬、
+     低對比的黑（不是純黑）、Medium 招牌的墨綠連結色。跟站內其餘介面是刻意兩套視覺
+     （跟一律深色的 #editor、Keep 風格的 #quick-wrap 同一種「這塊地方是它自己的東西」
+     的做法），所以獨立一組 token，只有 .blog-doc／.blog-fmt 這些選擇器會用到，不影響
+     預覽、PDF、電子書或站內其他頁面。深色主題另外覆寫墨色與邊框，綠色沿用同一個值
+     （在深底上仍然夠亮）。找不到 Medium 自家襯線字型時退回系統襯線字，效果幾乎一樣。 */
+  --md-serif: Georgia, Cambria, "Times New Roman", Times, "Noto Serif TC", serif;
+  --md-text: #242424;
+  --md-text-2: #6b6b6b;
+  --md-border: rgba(0, 0, 0, .15);
+  --md-accent: #1a8917;
+  --md-code-bg: #f2f2f2;
+  --md-selection: rgba(26, 137, 23, .18);
+  --md-measure: 680px;
   /* height of the sidebar header and the note toolbar — kept identical so the
      two hairlines meet exactly across the sidebar/main boundary */
   --topbar-h: 52px;
@@ -207,6 +221,11 @@
   --k-cmd: #5af78e; --k-kw: #6cb6ff; --k-str: #e3c34a; --k-var: #ff9d6a;
   --k-num: #c99bff; --k-com: #8496a8; --k-meta: #7fd6a0;
   /* 注意：--ed-* 沒有深色版本——編輯器在兩種主題下都維持深色，見 :root 的說明 */
+  --md-text: #e6e6e6;
+  --md-text-2: #a8a8a8;
+  --md-border: rgba(255, 255, 255, .18);
+  --md-code-bg: #1f2127;
+  --md-selection: rgba(26, 137, 23, .28);
 }
 
 * { box-sizing: border-box; }
@@ -1373,7 +1392,11 @@ a.dash-row-act { text-decoration: none; }
 /* ---- Blog mode（js/blogmode.js）-------------------------------------------
    分割／編輯／預覽之外的第四種檢視模式。整個寬度是一張排版好的頁面，點哪一段就原地變成
    那一段的 Markdown（.blog-src），字級跟排版後一樣；左邊的細條標出滑過／正在編輯的區塊。
-   跟預覽一樣照主題換色（不是 MD 編輯器那種永遠深色的程式碼面板）。 */
+   排版比照 Medium 的寫作編輯器：襯線內文、680px 窄欄、低對比的黑、選字浮出的黑色工具列、
+   分隔線是置中的三個點而不是一條線——用 --md-* token（見 :root）。跟全站直角、無襯線的
+   工具語彙是刻意分開的兩套視覺（跟一律深色的 #editor、Keep 風格的 #quick-wrap 同一種做
+   法），所以背景仍照主題切換（不是 MD 編輯器那種永遠深色的面板），但文字排印是 Blog 自己
+   的一套。唯一例外：「/」跳出來的類型選單（.wyg-slash）維持站內原本的樣子，不跟著換。 */
 .pane-blog { display: none; position: relative; background: var(--bg); overflow: hidden; }
 .panes.mode-blog .pane-edit,
 .panes.mode-blog .pane-preview,
@@ -1383,56 +1406,124 @@ a.dash-row-act { text-decoration: none; }
 /* 旁邊的目錄跟預覽用同一組 .preview-toc／.toc-show 樣式，收合規則也照抄一份 */
 .pane-blog.toc-hidden .preview-toc { display: none; }
 .pane-blog.toc-hidden:not(.no-toc) .toc-show { display: inline-flex; align-items: center; gap: 5px; }
-.blog-doc { max-width: 820px; margin: 0 auto; padding: 34px 40px 40vh; }
+/* .blog-doc.markdown-body（兩個 class 疊出比 .markdown-body 高的特異度）而不是單純
+   .blog-doc：#blog-doc 本身就掛著 markdown-body blog-doc 兩個 class，跟下面「所有預覽／
+   PDF／電子書共用」的 .markdown-body 系列規則特異度打平時，晚出現在檔案裡的那條贏——
+   而 .markdown-body 的基礎規則剛好排在後面，字級、行距、表格陰影這些會被它蓋掉。用兩個
+   class 疊出確定的高特異度，不必依賴誰先誰後就能保證這裡贏。 */
+.blog-doc.markdown-body {
+  max-width: var(--md-measure); margin: 0 auto; padding: 68px 20px 40vh;
+  font-family: var(--md-serif); font-size: 21px; line-height: 1.58; color: var(--md-text);
+}
 .blog-doc > .blog-block:first-child > :first-child { margin-top: 0; }
 .blog-block { position: relative; }
 .blog-block::before {
   content: ''; position: absolute; left: -18px; top: 0; bottom: 0; width: 2px;
   background: transparent; transition: background .12s;
 }
-.blog-doc:not(.is-readonly) .blog-block:hover::before { background: var(--border-strong); }
+.blog-doc:not(.is-readonly) .blog-block:hover::before { background: var(--md-border); }
 .blog-doc .blog-block.editing::before,
-.blog-doc:not(.is-readonly) .blog-block.editing:hover::before { background: var(--accent); }
+.blog-doc:not(.is-readonly) .blog-block.editing:hover::before { background: var(--md-accent); }
 .blog-doc.is-readonly .blog-block { cursor: auto; }
 /* 選取的圖片區塊：外框標示（保留圖片，不變回原始碼），Delete 可刪、Enter 在後面接新段落 */
 .blog-block.blog-img-sel { outline: none; }
 .blog-block.blog-img-sel > p, .blog-block.blog-img-sel > figure,
-.blog-block.blog-img-sel img { box-shadow: 0 0 0 2px var(--accent); border-radius: 2px; }
-.blog-block-empty { color: var(--text-faint); padding: 2px 0 14px; }
+.blog-block.blog-img-sel img { box-shadow: 0 0 0 2px var(--md-accent); }
+/* 空白筆記／新區塊的提示字：斜體襯線、淡灰，比照 Medium「Tell your story…」的樣子 */
+.blog-block-empty { color: var(--md-text-2); font-family: var(--md-serif); font-style: italic; padding: 2px 0 14px; }
 .blog-doc .mm-edit-btn { display: none; }
 .blog-src {
   display: block; width: 100%; margin: 0 0 14px; padding: 0; border: 0; outline: none;
-  resize: none; overflow: hidden; background: transparent; color: var(--text); caret-color: var(--accent);
+  resize: none; overflow: hidden; background: transparent; color: var(--md-text); caret-color: var(--md-accent);
   font: inherit; line-height: inherit; letter-spacing: inherit; tab-size: 4;
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .blog-src.is-h1, .blog-src.is-h2, .blog-src.is-h3, .blog-src.is-h4, .blog-src.is-h5, .blog-src.is-h6 {
-  margin: 28px 0 12px; font-weight: 700; line-height: 1.3; letter-spacing: -.01em;
+  margin: 34px 0 8px; font-weight: 700; line-height: 1.25; letter-spacing: -.015em;
 }
 .blog-src.is-h1 { font-size: 1.85em; }
-.blog-src.is-h2 { font-size: 1.45em; }
+.blog-src.is-h2 { font-size: 1.5em; }
 .blog-src.is-h3 { font-size: 1.2em; }
 .blog-src.is-h4 { font-size: 1.05em; }
 .blog-src.is-code, .blog-src.is-table {
-  font-family: var(--mono); font-size: var(--fs-md); line-height: 1.55;
-  padding: 14px 16px; background: var(--bg-2); border: 1px solid var(--border);
+  font-family: var(--mono); font-size: 17px; line-height: 1.6;
+  padding: 20px 24px; background: var(--md-code-bg); border: 0;
 }
-.blog-src.is-quote { padding-left: 14px; border-left: 3px solid var(--border-strong); color: var(--text-dim); }
+.blog-src.is-quote { padding-left: 20px; border-left: 3px solid var(--md-text); color: var(--md-text); font-style: italic; }
 .blog-doc > .blog-block:first-child > .blog-src { margin-top: 0; }
 
-/* 反白文字後浮出的格式工具列（js/blogmode.js 的 updateBubble）。body 子元素一律 fixed。 */
+/* ---- Medium 排版：標題、連結、清單、引言、分隔線、圖片、程式碼、表格 -------------------
+   這裡開始全部用 .blog-doc.markdown-body（見上面的說明），確定蓋過後面 .markdown-body
+   系列的基礎規則，不必管兩邊誰先誰後。 */
+.blog-doc.markdown-body h1, .blog-doc.markdown-body h2, .blog-doc.markdown-body h3,
+.blog-doc.markdown-body h4, .blog-doc.markdown-body h5, .blog-doc.markdown-body h6 {
+  font-family: var(--md-serif); font-weight: 700; line-height: 1.25; letter-spacing: -.015em;
+  color: var(--md-text); margin: 34px 0 8px; border: 0; padding: 0;
+}
+.blog-doc.markdown-body h1 { font-size: 2.3em; }
+.blog-doc.markdown-body h2 { font-size: 1.7em; }
+.blog-doc.markdown-body h3 { font-size: 1.35em; }
+.blog-doc.markdown-body h4 { font-size: 1.15em; }
+.blog-doc.markdown-body p { margin: 0 0 22px; }
+.blog-doc.markdown-body a { color: var(--md-text); text-decoration: underline; text-decoration-color: var(--md-border); text-underline-offset: 2px; }
+.blog-doc.markdown-body a:hover { color: var(--md-accent); text-decoration-color: var(--md-accent); }
+.blog-doc.markdown-body ul, .blog-doc.markdown-body ol { padding-left: 1.6em; margin: 0 0 22px; }
+.blog-doc.markdown-body li { margin: 8px 0; }
+.blog-doc.markdown-body li input[type="checkbox"] { margin-right: 8px; accent-color: var(--md-accent); }
+.blog-doc.markdown-body img { max-width: 100%; display: block; margin: 8px auto; }
+.blog-doc.markdown-body img.cover-logo { margin: 0 auto 18px; max-height: 96px; }
+/* Medium 的段落分隔線是置中的三個點，不是一條線 */
+.blog-doc.markdown-body hr {
+  border: 0; height: 1.4em; margin: 36px 0; position: relative;
+}
+.blog-doc.markdown-body hr::after {
+  content: '· · ·'; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  color: var(--md-text-2); font-family: var(--md-serif); font-size: 16px; letter-spacing: .3em;
+}
+.blog-doc.markdown-body blockquote {
+  margin: 0 0 22px; padding: 0 0 0 20px; color: var(--md-text); font-style: italic;
+  border-left: 3px solid var(--md-text); font-size: 1.05em;
+}
+.blog-doc.markdown-body pre {
+  background: var(--md-code-bg); padding: 20px 24px;
+  margin: 0 0 22px; font-size: 17px; line-height: 1.6; border: 0;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  width: 100%; box-sizing: border-box;
+}
+.blog-doc.markdown-body pre code { background: none; padding: 0; font-size: inherit; white-space: inherit; }
+.blog-doc.markdown-body code {
+  font-family: var(--mono); font-size: .82em;
+  background: var(--md-code-bg); padding: .15em .4em;
+}
+/* Medium 的表格是素的：沒有陰影卡片、沒有斑馬紋，只有一條條橫線把列分開 */
+.blog-doc.markdown-body table {
+  border-collapse: collapse; margin: 0 0 22px; display: block; overflow: auto;
+  border: 0; box-shadow: none; width: fit-content; max-width: 100%;
+  font-family: var(--md-serif); font-size: .92em;
+}
+.blog-doc.markdown-body th, .blog-doc.markdown-body td { border: 0; border-bottom: 1px solid var(--md-border); padding: 10px 16px 10px 0; text-align: left; }
+.blog-doc.markdown-body th { font-weight: 700; border-bottom: 2px solid var(--md-text); background: none; color: var(--md-text); }
+.blog-doc.markdown-body tr:nth-child(2n) td { background: none; }
+/* 選字的高亮沿用 Medium 的淡綠色，跟連結 hover 是同一個綠 */
+.blog-doc.markdown-body ::selection { background: var(--md-selection); }
+
+/* 反白文字後浮出的格式工具列（js/blogmode.js 的 updateBubble）。body 子元素一律 fixed。
+   比照 Medium 的選字工具列：不分主題一律深色的窄長條、白色圖示——這是 Medium 本身的作法
+   （它的工具列不跟著讀者的深色模式切換），故意不用 --bg/--border 這些會變色的 token。
+   圓角維持全站「方角」的規定（app.css 開頭：--r* 全部是 0），改變色階已經足夠讓它認得出
+   是同一套 Medium 語彙，不需要為了這一個元件破例。 */
 .blog-fmt {
   position: fixed; z-index: 1200; display: flex; align-items: center; gap: 1px;
-  padding: 3px; background: var(--bg); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+  padding: 4px; background: #1c1c1c; border: 0; box-shadow: 0 6px 20px rgba(0, 0, 0, .35);
 }
 .blog-fmt-btn {
-  display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
-  border: 0; background: transparent; color: var(--text-dim); cursor: pointer; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  border: 0; background: transparent; color: #d8d8d8; cursor: pointer; padding: 0;
   font: inherit; font-size: var(--fs-sm); transition: background .1s, color .1s;
 }
-.blog-fmt-btn:hover { background: var(--row-hover); color: var(--text); }
+.blog-fmt-btn:hover { background: rgba(255, 255, 255, .12); color: #fff; }
 .blog-fmt-btn .ic-svg { width: 16px; height: 16px; }
-.blog-fmt-sep { width: 1px; align-self: stretch; margin: 3px 3px; background: var(--border); }
+.blog-fmt-sep { width: 1px; align-self: stretch; margin: 4px 3px; background: rgba(255, 255, 255, .18); }
 
 /* Blog 表格拉欄寬：欄與欄的邊界上一條細條（js/blogmode.js 的 attachTableResize）。
    平常透明，滑過去才顯示 accent 線；拉的時候整頁 col-resize 游標、暫停選字。 */
@@ -1441,7 +1532,7 @@ a.dash-row-act { text-decoration: none; }
   content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px;
   background: transparent; transition: background .1s;
 }
-.blog-col-grip:hover::after, body.col-resizing .blog-col-grip::after { background: var(--accent); }
+.blog-col-grip:hover::after, body.col-resizing .blog-col-grip::after { background: var(--md-accent); }
 body.col-resizing { cursor: col-resize; user-select: none; }
 /* 設過欄寬的表格是 table-layout: fixed，內容太長的欄要換行而不是撐破版面 */
 .markdown-body table[data-colw] td, .markdown-body table[data-colw] th { overflow-wrap: anywhere; }
@@ -1455,7 +1546,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   opacity: .3; transition: opacity .1s, background .1s;
 }
 .blog-block:hover .tg-h { opacity: .55; }
-.tg-h:hover { opacity: 1; background: var(--accent); }
+.tg-h:hover { opacity: 1; background: var(--md-accent); }
 .tg-h .ic-svg { width: 12px; height: 12px; }
 .tg-colh { height: 11px; margin-top: 1px; cursor: grab; }
 .tg-rowh { width: 11px; margin-left: 1px; cursor: grab; }
@@ -1467,16 +1558,16 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   opacity: 0; transition: opacity .1s, color .1s, background .1s;
 }
 .blog-block:hover .tg-add { opacity: .8; }
-.tg-add:hover { opacity: 1; color: var(--bg); background: var(--accent); }
+.tg-add:hover { opacity: 1; color: var(--bg); background: var(--md-accent); }
 .tg-add .ic-svg { width: 14px; height: 14px; }
 .tg-add-col { width: 15px; }
 .tg-add-row { height: 15px; }
 
 /* 滑到把手上時，整欄／整列淡淡高亮 */
-.markdown-body .tg-hi { background: color-mix(in srgb, var(--accent) 12%, transparent) !important; }
+.markdown-body .tg-hi { background: color-mix(in srgb, var(--md-accent) 12%, transparent) !important; }
 
 /* 拖曳搬欄／搬列時的落點指示線 */
-.tg-drop { position: absolute; z-index: 7; background: var(--accent); pointer-events: none; }
+.tg-drop { position: absolute; z-index: 7; background: var(--md-accent); pointer-events: none; }
 .tg-drop-col { width: 2px; }
 .tg-drop-row { height: 2px; }
 body.tg-dragging { cursor: grabbing; user-select: none; }
@@ -1484,9 +1575,9 @@ body.tg-dragging { cursor: grabbing; user-select: none; }
 /* 就地編輯一格：蓋在那一格上的小編輯框，內距對齊儲存格（8px 12px + 1px 邊框） */
 .tg-cell-edit {
   position: absolute; z-index: 8; box-sizing: border-box; margin: 0; resize: none; overflow: hidden;
-  padding: 8px 12px; border: 1px solid var(--accent); background: var(--bg); color: var(--text);
-  font: inherit; line-height: 1.5; caret-color: var(--accent); outline: none;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+  padding: 8px 12px; border: 1px solid var(--md-accent); background: var(--bg); color: var(--text);
+  font: inherit; line-height: 1.5; caret-color: var(--md-accent); outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--md-accent) 25%, transparent);
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 
@@ -1507,13 +1598,14 @@ body.tg-dragging { cursor: grabbing; user-select: none; }
 
 /* ---------- Blog 所見即所得（js/blogwyg.js）---------- */
 /* 正在編輯的區塊就是排版好的它自己（contentEditable），左邊亮一條 accent 跟 textarea 版一致 */
-.blog-block.wyg-editing { outline: none; caret-color: var(--accent); }
+.blog-block.wyg-editing { outline: none; caret-color: var(--md-accent); }
 .blog-block.wyg-editing > * { outline: none; }
 .blog-doc .blog-block.wyg-editing::before,
-.blog-doc:not(.is-readonly) .blog-block.wyg-editing:hover::before { background: var(--accent); }
-/* 空段落要看得到游標在哪：給一點最小高度 */
+.blog-doc:not(.is-readonly) .blog-block.wyg-editing:hover::before { background: var(--md-accent); }
+/* 空段落要看得到游標在哪：給一點最小高度（跟 line-height: 1.58 對齊，不然聚焦一個空段落
+   時它會比左右已有文字的段落矮一點點，一行文字的高度跳一下） */
 .blog-block.wyg-editing > p:empty::before, .blog-block.wyg-editing > p > br:only-child { content: ''; }
-.blog-block.wyg-editing > p { min-height: 1.6em; }
+.blog-block.wyg-editing > p { min-height: 1.58em; }
 
 /* / 類型選單（body 子元素一律 fixed） */
 .wyg-slash {
@@ -1536,7 +1628,7 @@ body.tg-dragging { cursor: grabbing; user-select: none; }
   width: 260px; padding: 5px 8px; border: 1px solid var(--border); background: var(--bg-2); color: var(--text);
   font: inherit; font-size: var(--fs-sm); outline: none;
 }
-.wyg-link input:focus { border-color: var(--accent); }
+.wyg-link input:focus { border-color: var(--md-accent); }
 .wyg-link .btn { padding: 4px 10px; font-size: var(--fs-sm); }
 
 .pane-edit { flex-direction: column; overflow: hidden; }
