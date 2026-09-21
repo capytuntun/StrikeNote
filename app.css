@@ -156,13 +156,16 @@
   --ed-icode: #a6c78a;
   --ed-tag: #89dceb;
   --ed-container: #cba6f7;
-  /* Blog 模式（js/blogmode.js）：比照 Medium 編輯器的閱讀排版——襯線內文、680px 欄寬、
-     低對比的黑（不是純黑）、Medium 招牌的墨綠連結色。跟站內其餘介面是刻意兩套視覺
-     （跟一律深色的 #editor、Keep 風格的 #quick-wrap 同一種「這塊地方是它自己的東西」
-     的做法），所以獨立一組 token，只有 .blog-doc／.blog-fmt 這些選擇器會用到，不影響
-     預覽、PDF、電子書或站內其他頁面。深色主題另外覆寫墨色與邊框，綠色沿用同一個值
-     （在深底上仍然夠亮）。找不到 Medium 自家襯線字型時退回系統襯線字，效果幾乎一樣。 */
-  --md-serif: Georgia, Cambria, "Times New Roman", Times, "Noto Serif TC", serif;
+  /* Blog 模式（js/blogmode.js）：比照 Medium 編輯器的閱讀排版——680px 欄寬、低對比的黑
+     （不是純黑）、Medium 招牌的墨綠連結色。跟站內其餘介面是刻意兩套視覺（跟一律深色的
+     #editor、Keep 風格的 #quick-wrap 同一種「這塊地方是它自己的東西」的做法），所以獨立
+     一組 token，只有 .blog-doc／.blog-fmt 這些選擇器會用到，不影響預覽、PDF、電子書或
+     站內其他頁面。深色主題另外覆寫墨色與邊框，綠色沿用同一個值（在深底上仍然夠亮）。
+     字體用回站內的無襯線字（--sans）——原本這裡是 Medium 自己的襯線內文，使用者要求
+     改回來，其他排版（欄寬、深色工具列、三點分隔線、素面表格…）維持 Medium 的樣子。
+     Token 名稱沿用 --md-serif 沒改（六處引用都靠它），純粹省一輪改名，跟它現在存的其實
+     是無襯線字這件事沒關係。 */
+  --md-serif: var(--sans);
   --md-text: #242424;
   --md-text-2: #6b6b6b;
   --md-border: rgba(0, 0, 0, .15);
