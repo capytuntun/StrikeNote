@@ -535,7 +535,9 @@ async function runRestore(job, user, up, opts) {
         const nameC = f.name ? String(f.name).slice(0, 255) : null;
         try {
           if (existing) await q.deleteImage.run(f.id, owner);
-          await q.insertImagePending.run(f.id, owner, mimeC, nameC, Number(f.createdAt) || Date.now(), total, RESTORE_CHUNK);
+          // 已知的缺口：備份／還原目前不記檔案管理的雲端硬碟資料夾位置（folder_id），還原回來
+          // 一律落在最上層——檔案本身不會不見，只是要自己再搬一次資料夾。
+          await q.insertImagePending.run(f.id, owner, mimeC, nameC, Number(f.createdAt) || Date.now(), total, RESTORE_CHUNK, null);
           let held = [], heldLen = 0, seq = 0;
           const flush = async function (final) {
             while (heldLen >= RESTORE_CHUNK || (final && heldLen > 0)) {
@@ -565,7 +567,8 @@ async function runRestore(job, user, up, opts) {
       const mime = String(f.mime || 'application/octet-stream').slice(0, 255);
       const name = f.name ? String(f.name).slice(0, 255) : null;
       if (!existing) {
-        await q.insertImage.run(f.id, owner, mime, name, data, original, shapes, Number(f.createdAt) || Date.now());
+        // 同上：還原的檔案一律落在雲端硬碟最上層，不記得備份當時在哪個檔案管理資料夾裡。
+        await q.insertImage.run(f.id, owner, mime, name, data, original, shapes, Number(f.createdAt) || Date.now(), null);
         report.files.created++;
       } else {
         await q.updateImageFull.run(mime, name, data, original, shapes, f.id);

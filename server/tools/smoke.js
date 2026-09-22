@@ -948,6 +948,60 @@ async function main() {
     ok(MdImport.rewrite(fm.body, function () { return null; }) === fm.body, 'resolving nothing changes nothing');
   }
 
+  // 檔案管理／雲端硬碟：跟筆記完全分開的一棵資料夾樹（server/db.js file_folders），只整理
+  // 上傳的檔案本身。這裡順便驗一次 backup.js 的還原路徑——images.folder_id 那個欄位加進去
+  // 的時候，insertImagePending／insertImage 的參數數目沒有跟著改，backup.js 的呼叫端沒補上
+  // 新的那個參數，還原就整個炸掉（mysql2 回「Malformed communication packet」）；這幾項
+  // 顧著別再回去。
+  if (!OLD) {
+    section('file folders / 雲端硬碟 (server/db.js file_folders, server/api.js)');
+    r = await call(admin, 'GET', '/api/file-folders');
+    ok(r.status === 200 && Array.isArray(r.data.folders), 'list starts empty (or at least an array)', r.data);
+    r = await call(admin, 'POST', '/api/file-folders', { name: '煙霧測試' });
+    ok(r.status === 200 && r.data.folder && r.data.folder.name === '煙霧測試', 'create a top-level file folder', r.data);
+    const ffId = r.data.folder.id;
+    r = await call(admin, 'POST', '/api/file-folders', { name: '子資料夾', parentId: ffId });
+    const ffSubId = r.data.folder.id;
+    ok(r.status === 200 && r.data.folder.parentId === ffId, 'create a nested file folder', r.data);
+
+    // 直接上傳到子資料夾（X-Folder-Id），跟一般上傳（沒有這個 header）不衝突
+    r = await call(admin, 'POST', '/api/images', 'smoke-drive-file',
+      { raw: true, contentType: 'text/plain', headers: { 'X-File-Name': encodeURIComponent('smoke.txt'), 'X-Folder-Id': ffSubId } });
+    const ffFileId = r.data.id;
+    ok(r.status === 200 && !!ffFileId, 'upload directly into a subfolder', r.data);
+    r = await call(admin, 'POST', '/api/images', 'smoke-root-file',
+      { raw: true, contentType: 'text/plain', headers: { 'X-File-Name': encodeURIComponent('root.txt') } });
+    const rootFileId = r.data.id;
+    r = await call(admin, 'GET', '/api/images');
+    let img = r.data.images.find(x => x.id === ffFileId);
+    ok(img && img.folderId === ffSubId, 'listImages reports the folderId for the scoped upload', img);
+    img = r.data.images.find(x => x.id === rootFileId);
+    ok(img && img.folderId == null, 'an upload with no X-Folder-Id still lands at the drive root (existing paste/drop callers unaffected)', img);
+
+    // 重新命名／搬移：只動中繼資料的那條路，不像標註要整包位元組
+    r = await call(admin, 'PUT', '/api/images/' + ffFileId + '/file', { name: '改名了.txt' });
+    ok(r.status === 200, 'rename via /file');
+    r = await call(admin, 'PUT', '/api/images/' + ffFileId + '/file', { folderId: ffId });
+    ok(r.status === 200, 'move via /file');
+    r = await call(admin, 'GET', '/api/images');
+    ok(r.data.images.find(x => x.id === ffFileId).folderId === ffId, 'file now reports the new folder');
+
+    // 刪掉有內容的資料夾：檔案沒有垃圾桶，裡面的東西要搬到上一層，不能被連坐刪掉
+    r = await call(admin, 'DELETE', '/api/file-folders/' + ffSubId);
+    ok(r.status === 200, 'delete a non-empty folder succeeds');
+    r = await call(admin, 'GET', '/api/images');
+    ok(r.data.images.find(x => x.id === ffFileId).folderId === ffId, 'file that was untouched by the delete keeps its folder');
+    r = await call(admin, 'DELETE', '/api/file-folders/' + ffId);
+    ok(r.status === 200, 'delete the (now non-empty again) top folder too');
+    r = await call(admin, 'GET', '/api/images');
+    img = r.data.images.find(x => x.id === ffFileId);
+    ok(img && img.folderId == null, 'the file that was inside the deleted top folder landed at drive root, not lost', img);
+
+    // 收尾：把煙霧測試留下的檔案清掉，不要弄髒 scratch 資料庫
+    await call(admin, 'DELETE', '/api/images/' + ffFileId);
+    await call(admin, 'DELETE', '/api/images/' + rootFileId);
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 }

@@ -878,7 +878,8 @@ async function startUpload(user, body) {
   const id = uid('img');
   const mime = String((body && body.mime) || 'application/octet-stream').slice(0, 255);
   const name = body && body.name ? String(body.name).slice(0, 255) : null;
-  await q.insertImagePending.run(id, user.id, mime, name, Date.now(), size, UPLOAD_CHUNK);
+  const folderId = await resolveFileFolder(user, body && body.folderId);
+  await q.insertImagePending.run(id, user.id, mime, name, Date.now(), size, UPLOAD_CHUNK, folderId);
   return { id: id, chunkSize: UPLOAD_CHUNK, chunks: Math.ceil(size / UPLOAD_CHUNK) };
 }
 async function pendingUploadOf(user, id) {
@@ -911,11 +912,73 @@ async function sweepPendingUploads() {
   const r = await q.deleteStalePending.run(Date.now() - 3600000);
   return r.affectedRows;
 }
-async function createImage(user, mime, buf, name) {
+// ---------------- file folders (檔案管理／雲端硬碟) ----------------
+// 跟筆記的 folders 完全分開的一棵樹，純粹整理上傳的檔案；見 db.js file_folders 表的註解。
+// 沒有 area、沒有 permFor() 那套可見性——檔案資料夾本來就是私有的，跟筆記的分享/site-wide
+// 完全無關（分享的是筆記，不是檔案管理本身）。
+async function resolveFileFolder(user, folderId) {
+  if (!folderId) return null;
+  const f = await q.fileFolderById.get(folderId);
+  if (!f || f.owner_id !== user.id) return null;   // 資料夾不存在或不是自己的：當作根目錄，不擋上傳
+  return folderId;
+}
+async function listFileFolders(user) {
+  return (await q.fileFoldersOf.all(user.id)).map(f => ({ id: f.id, name: f.name, parentId: f.parent_id, createdAt: Number(f.created_at) }));
+}
+async function createFileFolder(user, body) {
+  const parentId = await resolveFileFolder(user, body && body.parentId);
+  const id = uid('ffld');
+  await q.insertFileFolder.run(id, user.id, String((body && body.name) || '新資料夾'), parentId, Date.now());
+  const f = await q.fileFolderById.get(id);
+  return { id: f.id, name: f.name, parentId: f.parent_id, createdAt: Number(f.created_at) };
+}
+async function updateFileFolder(user, id, body) {
+  const r = await q.fileFolderById.get(id);
+  if (!r || r.owner_id !== user.id) return { status: 404 };
+  const wantParent = body && body.parentId !== undefined ? body.parentId : r.parent_id;
+  // 不能把資料夾搬進自己的子孫底下——會斷成一個孤島，樹狀結構跟著壞掉。
+  if (wantParent) {
+    let cur = wantParent, hops = 0;
+    while (cur && hops++ < 100) {
+      if (cur === id) return { status: 400, error: '不能搬到自己的子資料夾底下' };
+      const p = await q.fileFolderById.get(cur);
+      cur = p ? p.parent_id : null;
+    }
+  }
+  const parentId = await resolveFileFolder(user, wantParent);
+  await q.updateFileFolder.run(String((body && body.name) || r.name), parentId, id, user.id);
+  const f = await q.fileFolderById.get(id);
+  return { folder: { id: f.id, name: f.name, parentId: f.parent_id, createdAt: Number(f.created_at) } };
+}
+// 檔案沒有垃圾桶，所以刪資料夾絕對不能連坐刪掉裡面的東西：子資料夾與檔案都先搬去上一層
+// （NULL 就是雲端硬碟最上層），再刪這個空掉的資料夾——使用者永遠不會因為刪錯一個資料夾
+// 就弄丟檔案，最多只是東西跑到上一層，還找得到。
+async function deleteFileFolder(user, id) {
+  const r = await q.fileFolderById.get(id);
+  if (!r || r.owner_id !== user.id) return { status: 404 };
+  await tx(async function () {
+    await q.moveChildFileFoldersUp.run(r.parent_id, id, user.id);
+    await q.moveChildImagesUp.run(r.parent_id, id, user.id);
+    await q.deleteFileFolder.run(id, user.id);
+  }, 'deleteFileFolder');
+  return { ok: true };
+}
+
+async function createImage(user, mime, buf, name, folderId) {
   const id = uid('img');
   await q.insertImage.run(id, user.id, String(mime || 'application/octet-stream'), name || null,
-    buf, null, null, Date.now());
+    buf, null, null, Date.now(), await resolveFileFolder(user, folderId));
   return { id: id };
+}
+// 檔案管理的重新命名／搬移到資料夾：只動中繼資料，不像 saveImage 那樣要求整包位元組
+// （標註）——連分塊上傳的大檔案也能改名字、搬資料夾，只是不能標註（saveImage 自己擋）。
+// name／folderId 都是選填，各自要動哪個由呼叫端決定（跟 updateFolder 同一個做法）。
+async function updateFile(user, id, body) {
+  const row = await q.imageById.get(id);
+  if (!row || row.owner_id !== user.id) return { status: 404 };
+  if (body && body.name !== undefined) await q.renameImage.run(String(body.name || '').slice(0, 255) || row.name, id, user.id);
+  if (body && body.folderId !== undefined) await q.moveImage.run(await resolveFileFolder(user, body.folderId), id, user.id);
+  return { ok: true };
 }
 
 async function getImage(user, id) {
@@ -966,7 +1029,7 @@ const MEDIA_REF = /(?:!?\[([^\]\n]*)\]\()?(?:img|pdf|file):([\w.-]+)/g;
 
 async function listImages(user) {
   const images = (await q.imagesOf.all(user.id)).map(r => ({
-    id: r.id, mime: r.mime, createdAt: Number(r.created_at),
+    id: r.id, mime: r.mime, createdAt: Number(r.created_at), folderId: r.folder_id,
     bytes: Number(r.bytes) + Number(r.original_bytes), annotated: !!r.annotated,
     name: '', fileName: r.name || '', notes: [], hiddenNotes: 0
   }));
@@ -1172,7 +1235,8 @@ module.exports = {
   restoreBookVersion, deleteBookVersion,
   listBookLinks, createBookLink, updateBookLink, deleteBookLink, publicBook,
   listFolders, createFolder, updateFolder, deleteFolder,
-  createImage, getImage, saveImage, deleteImage, listImages, saveOrder,
+  listFileFolders, createFileFolder, updateFileFolder, deleteFileFolder,
+  createImage, getImage, saveImage, updateFile, deleteImage, listImages, saveOrder,
   startUpload, putChunk, finishUpload, sweepPendingUploads,
   listShares, addShare, removeShare,
   normalizeArea   // server/backup.js reuses this so a restored area is validated the same way a live create is

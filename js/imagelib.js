@@ -38,6 +38,10 @@
     { key: 'pdf', label: 'PDF' },
     { key: 'other', label: '其他檔案' }
   ];
+  // 拖一張／多張卡片到資料夾方塊（或麵包屑）搬移用的私有 MIME type，跟 app.js／dashboard.js
+  // 拖筆記那套（application/x-strikenote-notes）是同一個協定精神，只是這裡拖的是檔案。
+  const DRAG_MIME = 'application/x-strikenote-files';
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; }
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -170,6 +174,13 @@
     const cards = new Map();   // id → 卡片元素，只建一次
     const dims = {};           // id → 「寬 × 高」，圖載入後才知道
 
+    // ---- 雲端硬碟資料夾（跟筆記的資料夾完全分開，見 server/db.js file_folders）----
+    // 形狀跟筆記的資料夾一樣（{id, name, parentId}），folderPath() 直接重用。
+    let fileFolders = [];
+    let curFolderId = null;   // null = 雲端硬碟最上層
+    const folderTiles = new Map();   // id → 資料夾方塊元素，只建一次
+    let movePop = null;   // 「搬移到資料夾」小選單目前開給哪個檔案（null = 沒開）
+
     function byId(id) { return images.find(function (x) { return x.id === id; }); }
     function inNote(img) {
       return !noteFilter || img.notes.some(function (n) { return n.id === noteFilter; });
@@ -209,7 +220,9 @@
         upBtn.disabled = true;
         toast('上傳 ' + files.length + ' 個檔案中…');
         Promise.all(files.map(function (f) {
-          return Store.putImage(f, f.name, !f.type && /\.pdf$/i.test(f.name) ? 'application/pdf' : undefined);
+          // 上傳到目前瀏覽的雲端硬碟資料夾（跟拖放上傳同一個規則）；在最上層就是 curFolderId
+          // = null，跟以前完全一樣的行為。
+          return Store.putImage(f, f.name, !f.type && /\.pdf$/i.test(f.name) ? 'application/pdf' : undefined, curFolderId);
         })).then(function () {
           toast('已上傳 ' + files.length + ' 個檔案');
           load();
@@ -221,6 +234,20 @@
       inp.click();
     });
     head.appendChild(upBtn);
+    // 新增資料夾：整理雲端硬碟用的，跟筆記的資料夾無關。
+    const newFolderBtn = button('btn', 'folder-plus', '新增資料夾');
+    newFolderBtn.title = '在目前位置新增一個資料夾';
+    newFolderBtn.addEventListener('click', function () {
+      App.prompt({ title: '新增資料夾', placeholder: '資料夾名稱', value: '新資料夾', ok: '建立' }).then(function (name) {
+        if (name == null) return;
+        Store.createFileFolder(name.trim() || '新資料夾', curFolderId).then(function (f) {
+          fileFolders.push(f);
+          renderFolders();
+          renderCrumb();
+        }, function (e) { toast('建立資料夾失敗：' + (e && e.message || e)); });
+      });
+    });
+    head.appendChild(newFolderBtn);
     const close = el('button', 'icon-btn ver-close');
     close.type = 'button';
     close.title = '關閉（Esc）';
@@ -320,11 +347,34 @@
 
     const body = el('div', 'imglib-body');
     const gridWrap = el('div', 'imglib-grid-wrap');
+    // 雲端硬碟麵包屑 + 資料夾方塊：跟首頁同一套 CSS 類別（.dash-crumb／.dash-folder-tile），
+    // 不必另外做一套視覺——areabrowser.js 對課程筆記的資料夾也是同一個做法。
+    const crumb = el('nav', 'dash-crumbs imglib-crumb');
+    crumb.setAttribute('aria-label', '雲端硬碟路徑');
+    const folderGrid = el('div', 'dash-folder-grid imglib-folder-grid');
+    gridWrap.appendChild(crumb);
+    gridWrap.appendChild(folderGrid);
     const grid = el('div', 'imglib-grid');
     gridWrap.appendChild(grid);
     const detail = el('aside', 'imglib-detail');
     body.appendChild(gridWrap);
     body.appendChild(detail);
+    // 從電腦把檔案拖進整個灰色區域（不是拖到某個資料夾方塊上，那個各自有自己的 drop）：
+    // 上傳到目前瀏覽的資料夾。拖動 App 內的卡片時不要誤判成「從電腦拖檔案」。
+    gridWrap.addEventListener('dragover', function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      gridWrap.classList.add('drag-over');
+    });
+    gridWrap.addEventListener('dragleave', function (e) {
+      if (!gridWrap.contains(e.relatedTarget)) gridWrap.classList.remove('drag-over');
+    });
+    gridWrap.addEventListener('drop', function (e) {
+      gridWrap.classList.remove('drag-over');
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      uploadDropped(e.dataTransfer.files, curFolderId);
+    });
 
     const foot = el('div', 'imglib-foot');
     const sum = el('span', 'imglib-sum');
@@ -346,6 +396,8 @@
 
     function dismiss() {
       document.removeEventListener('keydown', onKey, true);
+      closeFolderMenu();
+      closeMovePop();
       overlay.remove();
     }
     // 掛在 capture 階段：App.confirm 的確認框也是在 capture 聽 Esc，而且它先關掉自己，
@@ -499,6 +551,292 @@
     noteClear.addEventListener('click', function () { setNoteFilter(null); });
     popInput.addEventListener('input', renderNoteOptions);
 
+    // ---- 雲端硬碟資料夾 ----
+    // 資料夾本身的清單（跟筆記完全分開）一次載入、留在記憶體裡；folderPath() 是給筆記資料夾
+    // 用的既有函式，形狀一樣（{id, name, parentId}），直接重用。
+    function fileFolderById(id) { return fileFolders.find(function (f) { return f.id === id; }); }
+    function childFileFolders(parentId) {
+      return fileFolders.filter(function (f) { return (f.parentId || null) === parentId; })
+        .sort(function (a, b) { return compareText(a.name, b.name); });
+    }
+    function folderCounts(id) {
+      let files = 0, subs = childFileFolders(id).length;
+      images.forEach(function (img) { if ((img.folderId || null) === id) files++; });
+      return { files: files, subs: subs };
+    }
+    // 搜尋、依筆記篩選時忽略資料夾範圍（在哪裡都找得到），單純瀏覽時才限定在目前資料夾。
+    function folderScoped() { return !query && !noteFilter; }
+    function goFolder(id) {
+      curFolderId = id || null;
+      selected.clear();
+      renderCrumb();
+      renderFolders();
+      renderList();
+    }
+    function renderCrumb() {
+      crumb.textContent = '';
+      const chain = [];
+      let cur = curFolderId, seen = {};
+      while (cur && !seen[cur]) {
+        seen[cur] = true;
+        const f = fileFolderById(cur);
+        if (!f) break;
+        chain.unshift(f);
+        cur = f.parentId;
+      }
+      const home = el('button', 'dash-crumb' + (curFolderId ? '' : ' is-current'));
+      home.type = 'button';
+      home.innerHTML = icon('hard-drive');
+      home.appendChild(el('span', null, '雲端硬碟'));
+      if (curFolderId) home.addEventListener('click', function () { goFolder(null); });
+      else home.disabled = true;
+      makeCrumbDropTarget(home, null);
+      crumb.appendChild(home);
+      chain.forEach(function (f, i) {
+        const sep = el('span', 'dash-crumb-sep');
+        sep.innerHTML = icon('chevron-right');
+        crumb.appendChild(sep);
+        const isLast = i === chain.length - 1;
+        const b = el('button', 'dash-crumb' + (isLast ? ' is-current' : ''), f.name || '未命名資料夾');
+        b.type = 'button';
+        if (!isLast) { b.addEventListener('click', function () { goFolder(f.id); }); makeCrumbDropTarget(b, f.id); }
+        else b.disabled = true;
+        crumb.appendChild(b);
+      });
+      crumb.hidden = !fileFolders.length && !curFolderId;
+    }
+    // 麵包屑本身也能接住拖曳（把檔案拖回上層），跟資料夾方塊同一套 drop-target 視覺
+    function makeCrumbDropTarget(el2, targetId) {
+      el2.addEventListener('dragover', function (e) {
+        if (!hasInternalDrag(e)) return;
+        e.preventDefault();
+        el2.classList.add('drop-target');
+      });
+      el2.addEventListener('dragleave', function () { el2.classList.remove('drop-target'); });
+      el2.addEventListener('drop', function (e) {
+        el2.classList.remove('drop-target');
+        if (!hasInternalDrag(e)) return;
+        e.preventDefault();
+        moveFilesTo(dragPayload(e), targetId);
+      });
+    }
+    function hasInternalDrag(e) {
+      return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], DRAG_MIME) >= 0;
+    }
+    function dragPayload(e) {
+      try { return JSON.parse(e.dataTransfer.getData(DRAG_MIME) || '[]'); } catch (e2) { return []; }
+    }
+    function buildFolderTile(f) {
+      const counts = folderCounts(f.id);
+      const bits = [];
+      if (counts.files) bits.push(counts.files + ' 個檔案');
+      if (counts.subs) bits.push(counts.subs + ' 個資料夾');
+      const tile = el('div', 'dash-folder-tile');
+      tile.dataset.id = f.id;
+      tile.tabIndex = 0;
+      tile.setAttribute('role', 'button');
+      tile.title = '打開資料夾';
+      const head = el('div', 'dash-folder-head');
+      head.innerHTML = icon('folder');
+      head.className = 'dash-folder-ic';
+      const wrap = el('div', 'dash-folder-head');
+      wrap.appendChild(head);
+      wrap.appendChild(el('span', 'dash-folder-name', f.name || '未命名資料夾'));
+      tile.appendChild(wrap);
+      tile.appendChild(el('div', 'dash-folder-meta', bits.join('・') || '空的'));
+      const acts = el('div', 'dash-folder-acts');
+      const menuBtn = el('button', 'dash-folder-menu');
+      menuBtn.type = 'button';
+      menuBtn.title = '更多';
+      menuBtn.innerHTML = icon('more-vertical');
+      menuBtn.addEventListener('click', function (e) { e.stopPropagation(); openFolderMenu(f, menuBtn); });
+      acts.appendChild(menuBtn);
+      tile.appendChild(acts);
+      tile.addEventListener('click', function () { goFolder(f.id); });
+      tile.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goFolder(f.id); } });
+      // 拖檔案卡片進來搬移；也接受從電腦拖檔案進來直接上傳到這個資料夾
+      tile.addEventListener('dragover', function (e) {
+        if (!(hasInternalDrag(e) || hasFiles(e))) return;
+        e.preventDefault();
+        tile.classList.add('drop-target');
+      });
+      tile.addEventListener('dragleave', function () { tile.classList.remove('drop-target'); });
+      tile.addEventListener('drop', function (e) {
+        tile.classList.remove('drop-target');
+        if (hasInternalDrag(e)) { e.preventDefault(); moveFilesTo(dragPayload(e), f.id); return; }
+        if (hasFiles(e)) { e.preventDefault(); uploadDropped(e.dataTransfer.files, f.id); }
+      });
+      return tile;
+    }
+    function renderFolders() {
+      folderGrid.textContent = '';
+      const subs = childFileFolders(curFolderId);
+      folderGrid.hidden = !subs.length;
+      subs.forEach(function (f) {
+        let tile = folderTiles.get(f.id);
+        if (!tile) { tile = buildFolderTile(f); folderTiles.set(f.id, tile); }
+        else {
+          const counts = folderCounts(f.id);
+          const bits = [];
+          if (counts.files) bits.push(counts.files + ' 個檔案');
+          if (counts.subs) bits.push(counts.subs + ' 個資料夾');
+          tile.querySelector('.dash-folder-name').textContent = f.name || '未命名資料夾';
+          tile.querySelector('.dash-folder-meta').textContent = bits.join('・') || '空的';
+        }
+        folderGrid.appendChild(tile);
+      });
+      Array.from(folderTiles.keys()).forEach(function (id) { if (!fileFolderById(id)) folderTiles.delete(id); });
+    }
+    function openFolderMenu(f, anchor) {
+      closeFolderMenu();
+      const r = anchor.getBoundingClientRect();
+      const menu = el('div', 'tg-menu imglib-foldermenu');
+      const rename = el('button', null); rename.type = 'button'; rename.innerHTML = icon('pen-line'); rename.appendChild(el('span', null, '重新命名'));
+      rename.addEventListener('click', function () { closeFolderMenu(); renameFolder(f); });
+      const del = el('button', 'is-danger'); del.type = 'button'; del.innerHTML = icon('trash'); del.appendChild(el('span', null, '刪除資料夾'));
+      del.addEventListener('click', function () { closeFolderMenu(); removeFolder(f); });
+      menu.appendChild(rename);
+      menu.appendChild(del);
+      document.body.appendChild(menu);
+      const w = menu.offsetWidth;
+      menu.style.left = Math.max(6, Math.min(r.left, window.innerWidth - w - 6)) + 'px';
+      menu.style.top = (r.bottom + 4) + 'px';
+      const out = function (e) { if (!menu.contains(e.target)) closeFolderMenu(); };
+      setTimeout(function () { document.addEventListener('mousedown', out, true); }, 0);
+      menu._out = out;
+      folderMenuEl = menu;
+    }
+    let folderMenuEl = null;
+    function closeFolderMenu() {
+      if (!folderMenuEl) return;
+      document.removeEventListener('mousedown', folderMenuEl._out, true);
+      folderMenuEl.remove();
+      folderMenuEl = null;
+    }
+    function renameFolder(f) {
+      App.prompt({ title: '重新命名資料夾', value: f.name || '', ok: '重新命名' }).then(function (name) {
+        if (name == null || !name.trim() || name.trim() === f.name) return;
+        Store.updateFileFolder(f.id, { name: name.trim() }).then(function (nf) {
+          f.name = nf.name;
+          renderFolders();
+          renderCrumb();
+        }, function (e) { toast('重新命名失敗：' + (e && e.message || e)); });
+      });
+    }
+    function removeFolder(f) {
+      const counts = folderCounts(f.id);
+      const inside = counts.files + counts.subs;
+      confirm({
+        title: '刪除資料夾',
+        message: '確定刪除「' + (f.name || '未命名資料夾') + '」？' +
+          (inside ? '\n裡面的 ' + inside + ' 個項目會搬到上一層，不會被刪除。' : ''),
+        ok: '刪除資料夾', danger: true
+      }).then(function (ok) {
+        if (!ok) return;
+        Store.deleteFileFolder(f.id).then(function () {
+          // 伺服器已經把裡面的子資料夾／檔案搬到上一層了，這裡把本機那份狀態同步一致
+          const parentId = f.parentId || null;
+          fileFolders = fileFolders.filter(function (x) { return x.id !== f.id; });
+          fileFolders.forEach(function (x) { if (x.parentId === f.id) x.parentId = parentId; });
+          images.forEach(function (img) { if (img.folderId === f.id) img.folderId = parentId; });
+          folderTiles.delete(f.id);
+          renderFolders();
+          renderCrumb();
+          renderList();
+          toast('已刪除資料夾');
+        }, function (e) { toast('刪除失敗：' + (e && e.message || e)); });
+      });
+    }
+
+    // ---- 檔案：重新命名／搬移到資料夾 ----
+    function renameFile(img) {
+      App.prompt({ title: '重新命名', value: displayName(img), ok: '重新命名' }).then(function (name) {
+        if (name == null || !name.trim()) return;
+        Store.updateFile(img.id, { name: name.trim() }).then(function () {
+          // img.name（顯示名稱）不是單純等於檔名——伺服器的 listImages() 依規則決定要不要用
+          // 筆記裡的 alt 蓋過檔名（見 server/api.js listImages 結尾那段），這裡在前端沒辦法
+          // 正確重算同一套規則，重新整理一次清單最簡單也最不會跟伺服器兜不起來。卡片跟卡片
+          // 的舊 DOM 節點會被丟掉重建，但 activeId／選取狀態都是存 id，load() 裡的
+          // renderList／renderDetail 會照舊接回來。
+          const oldId = cards.get(img.id);
+          if (oldId) cards.delete(img.id);
+          load();
+          toast('已重新命名');
+        }, function (e) { toast('重新命名失敗：' + (e && e.message || e)); });
+      });
+    }
+    function moveFilesTo(ids, folderId) {
+      const list = (ids || []).map(byId).filter(Boolean).filter(function (img) { return (img.folderId || null) !== (folderId || null); });
+      if (!list.length) return;
+      let done = 0, chain = Promise.resolve();
+      list.forEach(function (img) {
+        chain = chain.then(function () {
+          return Store.updateFile(img.id, { folderId: folderId }).then(function () {
+            img.folderId = folderId || null;
+            done++;
+          }, function () {});
+        });
+      });
+      chain.then(function () {
+        renderFolders();
+        renderList();
+        if (activeId && list.some(function (img) { return img.id === activeId; })) renderDetail();
+        toast(done > 1 ? '已搬移 ' + done + ' 個檔案' : '已搬移檔案');
+      });
+    }
+    // 「搬移到資料夾」小選單：跟「依筆記篩選」那個下拉是同一種做法（搜尋 + 清單），
+    // 只是列的是雲端硬碟的資料夾，選了就搬並關掉——不是篩選，點一下就是動作。
+    function openMovePop(img, anchor) {
+      closeMovePop();
+      const r = anchor.getBoundingClientRect();
+      const pop2 = el('div', 'imglib-notepop imglib-movepop');
+      const list2 = el('div', 'imglib-notepop-list');
+      function opt(label, iconName, folderId, disabled) {
+        const b = el('button', 'imglib-noteopt' + ((img.folderId || null) === (folderId || null) ? ' is-on' : ''));
+        b.type = 'button';
+        b.disabled = !!disabled;
+        b.innerHTML = icon(iconName);
+        b.appendChild(el('span', 'o-title', label));
+        if (!disabled) b.addEventListener('click', function () { closeMovePop(); moveFilesTo([img.id], folderId); });
+        return b;
+      }
+      list2.appendChild(opt('雲端硬碟（最上層）', 'hard-drive', null));
+      fileFolders.slice().sort(function (a, b) { return compareText(folderPath(fileFolders, a.id), folderPath(fileFolders, b.id)); })
+        .forEach(function (f) { list2.appendChild(opt(folderPath(fileFolders, f.id), 'folder-open', f.id)); });
+      if (!fileFolders.length) list2.appendChild(el('div', 'imglib-notepop-empty', '還沒有任何資料夾'));
+      pop2.appendChild(list2);
+      document.body.appendChild(pop2);
+      const w = pop2.offsetWidth;
+      pop2.style.left = Math.max(6, Math.min(r.left, window.innerWidth - w - 6)) + 'px';
+      pop2.style.top = (r.bottom + 4) + 'px';
+      const out = function (e) { if (!pop2.contains(e.target)) closeMovePop(); };
+      setTimeout(function () { document.addEventListener('mousedown', out, true); }, 0);
+      pop2._out = out;
+      movePop = pop2;
+    }
+    function closeMovePop() {
+      if (!movePop) return;
+      document.removeEventListener('mousedown', movePop._out, true);
+      movePop.remove();
+      movePop = null;
+    }
+    // 從電腦把檔案拖進來（資料夾方塊、麵包屑或空白處都收）：跟右上角「上傳檔案」按鈕
+    // 同一條上傳管線，只是目的地資料夾不一樣。
+    function uploadDropped(fileList, folderId) {
+      const files = Array.prototype.slice.call(fileList || []);
+      if (!files.length) return;
+      toast('上傳 ' + files.length + ' 個檔案中…');
+      Promise.all(files.map(function (f) {
+        return Store.uploadFile(f, null, !f.type && /\.pdf$/i.test(f.name) ? 'application/pdf' : undefined, folderId);
+      })).then(function () {
+        toast('已上傳 ' + files.length + ' 個檔案');
+        load();
+      }, function (e) {
+        toast('上傳失敗：' + (e && e.message || e));
+        load();
+      });
+    }
+
     // ---- 卡片 ----
     function buildCard(img) {
       const card = el('div', 'imglib-card');
@@ -579,8 +917,17 @@
         if (e.shiftKey || e.ctrlKey || e.metaKey) { toggleSelect(img.id); return; }
         activate(img.id);
       });
+      // 拖去資料夾方塊或麵包屑搬移；拖已選取的一批卡片其中一張，整批一起搬（跟首頁拖筆記同一個手感）。
+      card.draggable = true;
+      card.addEventListener('dragstart', function (e) {
+        const ids = selected.has(img.id) && selected.size > 1 ? Array.from(selected) : [img.id];
+        e.dataTransfer.setData(DRAG_MIME, JSON.stringify(ids));
+        e.dataTransfer.setData('text/plain', ids.map(displayNameById).join(', '));
+        e.dataTransfer.effectAllowed = 'move';
+      });
       return card;
     }
+    function displayNameById(id) { const img = byId(id); return img ? displayName(img) : id; }
     function syncCard(card) {
       const id = card.getAttribute('data-id');
       const on = selected.has(id);
@@ -591,6 +938,9 @@
 
     function matches(img) {
       if (!inNote(img)) return false;
+      // 單純瀏覽（沒搜尋、沒依筆記篩選）限定在目前的雲端硬碟資料夾；一旦搜尋或依筆記篩選，
+      // 就是要「不管在哪裡都幫我找到」，資料夾範圍讓路。
+      if (folderScoped() && (img.folderId || null) !== curFolderId) return false;
       if (filter !== 'all' && statusOf(img) !== filter) return false;
       if (typeFilter !== 'all' && typeOf(img) !== typeFilter) return false;
       if (!query) return true;
@@ -602,7 +952,8 @@
     function emptyState() {
       const box = el('div', 'imglib-empty');
       let ic = 'image', msg;
-      if (!images.length) msg = '還沒有上傳過任何檔案。\n在筆記裡貼上或拖進圖片、PDF 或其他檔案，或按右上角的「上傳檔案」，就會出現在這裡。';
+      if (!images.length && !fileFolders.length) msg = '還沒有上傳過任何檔案。\n在筆記裡貼上或拖進圖片、PDF 或其他檔案，或按右上角的「上傳檔案」，就會出現在這裡；也可以把電腦裡的檔案直接拖到這裡上傳。';
+      else if (folderScoped() && curFolderId) { ic = 'folder-open'; msg = '這個資料夾是空的。\n把檔案拖進來，或按「上傳檔案」。'; }
       else if (query) { ic = 'search'; msg = '找不到符合「' + input.value.trim() + '」的檔案。'; }
       else if (noteFilter) {
         ic = 'file-text';
@@ -833,6 +1184,10 @@
         copyText(markdownOf(img)).then(function () { toast('已複製，可以直接貼進筆記'); },
           function () { toast('複製失敗'); });
       });
+      const renBtn = button('btn', 'pen-line', '重新命名');
+      renBtn.addEventListener('click', function () { renameFile(img); });
+      const mvBtn = button('btn', 'folder-open', '搬移到資料夾');
+      mvBtn.addEventListener('click', function () { openMovePop(img, mvBtn); });
       const dl = el('a', 'btn');
       dl.href = srcOf(img.id);
       dl.download = fileName(img);
@@ -841,6 +1196,8 @@
       const del = button('btn imglib-del', 'trash', '刪除檔案');
       del.addEventListener('click', function () { removeImages([img.id]); });
       acts.appendChild(copyBtn);
+      acts.appendChild(renBtn);
+      acts.appendChild(mvBtn);
       acts.appendChild(dl);
       acts.appendChild(del);
       main.appendChild(acts);
@@ -895,9 +1252,15 @@
       grid.appendChild(wait);
       renderFoot();
       renderDetail();
-      Store.listImages().then(function (data) {
-        images = (data && data.images) || [];
+      Promise.all([Store.listImages(), Store.getFileFolders()]).then(function (r) {
+        images = (r[0] && r[0].images) || [];
+        fileFolders = r[1] || [];
+        // 開著的時候資料夾被別處刪掉（理論上不會，檔案管理是這裡唯一動它的地方）就退回最上層，
+        // 不留在一個已經不存在的資料夾裡看著空畫面。
+        if (curFolderId && !fileFolderById(curFolderId)) curFolderId = null;
         loaded = true;
+        renderCrumb();
+        renderFolders();
         renderList();
         renderDetail();
       }).catch(function (e) {

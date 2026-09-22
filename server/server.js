@@ -162,6 +162,16 @@ function uploadName(header) {
   return s || null;
 }
 
+// X-Folder-Id: which 檔案管理 folder a direct upload lands in (see api.js's uid()
+// shape — alnum, dot, dash, underscore only, so unlike the file name this never
+// needs percent-decoding). A bad or missing value is not an error: api.js's
+// resolveFileFolder treats anything it cannot resolve to the caller's own folder
+// as "no folder" (root), so a forged id just quietly lands the file at the top.
+function uploadFolderId(header) {
+  const s = String(header || '');
+  return /^[\w.-]{1,80}$/.test(s) ? s : null;
+}
+
 function uploadHeaders(row, length) {
   const mime = String(row.mime || '').toLowerCase();
   const headers = {
@@ -540,13 +550,25 @@ async function handleApi(req, res, url) {
     if (method === 'DELETE') return send(await api.deleteFolder(user, m[1]));
   }
 
+  // 檔案管理／雲端硬碟的資料夾（js/imagelib.js）：跟上面的 /api/folders 完全獨立，
+  // 純粹整理上傳的檔案，見 db.js file_folders 表的註解。
+  if (p === '/api/file-folders' && method === 'GET') return json(res, 200, { folders: await api.listFileFolders(user) });
+  if (p === '/api/file-folders' && method === 'POST') {
+    return json(res, 200, { folder: await api.createFileFolder(user, await readJSON(req)) });
+  }
+  if ((m = p.match(/^\/api\/file-folders\/([\w.-]+)$/))) {
+    if (method === 'PUT') return send(await api.updateFileFolder(user, m[1], await readJSON(req)));
+    if (method === 'DELETE') return send(await api.deleteFileFolder(user, m[1]));
+  }
+
   // Chunked uploads for files over MAX_BODY_BYTES (js/store.js uploadFile → api.js):
   // start → PUT each chunk in order → finish. Name and type go through the same
   // sanitisers as a whole-file upload.
   if (p === '/api/uploads' && method === 'POST') {
     const b = await readJSON(req);
     return send(await api.startUpload(user, {
-      size: b.size, mime: uploadMime(b.mime), name: uploadName(encodeURIComponent(String(b.name || '')))
+      size: b.size, mime: uploadMime(b.mime), name: uploadName(encodeURIComponent(String(b.name || ''))),
+      folderId: uploadFolderId(b.folderId)
     }));
   }
   if ((m = p.match(/^\/api\/uploads\/([\w.-]+)\/(\d+)$/)) && method === 'PUT') {
@@ -564,8 +586,9 @@ async function handleApi(req, res, url) {
     // when it is served back is sendUpload's decision, not the uploader's.
     const mime = uploadMime(req.headers['content-type']);
     const name = uploadName(req.headers['x-file-name']);
+    const folderId = uploadFolderId(req.headers['x-folder-id']);
     const buf = await readBody(req, config.maxBodyBytes);
-    return json(res, 200, await api.createImage(user, mime, buf, name));
+    return json(res, 200, await api.createImage(user, mime, buf, name, folderId));
   }
   if ((m = p.match(/^\/api\/images\/([\w.-]+)$/))) {
     const id = m[1];
@@ -577,6 +600,11 @@ async function handleApi(req, res, url) {
     }
     if (method === 'PUT') return send(await api.saveImage(user, id, await readJSON(req)));
     if (method === 'DELETE') return send(await api.deleteImage(user, id));
+  }
+  // 檔案管理／雲端硬碟：重新命名、搬移到資料夾（js/imagelib.js）。跟上面 saveImage
+  // （改寫標註後的位元組）分開一條路，所以分塊上傳的大檔案也能改名字、搬資料夾。
+  if ((m = p.match(/^\/api\/images\/([\w.-]+)\/file$/)) && method === 'PUT') {
+    return send(await api.updateFile(user, m[1], await readJSON(req)));
   }
   if ((m = p.match(/^\/api\/images\/([\w.-]+)\/meta$/))) {
     if (method === 'GET') {

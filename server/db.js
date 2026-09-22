@@ -193,6 +193,22 @@ const SCHEMA = [
     CONSTRAINT fk_chunks_image FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+  // 檔案管理／雲端硬碟（js/imagelib.js, server/api.js 的 "file folders"）：一套跟筆記的
+  // folders 完全分開的資料夾樹，只用來整理上傳的檔案本身，不牽涉任何一篇筆記——沒有 area、
+  // 沒有 is_book，就是最陽春的「id / 名字 / 上層」。images.folder_id（下面 MIGRATIONS）指到
+  // 這裡；NULL 是雲端硬碟的最上層。刻意不重用 folders 表：folders 的 area 系統（course/
+  // knowledge/quick/novel）跟 permFor()／novelUnlocked() 這些筆記可見性規則綁得很緊，檔案
+  // 資料夾不該被拖進那套邏輯，也不該讓「刪除資料夾」意外牽動任何一篇筆記。
+  `CREATE TABLE IF NOT EXISTS file_folders (
+    id         VARCHAR(64) COLLATE utf8mb4_bin NOT NULL PRIMARY KEY,
+    owner_id   INT NOT NULL,
+    name       TEXT NOT NULL,
+    parent_id  VARCHAR(64) COLLATE utf8mb4_bin NULL,
+    created_at BIGINT NOT NULL,
+    KEY idx_file_folders_owner (owner_id),
+    CONSTRAINT fk_file_folders_owner FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
   `CREATE TABLE IF NOT EXISTS shares (
     note_id    VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
     user_id    INT NOT NULL,
@@ -308,7 +324,10 @@ const MIGRATIONS = [
   // Set by POST /api/novel/unlock after the caller re-types their own password;
   // permFor() only grants access to an area:'novel' note while this is set and
   // fresh (NOVEL_UNLOCK_TTL_MS in api.js) — see the 小說 bullet in CLAUDE.md.
-  ['sessions', 'novel_unlocked_at', 'BIGINT NULL']
+  ['sessions', 'novel_unlocked_at', 'BIGINT NULL'],
+  // 檔案管理／雲端硬碟：哪個 file_folders 資料夾裝著這個檔案，NULL = 最上層。跟 notes.area
+  // 那套完全無關——見上面 file_folders 表的註解。
+  ['images', 'folder_id', 'VARCHAR(64) COLLATE utf8mb4_bin NULL']
 ];
 
 async function addColumnIfMissing(table, col, ddl) {
@@ -538,14 +557,18 @@ const q = {
   // images
   imageById: stmt('SELECT * FROM images WHERE id = ?'),
   insertImage: stmt(`
-    INSERT INTO images (id, owner_id, mime, name, data, original, shapes, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+    INSERT INTO images (id, owner_id, mime, name, data, original, shapes, created_at, folder_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   updateImage: stmt('UPDATE images SET mime = ?, data = ?, original = ?, shapes = ? WHERE id = ?'),
+  // 檔案管理的重新命名／搬移資料夾：不動位元組，跟標註（updateImage）分開一條路。
+  // 兩個欄位都給、都不給皆可（分開呼叫各自的呼叫端負責帶齊）。
+  renameImage: stmt('UPDATE images SET name = ? WHERE id = ? AND owner_id = ?'),
+  moveImage: stmt('UPDATE images SET folder_id = ? WHERE id = ? AND owner_id = ?'),
   deleteImage: stmt('DELETE FROM images WHERE id = ? AND owner_id = ?'),
   // chunked uploads (api.js startUpload / putChunk / finishUpload)
   insertImagePending: stmt(`
-    INSERT INTO images (id, owner_id, mime, name, data, original, shapes, created_at, size, chunk_size, pending)
-    VALUES (?, ?, ?, ?, '', NULL, NULL, ?, ?, ?, 1)`),
+    INSERT INTO images (id, owner_id, mime, name, data, original, shapes, created_at, size, chunk_size, pending, folder_id)
+    VALUES (?, ?, ?, ?, '', NULL, NULL, ?, ?, ?, 1, ?)`),
   insertChunk: stmt('INSERT INTO image_chunks (image_id, seq, data) VALUES (?, ?, ?)'),
   chunkStats: stmt('SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(data)), 0) AS bytes FROM image_chunks WHERE image_id = ?'),
   chunkData: stmt('SELECT data FROM image_chunks WHERE image_id = ? AND seq = ?'),
@@ -560,8 +583,21 @@ const q = {
   // and every note, any owner, trashed or not, whose text could embed an upload.
   // The INSTR filter only trims the scan; listImages does the exact matching.
   imagesOf: stmt(
-    'SELECT id, mime, name, created_at, COALESCE(size, LENGTH(data)) AS bytes, COALESCE(LENGTH(original), 0) AS original_bytes, ' +
+    'SELECT id, mime, name, folder_id, created_at, COALESCE(size, LENGTH(data)) AS bytes, COALESCE(LENGTH(original), 0) AS original_bytes, ' +
     '(original IS NOT NULL) AS annotated FROM images WHERE owner_id = ? AND pending = 0 ORDER BY created_at DESC'),
+
+  // 檔案管理／雲端硬碟資料夾（file_folders）：跟 notes 的 folders 完全獨立的一棵樹，
+  // 純粹整理上傳的檔案，見上面 file_folders 表的註解。
+  fileFoldersOf: stmt('SELECT * FROM file_folders WHERE owner_id = ?'),
+  fileFolderById: stmt('SELECT * FROM file_folders WHERE id = ?'),
+  insertFileFolder: stmt(
+    'INSERT INTO file_folders (id, owner_id, name, parent_id, created_at) VALUES (?, ?, ?, ?, ?)'),
+  updateFileFolder: stmt('UPDATE file_folders SET name = ?, parent_id = ? WHERE id = ? AND owner_id = ?'),
+  deleteFileFolder: stmt('DELETE FROM file_folders WHERE id = ? AND owner_id = ?'),
+  // 刪掉一個資料夾之前，把它裡面的東西（子資料夾與檔案）都先搬到它的上層——檔案沒有
+  // 垃圾桶，刪資料夾絕對不能連著把裡面的檔案一起刪掉。
+  moveChildFileFoldersUp: stmt('UPDATE file_folders SET parent_id = ? WHERE parent_id = ? AND owner_id = ?'),
+  moveChildImagesUp: stmt('UPDATE images SET folder_id = ? WHERE folder_id = ? AND owner_id = ?'),
   notesEmbeddingMedia: stmt(
     'SELECT n.id, n.owner_id, u.username AS owner_name, n.title, n.folder_id, n.access, n.access_perm, ' +
     'n.deleted_at, n.updated_at, n.content FROM notes n JOIN users u ON u.id = n.owner_id ' +

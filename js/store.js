@@ -115,6 +115,14 @@
       return req('PUT', '/api/folders/' + folder.id, body).then(r => r.folder);
     },
     deleteFolder: function (id) { return req('DELETE', '/api/folders/' + id); },
+
+    // 檔案管理／雲端硬碟的資料夾（js/imagelib.js）：跟上面的筆記 folders 完全分開的一棵樹。
+    getFileFolders: function () { return req('GET', '/api/file-folders').then(r => r.folders); },
+    createFileFolder: function (name, parentId) {
+      return req('POST', '/api/file-folders', { name: name || '新資料夾', parentId: parentId || null }).then(r => r.folder);
+    },
+    updateFileFolder: function (id, body) { return req('PUT', '/api/file-folders/' + id, body).then(r => r.folder); },
+    deleteFileFolder: function (id) { return req('DELETE', '/api/file-folders/' + id); },
     // Manual order (js/sorting.js). `ids` is one whole level — the children of
     // `parentId` — in its new order; a listed row from elsewhere moves in.
     saveOrder: function (kind, parentId, ids) {
@@ -260,11 +268,15 @@
 
     // Uploads — images, PDFs and any other file. `name` travels percent-encoded
     // in X-File-Name (a header cannot hold CJK); `type` overrides a missing or
-    // wrong blob.type (a .pdf the OS did not label).
-    putImage: function (blob, name, type) {
+    // wrong blob.type (a .pdf the OS did not label). `folderId` (optional) is a
+    // 檔案管理 folder id — ASCII, so unlike the name it goes straight in a header
+    // (X-Folder-Id) with no encoding. Every existing caller (paste/drop/toolbar/
+    // Blog/course-file upload) omits it and lands at 雲端硬碟's root, unchanged.
+    putImage: function (blob, name, type, folderId) {
       const h = { 'Content-Type': type || blob.type || 'application/octet-stream' };
       const n = name != null ? name : blob.name;
       if (n) h['X-File-Name'] = encodeURIComponent(String(n));
+      if (folderId) h['X-Folder-Id'] = folderId;
       return req('POST', '/api/images', blob, { raw: true, headers: h }).then(r => r.id);
     },
     // Any file, any size (up to the server's UPLOAD_MAX_BYTES). A file that fits one
@@ -273,7 +285,7 @@
     // fails is retried a few times (the server recognises a repeat by its sequence number,
     // so a retry can never append twice). onProgress(sentBytes, totalBytes). Resolves to
     // the file id, the same id putImage would give.
-    uploadFile: function (file, onProgress, type) {
+    uploadFile: function (file, onProgress, type, folderId) {
       const mime = type || file.type || 'application/octet-stream';
       const progress = function (n) { if (onProgress) onProgress(n, file.size); };
       if (file.size <= 20 * 1024 * 1024) {
@@ -281,11 +293,11 @@
         // 這台伺服器的 MAX_BODY_BYTES 可能調得比 20 MB 小：改走分塊，區塊大小由伺服器決定。
         // 不能只認 413——伺服器一拒收就關連線，瀏覽器還在送 body，看到的是沒有 status 的
         // 「Failed to fetch」。真的斷網的話，分塊的第一個請求一樣會失敗，錯誤照常浮上來。
-        return this.putImage(file, file.name, mime).then(function (id) { progress(file.size); return id; },
+        return this.putImage(file, file.name, mime, folderId).then(function (id) { progress(file.size); return id; },
           function (e) { if (e && (e.status === 413 || !e.status)) return chunked(); throw e; });
       }
       return chunked();
-      function chunked() { return req('POST', '/api/uploads', { name: file.name, mime: mime, size: file.size }).then(function (up) {
+      function chunked() { return req('POST', '/api/uploads', { name: file.name, mime: mime, size: file.size, folderId: folderId || null }).then(function (up) {
         let seq = 0;
         function putChunk(tries) {
           const start = seq * up.chunkSize;
@@ -377,6 +389,9 @@
       });
     },
     deleteImage: function (id) { return req('DELETE', '/api/images/' + id); },
+    // 檔案管理：重新命名／搬移到資料夾，只動中繼資料（不像 saveImage 要整包位元組）。
+    // body 可以只給 { name } 或只給 { folderId }，或兩個一起。
+    updateFile: function (id, body) { return req('PUT', '/api/images/' + id + '/file', body); },
     // Image library: every upload of mine (no bytes) with the notes that embed it.
     listImages: function () { return req('GET', '/api/images'); },
 
