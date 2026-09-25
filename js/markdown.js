@@ -461,6 +461,34 @@
   //   { type:'link' }                          a line that is just a link -> {%preview url %}
   //   { type:'card', title }                   {%preview url %} -> [title](url), or <url>
   const FENCE_LINE = /^\s{0,3}(?:```|~~~)/;
+  // 圖片黑框：![說明](img:<id>) <-> ![說明](img:<id>#frame)，把第 index 張站內圖片的
+  // 黑框打開／關掉（index 由呼叫端依預覽裡 <img> 的文件順序算出來，見 app.js 的
+  // toggleImageFrame）。兩個對應關係一定要跟渲染端一致，才不會點 A 改到 B：
+  //   1. 只認 `!` 開頭的——沒有驚嘆號的 [名稱](img:id) 走的是 link renderer，不會變成 <img>。
+  //   2. 跳過圍籬程式碼區塊——教學文章裡「示範」的那行 ![x](img:…) 不會被渲染成圖片，
+  //      也就不該佔掉一個序號。待辦清單的 toggleTask 用的是同一套對應方式。
+  const IMG_FRAME = 'frame';
+  const IMG_REF = /!\[[^\]\n]*\]\(img:[\w.-]+(#frame)?\)/g;
+  function toggleImageFrame(text, index) {
+    const lines = String(text).split('\n');
+    let fence = false, seen = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (FENCE_LINE.test(lines[i])) { fence = !fence; continue; }
+      if (fence) continue;
+      IMG_REF.lastIndex = 0;
+      let m;
+      while ((m = IMG_REF.exec(lines[i]))) {
+        if (seen++ !== index) continue;
+        const ref = m[0];
+        const next = m[1]
+          ? ref.slice(0, -(IMG_FRAME.length + 2)) + ')'      // 去掉結尾的「#frame)」，補回「)」
+          : ref.slice(0, -1) + '#' + IMG_FRAME + ')';        // 把結尾的「)」換成「#frame)」
+        lines[i] = lines[i].slice(0, m.index) + next + lines[i].slice(m.index + ref.length);
+        return lines.join('\n');
+      }
+    }
+    return String(text);
+  }
   function standaloneLinkUrl(line) {
     const s = line.trim();
     let m = /^\[[^\]\n]*\]\((https?:\/\/\S+?)(?:\s+"[^"\n]*")?\)$/.exec(s);
@@ -647,17 +675,31 @@
           '</span>';
       }
       if (href && href.indexOf('img:') === 0) {
-        const id = href.slice(4);
+        // ![說明](img:<id>) 是一般圖片，結尾多一個 #frame 表示這張要加黑框（報告裡的截圖
+        // 底色常常跟紙一樣白，沒有框會糊成一片）。標記寫在 markdown 裡而不是 note.meta，
+        // 所以預覽、PDF、電子書讀的是同一份來源，複製貼上整段也跟著走。id 只會是 [\w.-]
+        // （server/api.js 的 MEDIA_REF 也照這個切），「#」之後的東西吃不進 id，伺服器判斷
+        // 圖片可見性用的 `img:<id>` 子字串比對也不受影響。
+        const raw = href.slice(4);
+        const hash = raw.indexOf('#');
+        const id = hash < 0 ? raw : raw.slice(0, hash);
+        const framed = hash >= 0 && raw.slice(hash + 1) === IMG_FRAME;
         const isLogo = (text === '__cover_logo__');
-        const img = '<img data-img-id="' + escapeHtml(id) + '"' + (isLogo ? ' class="cover-logo"' : '') +
+        const cls = isLogo ? 'cover-logo' : (framed ? 'img-framed' : '');
+        const img = '<img data-img-id="' + escapeHtml(id) + '"' + (cls ? ' class="' + cls + '"' : '') +
           ' alt="' + escapeHtml(text || '') + '"' +
           (title ? ' title="' + escapeHtml(title) + '"' : '') + '>';
         // The cover logo is centred as a block and never annotated, so leave it bare.
         if (isLogo) return img;
-        // Stored images get a wrapper so the annotate button can sit over them.
+        // Stored images get a wrapper so the hover tools can sit over them.
         return '<span class="img-wrap">' + img +
+          '<span class="img-tools">' +
           '<button class="img-annotate" type="button" data-annotate="' + escapeHtml(id) +
-          '" title="標註這張圖片">✎ 標註</button></span>';
+          '" title="標註這張圖片">✎ 標註</button>' +
+          '<button class="img-frame-btn" type="button" data-frame="' + escapeHtml(id) + '"' +
+          (framed ? ' aria-pressed="true"' : '') +
+          ' title="' + (framed ? '移除黑框' : '加上黑框') + '">▢ 黑框</button>' +
+          '</span></span>';
       }
       return '<img src="' + escapeHtml(href) + '" alt="' + escapeHtml(text || '') + '"' +
         (title ? ' title="' + escapeHtml(title) + '"' : '') + '>';
@@ -725,6 +767,7 @@
     if (raw.indexOf(TOC_PLACEHOLDER) >= 0) raw = raw.split(TOC_PLACEHOLDER).join(buildInlineTOC());
     return DOMPurify.sanitize(raw, {
       ADD_ATTR: ['id', 'data-img-id', 'data-note-id', 'data-note-title', 'data-annotate',
+        'data-frame', 'aria-pressed',   // 圖片黑框的切換鈕
         'data-risk', 'data-finding', 'type', 'target', 'data-pdf-id', 'loading', 'data-tag',
         'data-toc',    // [toc] 的展開鈕
         'data-task',   // 待辦清單：勾選框在文件中的序號，用來回寫原始 markdown
@@ -937,6 +980,7 @@
     invalidateImage: invalidateImage,
     resolveLinkCards: resolveLinkCards,
     switchEmbed: switchEmbed,
+    toggleImageFrame: toggleImageFrame,
     applyColWidths: applyColWidths,
     setTableCols: setTableCols,
     extractFindings: extractFindings,

@@ -400,8 +400,11 @@
       '.pdf-content img { max-width: 100%; }',
       '.pdf-content .code-block { position: relative; margin: 0 0 10pt; }',
       '.pdf-content .code-block .code-tools { position: absolute; top: 0; right: 0; }',
-      '.pdf-content .code-copy, .pdf-content .img-annotate, .pdf-content .mm-edit-btn,' +
+      '.pdf-content .code-copy, .pdf-content .img-tools, .pdf-content .mm-edit-btn,' +
       ' .pdf-content .mm-hint, .pdf-content .rm-edit-btn { display: none; }',
+      /* 圖片黑框（markdown 裡的 img:<id>#frame）。列印文件沒有畫面上的 CSS 變數，
+         一律純黑——本來就是為了紙上的白底截圖才有這個功能。 */
+      '.pdf-content img.img-framed { border: 1px solid #000; }',
       /* 心智圖：節點的底色與字色在畫面上是靠 CSS 變數決定的，列印文件裡沒有那些
          變數，不補這幾行的話 fill 會失效變成整塊黑。 */
       '.pdf-content .mindmap-block { border: 1px solid #d0d7de; padding: 8pt; margin: 0 0 12pt;',
@@ -667,7 +670,7 @@
   function prepare(note, previewEl) {
     const clone = previewEl.cloneNode(true);
     // strip interactive controls from the export
-    Array.prototype.forEach.call(clone.querySelectorAll('.code-copy, .img-annotate, .mm-edit-btn'),
+    Array.prototype.forEach.call(clone.querySelectorAll('.code-copy, .img-tools, .mm-edit-btn'),
       function (b) { b.remove(); });
     // A to-do box on paper is a record, not a control — leave the tick visible
     // but make sure nobody can change it in a PDF viewer that renders form

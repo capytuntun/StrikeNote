@@ -2368,18 +2368,35 @@ select.sec-info-input { cursor: pointer; }
 @media (max-width: 1100px) { .book-outline { display: none; } }
 @media (max-width: 760px) { .book-nav { flex-basis: 220px; } .book-page { padding: 24px 20px 60px; } }
 
-/* ---------- Image annotation ---------- */
+/* ---------- Image annotation / 圖片黑框 ---------- */
 .img-wrap { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
-.img-annotate {
-  position: absolute; top: 8px; right: 8px; z-index: 2;
-  display: none; align-items: center; cursor: pointer; font-family: inherit;
+/* 滑過圖片才出現的一排小工具（標註、黑框）。兩顆鈕共用同一個絕對定位的容器，這樣加鈕
+   不用重算每一顆的 right 值；pdf.js 與 book.js 匯出前整個 .img-tools 一起拿掉。
+   只在 #preview 裡浮出來：這兩顆鈕都要寫回 #editor 的原始碼，而 app.js 的 click 處理
+   也只掛在 #preview 上——電子書閱讀器、隨筆卡片、檔案檢視器裡的 Markdown 同樣用
+   MD.render() 渲染，那裡按下去沒有原始碼可以改，按鈕不該出現。 */
+.img-tools { position: absolute; top: 8px; right: 8px; z-index: 2; display: none; gap: 6px; }
+#preview .img-wrap:hover .img-tools { display: inline-flex; }
+.img-annotate, .img-frame-btn {
+  display: inline-flex; align-items: center; cursor: pointer; font-family: inherit;
   border: 1px solid var(--border); background: rgba(255, 255, 255, .96);
   color: var(--text); font-size: var(--fs-xs); font-weight: 600; padding: 4px 9px; line-height: 1.4;
   box-shadow: var(--shadow-sm);
+  /* 小圖（例如一顆 icon）上面這排鈕會比圖還寬，不禁止換行的話「標註」「黑框」會被
+     擠成一個字一行，糊成一團 */
+  white-space: nowrap;
 }
-:root[data-theme="dark"] .img-annotate { background: rgba(25,29,36,.96); }
-.img-wrap:hover .img-annotate { display: inline-flex; }
-.img-annotate:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+:root[data-theme="dark"] .img-annotate,
+:root[data-theme="dark"] .img-frame-btn { background: rgba(25,29,36,.96); }
+.img-annotate:hover, .img-frame-btn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* 已經套上黑框的那顆鈕維持按下的樣子，不用滑過去才知道現在是開還是關 */
+.img-frame-btn[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: var(--bg); }
+/* 黑框本身。報告裡的截圖底色常常跟紙一樣白，沒有框會跟頁面糊在一起，所以框線是給
+   「紙」看的——列印與淺色主題一律純黑（pdf.js 的列印樣式另外複述一份同樣的規則）。
+   深色主題不能也用純黑：深底上的黑線等於看不見，會讓人以為沒套成功，所以改用同樣
+   醒目的淺色線，語意仍然是「這張圖有框」。 */
+.markdown-body img.img-framed { border: 1px solid #000; }
+:root[data-theme="dark"] .markdown-body img.img-framed { border-color: #d7dbe3; }
 
 .anno-overlay { padding: 22px; }
 /* .modal sets a 440px width later in this file, so match its specificity here */

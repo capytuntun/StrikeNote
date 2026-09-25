@@ -2018,6 +2018,26 @@
     applyEditorText(lines.join('\n'));
   }
 
+  // 圖片黑框：預覽裡滑到圖片上出現的「▢ 黑框」鈕，切換這張圖的 #frame 標記。
+  // 對應方式跟待辦清單一樣——預覽裡第 N 張站內圖片就是原始碼裡第 N 個 ![…](img:…)，
+  // 序號在這裡算（DOM 才知道按的是哪一張），改寫原始碼交給 MD.toggleImageFrame。
+  // 走 applyEditorText 是重點：它會發一個 input 事件，自動存檔、重新渲染、共同編輯的
+  // 合併全部照原本的路徑跑，這顆鈕不需要自己碰任何一個。
+  function toggleImageFrame(btn) {
+    const cur = state.current;
+    if (!cur || cur.perm === 'read') return;
+    const wrap = btn.closest('.img-wrap');
+    const img = wrap && wrap.querySelector('img[data-img-id]');
+    if (!img) return;
+    const all = Array.prototype.slice.call(previewEl.querySelectorAll('img[data-img-id]'));
+    const index = all.indexOf(img);
+    if (index < 0) return;
+    const next = MD.toggleImageFrame(editorEl.value, index);
+    // 數不對的時候寧可什麼都不改，讓下一次渲染以原始碼為準（同 toggleTask）
+    if (next === editorEl.value) { renderPreviewNow(); return; }
+    applyEditorText(next);
+  }
+
   // Replace the body of the nth ```<fence> block (mindmap or relmap) in the source.
   function replaceFenceBlock(fence, index, outline) {
     const lines = editorEl.value.split('\n');
@@ -4529,6 +4549,8 @@
       if (tag) { e.preventDefault(); browseTag(tag.getAttribute('data-tag')); return; }
       const anno = e.target.closest('.img-annotate');
       if (anno) { e.preventDefault(); openAnnotator(anno.getAttribute('data-annotate')); return; }
+      const frameBtn = e.target.closest('.img-frame-btn');
+      if (frameBtn) { e.preventDefault(); toggleImageFrame(frameBtn); return; }
       // 內文 [toc] 的展開鈕：預設只列到 ##，點了才顯示底下的 ###
       const tocToggle = e.target.closest('.md-toc-toggle');
       if (tocToggle) {

@@ -233,6 +233,18 @@ async function main() {
   r = await call(admin, 'PUT', '/api/notes/' + noteIds[0], { title: cur.title, content: cur.content + '\n\n![img](img:' + imgId + ')', baseContent: cur.content, folderId: fid });
   r = await call(bob, 'GET', '/api/images/' + imgId, undefined, { buffer: true });
   ok(r.status === 200, 'image visible once a shared note embeds it', r.status);
+  // 圖片黑框把引用寫成 ![x](img:<id>#frame)。id 只吃 [\w.-]，所以 MEDIA_REF 切出來的 id
+  // 不會含「#frame」，可見性的 `img:<id>` 子字串比對也還在——這條規則一旦破掉，分享出去
+  // 的筆記裡所有加了框的圖都會變成 404，而且只有收件人才看得出來。
+  r = await call(admin, 'POST', '/api/images', PNG, { raw: true, contentType: 'image/png' });
+  const framedId = r.data.id;
+  cur = (await call(admin, 'GET', '/api/notes/' + noteIds[0])).data.note;
+  await call(admin, 'PUT', '/api/notes/' + noteIds[0], { title: cur.title, content: cur.content + '\n\n![框](img:' + framedId + '#frame)', baseContent: cur.content, folderId: fid });
+  r = await call(bob, 'GET', '/api/images/' + framedId, undefined, { buffer: true });
+  ok(r.status === 200, 'a framed reference (img:<id>#frame) is still visible to a share recipient', r.status);
+  r = await call(admin, 'GET', '/api/images');
+  const framedRow = (r.data.images || []).find(x => x.id === framedId);
+  ok(!!framedRow && framedRow.notes && framedRow.notes.length > 0, 'a framed reference still counts as used in 檔案管理', framedRow);
   r = await call(admin, 'PUT', '/api/images/' + imgId, {
     mime: 'image/png', data: PNG.toString('base64'), original: PNG.toString('base64'),
     shapes: [{ type: 'rect', x: 1, y: 1, w: 2, h: 2, color: '#f00' }]

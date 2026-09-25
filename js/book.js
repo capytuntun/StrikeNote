@@ -351,7 +351,7 @@
           span.textContent = '（附件「' + name + '」未包含在出版檔中）';
           n.replaceWith(span);
         });
-        work.querySelectorAll('.img-annotate, .code-copy, .mm-edit-btn, .mm-hint').forEach(function (n) { n.remove(); });
+        work.querySelectorAll('.img-tools, .code-copy, .mm-edit-btn, .mm-hint').forEach(function (n) { n.remove(); });
         // 出版檔沒有編輯器可以回寫，勾選框只是一份紀錄——留著勾選狀態，但不讓讀者
         // 以為自己改得動它。
         work.querySelectorAll('.task-check').forEach(function (n) { n.disabled = true; });
