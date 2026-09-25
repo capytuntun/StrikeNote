@@ -474,9 +474,12 @@
       it.node.y = r * Math.sin(a);
     });
 
-    // 只有自己一顆時把可視範圍收小一點，不然那顆會變成一大片空白裡的小點
-    const pad = near.length ? MINI_NODE + 26 : MINI_NODE + 18;
-    const box = r + pad;
+    // viewBox 是「圖的座標範圍」，範圍越小、畫出來就被放得越大。只有自己一顆時
+    // r 是 0，範圍會縮到只剩那顆點，SVG 於是把它撐滿整張卡——一顆巨大的圓加一行
+    // 巨大的字（使用者截圖回報過）。所以給範圍一個下限，就用「一圈鄰居」時的大小：
+    // 同一篇筆記不會因為多連了一個人就忽然縮小，孤零零的時候也是一顆正常大小的點。
+    const pad = MINI_NODE + 26;
+    const box = Math.max(r + pad, MINI_R + pad);
     const svg = svgEl('svg', {
       class: 'graph-mini-svg', viewBox: (-box) + ' ' + (-box) + ' ' + (box * 2) + ' ' + (box * 2),
       preserveAspectRatio: 'xMidYMid meet'
