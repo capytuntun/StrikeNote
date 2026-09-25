@@ -983,8 +983,6 @@
   function leaveOtherViews() {
     saveNow();
     closeStream();
-    if (window.BlogMode) BlogMode.reset();
-    blogNoteId = null;
     LS.set('lastNote', '');
     noteBar(false);
     if (notePathEl) notePathEl.textContent = '';
@@ -1426,8 +1424,7 @@
 
   // 頂列夠不夠寬是量出來的，不是照視窗寬度猜的：標題絕對定位貼死在正中線（對齊分割檢視的
   // 分隔線），左邊的模式切換鈕、右邊的版本／分享／PDF 都不會讓步，視窗一窄就可能疊到標題
-  // 上——加了 Blog mode 這顆鈕之後左邊變寬，疊到的臨界寬度也跟著變寬了。逐級收：先收純
-  // 裝飾（水豚、線上人數），再把標題截短（資料夾路徑先讓，見 capTitle），還不夠才把按鈕
+  // 上。逐級收：先收純裝飾（水豚、線上人數），再把標題截短（資料夾路徑先讓，見 capTitle），還不夠才把按鈕
   // 文字收成純圖示，最後才不得已把標題整個藏起來。資料夾路徑很長的筆記在一般筆電寬度下
   // 原本會直接跳到收按鈕文字——「分割／編輯／預覽／版本／分享」少了字不好認，截掉一段
   // 路徑卻幾乎沒有損失。每一級收完都重量一次，空間夠了（視窗變寬回去）也要能一路放寬回來。
@@ -1651,17 +1648,13 @@
 
   function openNote(id) {
     // 檔案筆記（meta.file：課程筆記資料夾裡上傳的 PPTX／PDF／影片）沒有編輯器可開，只是在
-    // 目前畫面上疊一個檢視器。一定要在 closeStream()/BlogMode.reset() 之前判斷——從搜尋或
+    // 目前畫面上疊一個檢視器。一定要在 closeStream() 之前判斷——從搜尋或
     // 連結點到一個檔案，不該把正開著的那篇筆記的協作連線關掉。
     const known = state.notes.find(function (n) { return n.id === id; });
     if (isFileNote(known)) { openFileViewer(known); return; }
     if (isStickyNote(known) && goToSticky(known)) return;
     closeStream();   // stop listening to the note we're leaving
-    // 放下 Blog mode 裡正在編輯的區塊。它打的字早就寫進 #editor 了；要是等新筆記載入後
-    // 才收尾，收尾的回寫會落到新筆記上。
-    if (window.BlogMode) BlogMode.reset();
     if (multi) multi.clear();
-    blogNoteId = null;
     // 小說筆記在 state.notes 裡卻打不開，八成是 server/api.js 的一小時解鎖過期了
     // （見 novelIsUnlocked 宣告處）——跟一般「筆記不見了」分開處理，讓使用者知道
     // 只是要再輸入一次密碼，不是筆記真的不見。
@@ -1736,20 +1729,18 @@
       try { editorEl.setSelectionRange(0, 0); } catch (e) {}
       editorEl.scrollTop = 0;
       if (previewScrollEl) previewScrollEl.scrollTop = 0;
-      const blogScrollEl = $('#blog-scroll');
-      if (blogScrollEl) blogScrollEl.scrollTop = 0;
       applyReadOnly(note);
       updateNotePath(note);   // 標題前綴顯示所在資料夾（如 pp/）
       // Only the owner may (re)share; recipients just see the collaborators.
       if (shareBtn) shareBtn.hidden = !isMine(note);
       if (editorEl._hlRefresh) editorEl._hlRefresh();
-      // 重新套用目前的檢視模式：Blog mode 要拿這篇的內容重新排版
+      // 重新套用目前的檢視模式
       setMode(state.mode);
       renderPreview();
       updateStatus();
       renderTree();
       startStream(note);   // go live: receive others' edits + presence
-      if (note.perm !== 'read' && state.mode !== 'blog') editorEl.focus();
+      if (note.perm !== 'read') editorEl.focus();
     }).catch(function () {
       showEmpty();
       if (wasNovel) {
@@ -1766,12 +1757,6 @@
   }
   function renderPreviewNow() {
     if (previewTimer) { clearTimeout(previewTimer); previewTimer = null; }
-    // Blog mode 看不到預覽，排版由 blogmode.js 自己做，把新內容交給它就好；離開這個模式時
-    // setMode 會補渲染一次預覽。PDF 匯出自己會重新渲染，不靠這裡。
-    if (state.mode === 'blog') {
-      if (window.BlogMode) BlogMode.update(editorEl.value, !!(state.current && state.current.perm === 'read'));
-      return;
-    }
     previewEl.innerHTML = MD.render(editorEl.value);
     // LineSync before resolveImages: it rewrites paragraph/list-item innerHTML,
     // and resolveImages sets img.src asynchronously — the other way round the
@@ -2156,19 +2141,14 @@
     relmapView = view;
   }
 
-  // ---- Table of contents: beside the preview, and beside the Blog page ---
-  // One builder, two rails: #preview-toc reads the preview, #blog-toc reads the
-  // Blog page (rebuilt from BlogMode's onRender). Collapsing is one setting for both.
-  const blogTocEl = $('#blog-toc');
-  const blogScrollEl = $('#blog-scroll');
+  // ---- Table of contents: beside the preview -----------------------------
   function setTocCollapsed(v) {
-    document.querySelectorAll('.pane-preview, .pane-blog').forEach(function (pane) {
+    document.querySelectorAll('.pane-preview').forEach(function (pane) {
       pane.classList.toggle('toc-hidden', !!v);
     });
     LS.set('tocCollapsed', v ? '1' : '0');
   }
   function buildPreviewTOC() { buildTOC(tocEl, previewEl, previewScrollEl); }
-  function buildBlogTOC() { buildTOC(blogTocEl, $('#blog-doc'), blogScrollEl); }
   function buildTOC(tocEl, contentEl, scrollEl) {
     if (!tocEl || !contentEl) return;
     const pane = tocEl.closest('.pane');
@@ -2197,8 +2177,6 @@
       a.textContent = h.textContent;
       a.href = '#';
       a._target = h;
-      // Blog：正在編輯的標題已經換成編輯框（<h*> 不在了），就改用它所在的區塊
-      a._block = h.closest('.blog-block');
       a.addEventListener('click', function (e) {
         e.preventDefault();
         const t = tocTargetOf(a);
@@ -2263,14 +2241,11 @@
     });
   }
   function tocTargetOf(a) {
-    if (a._target && a._target.isConnected) return a._target;
-    return a._block && a._block.isConnected ? a._block : null;
+    return a._target && a._target.isConnected ? a._target : null;
   }
-  // 不帶參數（捲動事件、展開箭頭）就兩邊都更新；看不見的那一邊量不到位置，直接略過
   function updateTocActive(nav, scrollEl) {
     if (!nav || !nav.nodeType) {
       updateTocActive(tocEl, previewScrollEl);
-      updateTocActive(blogTocEl, blogScrollEl);
       return;
     }
     if (!scrollEl || !scrollEl.offsetParent) return;
@@ -2331,11 +2306,6 @@
     editorEl.value = merged;
     shiftRemoteCarets(merged);
     if (multi) multi.remap(oldV, merged);   // 多行編輯的其他游標也跟著搬
-    // Blog mode 要馬上知道，不能等 renderPreview 的 120ms：那段時間裡再打一個字，
-    // blogmode.js 會拿舊內容去換行，把這次合併進來的修改蓋掉。
-    if (state.mode === 'blog' && window.BlogMode) {
-      BlogMode.update(merged, !!(state.current && state.current.perm === 'read'));
-    }
     if (focused) {
       // both ends, so a selection someone is about to format survives a merge elsewhere
       const c = mapCaret(oldV, merged, caret);
@@ -2700,55 +2670,17 @@
   }
 
   // ---- View modes --------------------------------------------------------
-  const MODES = { split: 1, edit: 1, preview: 1, blog: 1 };
-  let blogNoteId = null;   // BlogMode 目前排版的是哪一篇；onBlogChange 只收這一篇的修改
+  const MODES = { split: 1, edit: 1, preview: 1 };
   function setMode(mode) {
     if (!MODES[mode]) mode = 'split';
-    const was = state.mode;
-    // 先收尾再切：收尾可能清掉空區塊、經 onBlogChange 回寫，那時 state.mode 還得是 blog
-    if (was === 'blog' && mode !== 'blog' && window.BlogMode) BlogMode.hide();
     state.mode = mode;
     LS.set('mode', mode);
-    panesEl.classList.remove('mode-split', 'mode-edit', 'mode-preview', 'mode-blog');
+    panesEl.classList.remove('mode-split', 'mode-edit', 'mode-preview');
     panesEl.classList.add('mode-' + mode);
     document.querySelectorAll('.mode-btn').forEach(function (b) {
       b.classList.toggle('active', b.dataset.mode === mode);
     });
-    if (mode === 'blog') {
-      blogNoteId = state.currentId;
-      if (window.BlogMode) BlogMode.show(editorEl.value, !!(state.current && state.current.perm === 'read'));
-    } else if (was === 'blog') {
-      blogNoteId = null;
-      // Blog mode 裡打的字只寫進了 #editor 的值；高亮底圖和預覽都還停在切進來之前
-      if (editorEl._hlRefresh) editorEl._hlRefresh();
-      renderPreviewNow();
-    }
     if (mode === 'preview') renderPreview();
-  }
-  // Blog 表格拉欄寬：欄寬存在 note.meta.tableWidths（依表格在文件中的順序索引，每個是一個
-  // 各欄百分比的陣列）。只改 meta、走一般自動存檔——跟釘選一樣是「記帳」變更，伺服器不動
-  // 內文、不 bump rev。開著的筆記以 state.current 為準，直接改就好，不用 patchNoteMeta 那套
-  // 先抓最新再合併（那是給沒開著的筆記在儀表板釘選用的）。
-  function setTableWidths(tableIndex, widths) {
-    const cur = state.current;
-    if (!cur || cur.perm === 'read') return;
-    const meta = cur.meta = cur.meta || {};
-    const tw = (meta.tableWidths || []).slice();
-    tw[tableIndex] = widths;
-    meta.tableWidths = tw;
-    const n = state.notes.find(function (x) { return x.id === cur.id; });
-    if (n) n.meta = meta;
-    scheduleSave();
-  }
-  // BlogMode 每次輸入都把整份 Markdown 交回來：寫回 #editor，走一般的自動存檔。
-  function onBlogChange(text) {
-    const cur = state.current;
-    if (!cur || cur.perm === 'read' || state.mode !== 'blog' || cur.id !== blogNoteId) return;
-    editorEl.value = text;
-    shiftRemoteCarets(text);
-    scheduleSave();
-    updateStatus();
-    danceCapybara();
   }
 
   // ---- Paste files -------------------------------------------------------
@@ -2991,7 +2923,7 @@
 
   // ---- Upload files ------------------------------------------------------
   // Every way a file gets into a note — paste, drop, the toolbar's 檔案 button,
-  // /file, and the same three in Blog — ends up here. Each file is uploaded and
+  // /file — ends up here. Each file is uploaded and
   // turned into the Markdown that shows it: an image is embedded, a PDF is either
   // embedded or a file link (the last choice made with the 檔案｜預覽 switch),
   // and anything else is a download link.
@@ -3040,16 +2972,15 @@
     });
     return true;
   }
-  // 檔案挑選器。target 是觸發它的編輯框：#editor，或 Blog 裡正在編輯的那一格。
-  function pickFiles(target) {
+  // 檔案挑選器。
+  function pickFiles() {
     const inp = document.createElement('input');
     inp.type = 'file';
     inp.multiple = true;
     inp.addEventListener('change', function () {
       const files = Array.prototype.slice.call(inp.files || []);
       if (!files.length) return;
-      if (state.mode === 'blog' && target !== editorEl && window.BlogMode) BlogMode.insertFiles(files);
-      else insertFiles(files);
+      insertFiles(files);
     });
     inp.click();
   }
@@ -3990,7 +3921,7 @@
     // Make sure preview reflects latest text before export.
     previewEl.innerHTML = MD.render(editorEl.value);
     MD.resolveImages(previewEl);
-    // Table column widths (set in Blog) live in meta; carry them into the print clone.
+    // Table column widths live in meta; carry them into the print clone.
     if (state.current.meta) MD.applyColWidths(previewEl, state.current.meta.tableWidths);
     statusSave.textContent = '準備列印預覽…';
     // small delay so images resolve
@@ -4133,9 +4064,6 @@
       onSaved: function () {
         statusSave.textContent = '標註已儲存 ✓';
         renderPreviewNow(); // re-read the blob through the invalidated URL cache
-        // Blog 模式：markdown 沒變，BlogMode.update() 會直接 return 不重繪，所以另外叫它把
-        // 被 invalidate 的圖當場重抓——不然標註畫完不會顯示，要再點一次圖才更新。
-        if (window.BlogMode && BlogMode.refreshImages) BlogMode.refreshImages();
       }
     });
   }
@@ -4240,23 +4168,6 @@
     }
 
     $('#new-note').addEventListener('click', function () { newNote(currentFolderId()); });
-    // Blog mode：排版好的頁面上每一段都能原地改（js/blogmode.js）
-    if (window.BlogMode) BlogMode.init($('#blog-doc'), {
-      onChange: onBlogChange,
-      onSave: saveNow,
-      onRender: buildBlogTOC,
-      uploadFiles: uploadFiles,
-      onStatus: function (msg) { if (msg) statusSave.textContent = msg; },
-      onPdfPref: function (v) { LS.set('pdfDisplay', v); },
-      onNoteLink: handleNoteLink,
-      onTag: browseTag,
-      onAnnotate: openAnnotator,
-      copyText: copyText,
-      toast: toast,
-      // 表格拉欄寬：讀寫 note.meta.tableWidths（依表格在文件中的順序索引）
-      getTableWidths: function () { return state.current && state.current.meta ? state.current.meta.tableWidths : null; },
-      onTableWidths: setTableWidths
-    });
     // 預覽裡 PDF 的「檔案｜預覽」、獨佔一行的網址的「連結｜預覽卡片」（js/embedswitch.js）。
     // 改寫範圍是 LineSync 標在預覽元素上的原始碼行號。
     if (window.EmbedSwitch) EmbedSwitch.attach(previewEl, {
@@ -4271,7 +4182,7 @@
       canEdit: function () { return !!state.current && state.current.perm !== 'read'; },
       onPdfPref: function (v) { LS.set('pdfDisplay', v); }
     });
-    // /file、/upload：打開檔案挑選器（MD 編輯器與 Blog 的編輯框都掛著 Editor）
+    // /file、/upload：打開檔案挑選器
     if (window.Editor && Editor.setActionSnippets) Editor.setActionSnippets([
       { cmd: 'file', hint: '上傳檔案（圖片、PDF、任何附件）', action: pickFiles },
       { cmd: 'upload', hint: '上傳檔案（圖片、PDF、任何附件）', action: pickFiles }
@@ -4588,14 +4499,10 @@
         ro.observe(editorEl);
       }
     }
-    // scroll-spy: highlight the current heading in the TOC (preview and Blog)
+    // scroll-spy: highlight the current heading in the TOC
     if (previewScrollEl) previewScrollEl.addEventListener('scroll', function () { updateTocActive(tocEl, previewScrollEl); });
-    if (blogScrollEl) blogScrollEl.addEventListener('scroll', function () { updateTocActive(blogTocEl, blogScrollEl); });
-    // TOC show buttons (re-open a collapsed TOC)
-    ['#toc-show', '#blog-toc-show'].forEach(function (sel) {
-      const b = $(sel);
-      if (b) b.addEventListener('click', function () { setTocCollapsed(false); });
-    });
+    // TOC show button (re-open a collapsed TOC)
+    { const b = $('#toc-show'); if (b) b.addEventListener('click', function () { setTocCollapsed(false); }); }
     // Copy button on code blocks
     previewEl.addEventListener('click', function (e) {
       if (!e.target.closest) return;

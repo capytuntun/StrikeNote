@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=156">
+  <link rel="stylesheet" href="app.css?v=157">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -71,8 +71,6 @@
           <button data-mode="split" class="mode-btn active" title="分割檢視" data-icon="columns"><span class="btn-label">分割</span></button>
           <button data-mode="edit" class="mode-btn" title="純編輯" data-icon="pen-line"><span class="btn-label">編輯</span></button>
           <button data-mode="preview" class="mode-btn" title="純預覽" data-icon="eye"><span class="btn-label">預覽</span></button>
-          <!-- Blog（js/blogmode.js）：直接在排版好的頁面上改，語法和 Markdown 一樣 -->
-          <button data-mode="blog" class="mode-btn" title="Blog：直接在排版好的頁面上編輯，語法和 Markdown 一樣" data-icon="file-pen"><span class="btn-label">Blog</span></button>
         </div>
         <!-- 標題連同資料夾路徑前綴（如 測試資料夾\測試筆記）包成一組，整組絕對定位
              置中在頂列正中線；輸入框寬度由 app.js 依文字量測，兩者才接得起來 -->
@@ -255,15 +253,6 @@
               <aside id="backlinks" class="backlinks" hidden></aside>
             </div>
           </section>
-          <!-- Blog mode（js/blogmode.js）：取代上面兩欄，直接在排版好的頁面上改 -->
-          <section class="pane pane-blog" id="pane-blog">
-            <!-- 跟預覽同一套目錄（app.js 的 buildTOC），收合狀態兩邊共用 -->
-            <button id="blog-toc-show" class="toc-show" title="顯示目錄" data-icon="list">目錄</button>
-            <nav id="blog-toc" class="preview-toc" aria-label="目錄"></nav>
-            <div class="blog-scroll" id="blog-scroll">
-              <article id="blog-doc" class="markdown-body blog-doc"></article>
-            </div>
-          </section>
         </div>
         <div class="statusbar">
           <span id="status-info"></span>
@@ -364,19 +353,18 @@
   <script src="js/mindmap.js?v=3"></script>
   <script src="js/relmap.js?v=4"></script>
   <script src="js/graph.js?v=5"></script>
-  <script src="js/store.js?v=58"></script>
+  <script src="js/store.js?v=59"></script>
   <script src="js/auth.js?v=48"></script>
   <script src="js/migrate.js?v=41"></script>
   <script src="js/admin.js?v=49"></script>
   <script src="js/backup.js?v=1"></script>
   <script src="js/search.js?v=41"></script>
-  <script src="js/markdown.js?v=58"></script>
-  <script src="js/editor.js?v=53"></script>
+  <script src="js/markdown.js?v=59"></script>
+  <script src="js/editor.js?v=54"></script>
   <script src="js/multicursor.js?v=3"></script>
   <script src="js/templates.js?v=1"></script>
   <script src="js/edithl.js?v=46"></script>
   <script src="js/table.js?v=43"></script>
-  <script src="js/tablegrid.js?v=1"></script>
   <script src="js/oscp.js?v=42"></script>
   <script src="js/secreport.js?v=41"></script>
   <script src="js/seceditor.js?v=43"></script>
@@ -391,10 +379,8 @@
   <script src="js/versions.js?v=2"></script>
   <script src="js/trash.js?v=2"></script>
   <script src="js/imagelib.js?v=4"></script>
-  <script src="js/linesync.js?v=6"></script>
-  <script src="js/embedswitch.js?v=1"></script>
-  <script src="js/blogwyg.js?v=7"></script>
-  <script src="js/blogmode.js?v=14"></script>
-  <script src="js/app.js?v=115"></script>
+  <script src="js/linesync.js?v=7"></script>
+  <script src="js/embedswitch.js?v=2"></script>
+  <script src="js/app.js?v=116"></script>
 </body>
 </html>

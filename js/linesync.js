@@ -408,6 +408,5 @@
     previewEl.addEventListener('click', onPreviewClick);
   }
 
-  // sourceBlocks is also how js/blogmode.js cuts a note into editable blocks.
-  global.LineSync = { init: init, rebuild: rebuild, sourceBlocks: sourceBlocks };
+  global.LineSync = { init: init, rebuild: rebuild };
 })(window);

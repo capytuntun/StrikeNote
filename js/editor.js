@@ -529,8 +529,8 @@
     setExtraSnippets: setExtraSnippets,
     setActionSnippets: setActionSnippets,
     // Where the caret sits inside a textarea, for anyone positioning a popup over
-    // it (the slash menu here, Blog's selection toolbar). {top,left,height} are
-    // relative to the textarea's top-left; add its getBoundingClientRect() and
+    // it (the slash menu here). {top,left,height} are relative to the textarea's
+    // top-left; add its getBoundingClientRect() and
     // subtract its scroll for viewport coordinates.
     caretCoords: caretCoords,
     snippets: { machine: MACHINE_SNIPPET, adset: ADSET_SNIPPET }

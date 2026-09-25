@@ -1,6 +1,6 @@
 /* embedswitch.js — the small「檔案｜預覽」/「連結｜預覽卡片」switch that appears
  * over an embedded PDF, a PDF attachment link, a link preview card or a web link
- * standing on its own line, in the preview and in Blog.
+ * standing on its own line, in the preview.
  *
  * None of it is in the rendered HTML: markdown.js emits no control for it, so
  * the PDF export, the published book and search never see one. A single bar is

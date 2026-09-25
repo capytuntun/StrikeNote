@@ -829,8 +829,10 @@
   // ---- Table column widths --------------------------------------------------
   // Markdown has no column-width concept, so widths live in note.meta.tableWidths
   // (an array indexed by the table's document order; each entry an array of
-  // per-column percentages). They are applied to the RENDERED DOM here, not in the
-  // markdown, so Blog, the preview, the PDF and the book all show the same widths
+  // per-column percentages) — a legacy, read-only setting from the removed Blog
+  // mode; nothing writes new values here any more, but a note that already has
+  // some keeps rendering with them. They are applied to the RENDERED DOM here, not
+  // in the markdown, so the preview, the PDF and the book all show the same widths
   // by calling applyColWidths on their own rendered container. A table with no
   // stored widths (or a stored entry whose length no longer matches the columns —
   // a column was added or removed) is left in its default content-sized layout.

@@ -271,7 +271,7 @@
     // wrong blob.type (a .pdf the OS did not label). `folderId` (optional) is a
     // 檔案管理 folder id — ASCII, so unlike the name it goes straight in a header
     // (X-Folder-Id) with no encoding. Every existing caller (paste/drop/toolbar/
-    // Blog/course-file upload) omits it and lands at 雲端硬碟's root, unchanged.
+    // course-file upload) omits it and lands at 雲端硬碟's root, unchanged.
     putImage: function (blob, name, type, folderId) {
       const h = { 'Content-Type': type || blob.type || 'application/octet-stream' };
       const n = name != null ? name : blob.name;
