@@ -321,19 +321,34 @@ input, select, textarea { transition: border-color var(--dur-1) var(--ease-out),
           mask: url('logo.png') center / contain no-repeat;
 }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 4px; flex: 0 0 auto; padding-right: 12px; }
-/* 資料夾路徑前綴：跟標題接在同一串裡（如 測試資料夾\測試筆記），顏色較淡以區分；
+/* 資料夾路徑前綴，排版比照 HackMD 的「📁 資料夾 / **筆記標題**」：資料夾圖示 + 中灰、
+   一般字重的資料夾名 + 兩側留白的「/」，跟後面深色粗體的標題分出主次（一眼看得出哪個
+   是筆記名）。舊版是同字級、同字重、直接黏成「資料夾/筆記」，讀起來分不出斷在哪。
    點它回到那個資料夾的頁面 */
+/* 收縮順序是這裡的重點，跟 HackMD 一致：空間不夠時先截後面的「筆記標題」，資料夾名
+   要撐到最後。之前是反過來的（標題 flex-shrink:0、路徑 0 1 auto），於是 flex 為了塞下
+   不肯縮的標題，把整段資料夾壓成 0 寬，畫面上只剩標題前面一小截殘影——使用者截圖回報
+   的就是這個。
+   flex 沒有「先縮 A、A 到底了再縮 B」的寫法，收縮量是照「flex-shrink × 基準寬度」分攤的，
+   所以改用權重表達優先順序：標題 flex-shrink 給 1000、路徑留 1，超出的寬度幾乎全部由
+   標題吸收（顯示成「…」），等標題縮到它的 min-width 40px 卡住，剩下的才輪到路徑縮
+   （.note-path-text 自己也有省略號）。單純把路徑設成 flex: 0 0 auto 不行：資料夾名一長
+   （30vw 上限 ≈ 1280px 視窗的 384px）就會連同標題的 40px 一起超出外框，標題被外框的
+   overflow:hidden 硬切掉、連「…」都沒有。 */
 #note-path {
   display: flex; align-items: center; flex: 0 1 auto; min-width: 0;
-  color: var(--text-faint); font-size: var(--fs-lg); font-weight: 600; line-height: 1.3;
+  color: var(--text-dim); font-size: var(--fs-base); font-weight: 500; line-height: 1.3;
   white-space: nowrap; user-select: none; cursor: pointer; transition: color .12s;
 }
-/* 只截路徑本身，結尾的「/」獨立一格永遠看得到，讀起來才是「資料夾/筆記」。上限不能用 %：
-   外框是依內容撐開的，% 會對著「路徑＋標題」的總寬算，標題一短，路徑明明有地方也會被切成
-   「specterops_tr…」，連「/」一起不見。 */
+.note-path-ic { flex: none; display: inline-flex; align-items: center; margin-right: 6px; color: var(--text-faint); }
+.note-path-ic .ic-svg { width: 15px; height: 15px; }
+/* 只截路徑本身，圖示和結尾的「/」各自獨立一格永遠看得到，讀起來才是「資料夾 / 筆記」。
+   上限不能用 %：外框是依內容撐開的，% 會對著「路徑＋標題」的總寬算，標題一短，路徑明明
+   有地方也會被切成「specterops_tr…」，連「/」一起不見。 */
 .note-path-text { min-width: 0; max-width: 30vw; overflow: hidden; text-overflow: ellipsis; }
-.note-path-sep { flex: none; }
+.note-path-sep { flex: none; margin: 0 7px; color: var(--text-faint); font-weight: 400; }
 #note-path:hover { color: var(--accent); }
+#note-path:hover .note-path-ic { color: var(--accent); }
 #note-path:empty { display: none; }
 /* topbar gap 設為 0 以精準對齊，右側控制項改用 margin 維持間距 */
 #topbar #capybara,
@@ -390,9 +405,11 @@ input, select, textarea { transition: border-color var(--dur-1) var(--ease-out),
 /* 收到不能再收：連品牌字都放不下，只留水豚標記——圖示還在，回首頁的點擊區也還在，
    只是暫時看不到「StrikeNote」這幾個字。 */
 #topbar.topbar-lvl5 .logo-text { display: none; }
-/* 標題不讓步（flex-shrink 0）：空間不夠時先截前面的資料夾路徑（.note-path-text 自己的
-   30vw 上限，比這裡先啟動），筆記名稱盡量保持完整。但標題本身長到連資料夾路徑截光了
-   都放不下時（比如貼一整行 CVE／弱點描述當標題），要像 HackMD 一樣優雅省略成「…」，
+/* 標題先讓步（flex-shrink 1000，見上面 #note-path 的說明），資料夾名撐到最後——排版
+   比照 HackMD：`📁 資料夾 / **標題…**`。一開始寫反了（標題 flex-shrink:0），結果 flex
+   為了塞下不肯縮的標題，把整段資料夾壓成 0 寬，只剩一小截殘影。
+   寬度來源：fitNoteTitle() 量出文字寬度設成 style.width，所以「有地方時」標題就是剛好
+   包住文字；地方不夠時 flex 再從這個寬度往下縮，縮到什麼程度就顯示到哪、後面接「…」。
    不能讓文字看起來斷在一半、更不能讓輸入框的字撐出頂列甚至跑出畫面外——使用者截圖回報
    過長標題最後一小段字直接被切齊視窗邊緣、完全沒有省略號，改名時（尤其新筆記按 50ms 後
    的 titleEl.select() 全選）看起來更糟：一段被反白選取的字卡在正中間，前後都看不到。
@@ -404,15 +421,20 @@ input, select, textarea { transition: border-color var(--dur-1) var(--ease-out),
       當作最後一道防線：不管 app.js 的 fitTopbar()/capTitle() 依 DOM 量測出來的
       .note-title-wrap 寬度有沒有算對、算的時機有沒有搶在下一次畫面重繪之前——這個
       上限永遠成立，標題絕對不會撐出頂列。100%（相對 wrap）留著當一般情況下真正算數
-      的那個（通常比這個硬上限更窄），min(58vw,860px) 純粹是保底。 */
+      的那個（通常比這個硬上限更窄），min(58vw,860px) 純粹是保底。
+   字級：跟 HackMD 一樣用 UI 主體的 14px，不是 18px 的「內文標題」級——頂列是工具列，
+   標題在這裡是「你在哪一篇」的指示，不是版面上的大標；小一級也讓同樣的寬度能多容下
+   十幾個字，長標題被截掉的機會跟著變少。改這裡一定要同步改下面的 .note-title-measure，
+   fitNoteTitle() 就是拿那個隱形 span 量出寬度再設給輸入框的，字級不一致＝量錯寬度。 */
 #topbar .note-title {
-  flex: 0 0 auto; width: auto; min-width: 40px; max-width: min(100%, 58vw, 860px);
+  flex: 0 1000 auto; width: auto; min-width: 40px; max-width: min(100%, 58vw, 860px);
   text-align: left; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: var(--fs-base);
 }
-/* 量標題文字寬度用的隱形 span：字型設定要跟 .note-title 一模一樣 */
+/* 量標題文字寬度用的隱形 span：字型設定要跟 #topbar .note-title 一模一樣 */
 .note-title-measure {
   position: absolute; left: -9999px; top: 0; visibility: hidden; white-space: pre;
-  font-size: var(--fs-lg); font-weight: 700; letter-spacing: -.01em;
+  font-size: var(--fs-base); font-weight: 700; letter-spacing: -.01em;
 }
 
 /* 帳號選單 */

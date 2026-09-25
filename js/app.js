@@ -1348,19 +1348,25 @@
     }
     return parts.join('/');
   }
-  // 標題前面的「資料夾/」。路徑和結尾的「/」分成兩格：路徑太長時只截路徑（app.css 的
-  // .note-path-text），「/」永遠看得到，整串讀起來才是「資料夾/筆記」。
+  // 標題前面的「📁 資料夾 / 」，排版比照 HackMD：資料夾圖示＋較淡的資料夾名，接一個
+  // 兩側留空白的「/」，後面才是粗體的筆記標題。圖示、路徑、「/」分成三格：路徑太長時
+  // 只截路徑本身（app.css 的 .note-path-text），圖示和「/」永遠看得到，整串讀起來
+  // 才還是「資料夾 / 筆記」。
   function updateNotePath(note) {
     if (notePathEl) {
       const path = note ? folderPath(note.folderId) : '';
       notePathEl.textContent = '';
       if (path) {
+        const ic = document.createElement('span');
+        ic.className = 'note-path-ic';
+        ic.innerHTML = Icons.svg('folder');
         const text = document.createElement('span');
         text.className = 'note-path-text';
         text.textContent = path;
         const sep = document.createElement('span');
         sep.className = 'note-path-sep';
         sep.textContent = '/';
+        notePathEl.appendChild(ic);
         notePathEl.appendChild(text);
         notePathEl.appendChild(sep);
       }
