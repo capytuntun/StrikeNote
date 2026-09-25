@@ -3090,8 +3090,15 @@ select.sec-info-input { cursor: pointer; }
   display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto;
   font-size: var(--fs-xs); color: var(--text-faint);
 }
-.graph-legend .ic-svg { width: 13px; height: 13px; margin-left: 10px; margin-right: 3px; color: var(--text-dim); }
-.graph-legend .ic-svg:first-child { margin-left: 0; }
+/* 圖例的小圓點：跟圖上的節點同一個語彙。筆記的顏色是每篇各自雜湊出來的，沒有單一
+   代表色，所以圖例用中性的 --text-dim；標籤在圖上固定 --folder，這裡就用同一個。 */
+.graph-legend-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin-left: 10px; margin-right: 5px; vertical-align: middle;
+}
+.graph-legend-dot:first-child { margin-left: 0; }
+.graph-legend-dot.is-note { background: var(--text-dim); }
+.graph-legend-dot.is-tag { background: var(--folder); }
 .graph-canvas {
   flex: 1 1 auto; position: relative; overflow: hidden;
   background: var(--bg-2); outline: none; cursor: grab;
@@ -3133,15 +3140,14 @@ select.sec-info-input { cursor: pointer; }
 .graph-edge-tag { stroke-dasharray: 2 4; }
 .graph-edge.is-dim { opacity: .1; }
 .graph-node { cursor: pointer; }
-/* 節點＝白色圓盤＋彩色圓環＋中間小圖示（參考圖裡那是網站 favicon）。圓盤固定白色、
-   不跟主題走：暗色底上白盤最像參考圖，亮色底上有彩色圓環撐著也看得清楚。筆記的
-   圓環顏色由 js inline 指定（雜湊），標籤固定 --folder，跟圖例的兩個 icon 對得上。 */
+/* 節點＝一顆實心小圓點。顏色就是它的身分：筆記由 js inline 指定（用 id 雜湊出來的
+   固定色），標籤固定 --folder。滑過去才加一圈細外框當強調——平常不畫外框，一堆
+   有環的圓在縮小的圖上會糊成一片。 */
 .graph-node-dot {
-  fill: #fff; stroke: var(--folder); stroke-width: 2.5;
+  fill: var(--folder); stroke: none;
   transition: opacity .12s, stroke-width .12s;
 }
 .graph-node-tag { color: var(--folder); }
-.graph-node-ic { pointer-events: none; transition: opacity .12s; }
 .graph-node-label {
   text-anchor: middle; fill: var(--text); font-family: var(--sans); font-weight: 600;
   font-size: 11px; pointer-events: none; user-select: none; transition: opacity .12s;
@@ -3154,9 +3160,10 @@ select.sec-info-input { cursor: pointer; }
    被調暗的節點會以 .18 透明度浮出一片「未命名筆記」的鬼影標籤。 */
 .graph-canvas.hide-labels .graph-node:not(.is-hover) .graph-node-label { opacity: 0; }
 .graph-node.is-dim .graph-node-dot,
-.graph-node.is-dim .graph-node-ic,
 .graph-node.is-dim .graph-node-label { opacity: .18; }
-.graph-node.is-hover .graph-node-dot { stroke-width: 4; }
+/* 滑過去：圓點外面補一圈同色的細光暈，點本身不變大（變大會把周圍的線推開，看起來像
+   整張圖在跳）。stroke 走 currentColor，而 g.style.color 已經是這顆節點的顏色。 */
+.graph-node.is-hover .graph-node-dot { stroke: currentColor; stroke-width: 3; stroke-opacity: .35; }
 
 /* ---- 預覽右上角的小視窗：這篇筆記的局部關聯圖（Graph.mini）-------------------
    目錄欄（.preview-toc）在預覽的左邊，右上角本來就是空的，所以這裡只要對著
@@ -3195,8 +3202,9 @@ select.sec-info-input { cursor: pointer; }
 .graph-mini .graph-node-label { font-size: 8px; opacity: 1; }
 .graph-mini .graph-node { cursor: default; }
 .graph-mini .graph-node.is-clickable { cursor: pointer; }
-.graph-mini .graph-node.is-clickable:hover .graph-node-dot { stroke-width: 4; }
-.graph-mini .graph-node.is-center .graph-node-dot { stroke-width: 3.5; }
+/* 圓點是實心的（沒有外框），強調就補一圈同色細光暈——中心那顆常駐，滑過的那顆暫時 */
+.graph-mini .graph-node.is-clickable:hover .graph-node-dot { stroke: currentColor; stroke-width: 3; stroke-opacity: .35; }
+.graph-mini .graph-node.is-center .graph-node-dot { stroke: currentColor; stroke-width: 2.5; stroke-opacity: .3; }
 .graph-mini .graph-node.is-center .graph-node-label { font-weight: 700; }
 
 /* ---------- 版本紀錄 ---------- */

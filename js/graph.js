@@ -45,22 +45,6 @@
   function nodeColor(n) { return n.kind === 'tag' ? null : NODE_COLORS[hash(n.id) % NODE_COLORS.length]; }
   function edgeColor(e) { return EDGE_COLORS[hash(e.a + '|' + e.b) % EDGE_COLORS.length]; }
 
-  // 節點裡的小圖示：參考圖的節點是「白色圓底、彩色圓環、中間一個小 icon」（那邊是
-  // 網站的 favicon），這裡沒有 favicon，就用 icons.js 現成的線條圖示——筆記是
-  // file-text、標籤是 hash。Icons.el() 給的是一個完整的 <svg>，但 .ic-svg 的全站
-  // CSS 會把它的寬高鎖在 16px，所以不是把 <svg> 塞進去，而是把裡面的 <path> 搬進一個
-  // 自己的 <g>，用 transform 從 24×24 的座標縮到節點需要的大小；stroke 走
-  // currentColor，筆記節點在 JS 上 inline 指定 color，標籤節點交給 CSS 的 --folder。
-  function iconGroup(name, size) {
-    const src = (global.Icons && Icons.el) ? Icons.el(name) : null;
-    const g = svgEl('g', {
-      class: 'graph-node-ic', fill: 'none', stroke: 'currentColor', 'stroke-width': 2.4,
-      'stroke-linecap': 'round', 'stroke-linejoin': 'round',
-      transform: 'translate(' + (-size / 2) + ',' + (-size / 2) + ') scale(' + (size / 24) + ')'
-    });
-    if (src) while (src.firstChild) g.appendChild(src.firstChild);
-    return g;
-  }
   // 二次貝茲曲線：控制點從邊的中點沿垂直方向偏移，偏移量隨線長縮放、方向照雜湊
   // 奇偶交替（有的往左彎有的往右彎），整張圖才會有機、不會每條線都彎同一邊。
   function curvePath(ax, ay, bx, by, seed) {
@@ -146,7 +130,8 @@
       '<label class="graph-tag-toggle"><input type="checkbox" class="graph-tags-cb" checked> 顯示標籤</label>' +
       '<label class="graph-tag-toggle"><input type="checkbox" class="graph-labels-cb"' + (showLabels ? ' checked' : '') + '> 顯示名稱</label>' +
       '<span class="graph-bar-sp"></span>' +
-      '<span class="graph-legend">' + (global.Icons ? Icons.svg('file-text') : '') + '筆記' + (global.Icons ? Icons.svg('hash') : '') + '標籤</span>' +
+      // 圖例跟著節點走：節點是小圓點了，圖例就用同樣的小圓點，不再放圖示
+      '<span class="graph-legend"><i class="graph-legend-dot is-note"></i>筆記<i class="graph-legend-dot is-tag"></i>標籤</span>' +
       '<button class="btn graph-close" type="button">返回</button>' +
       '</header>' +
       '<div class="graph-canvas" tabindex="0">' +
@@ -213,18 +198,20 @@
         edgeEls[e.a + '|' + e.b] = { el: path, edge: e, seed: hash(e.a + '|' + e.b) };
       });
       visibleNodes().forEach(function (n) {
-        // 節點比之前大一號：白底圓盤裡要放得下一個看得出來的小圖示。
-        const r = n.kind === 'tag' ? 8 : (10 + Math.min(n.deg * 1.6, 12));
+        // 小圓點就好。之前是「白底圓盤＋中間一個小圖示」，圓盤為了塞得下圖示只好放大，
+        // 整張圖就變成一堆大盤子——節點大小在這種圖上是用來表示「這篇連得多不多」的，
+        // 不是用來當圖示的容器。圖示拿掉，半徑改成小一號的級距（連結多的還是明顯大顆），
+        // 筆記與標籤靠顏色分（標籤固定 --folder），名字就寫在下面。
+        const r = n.kind === 'tag' ? 3.5 : (4 + Math.min(n.deg * 0.7, 5));
         const g = svgEl('g', { class: 'graph-node graph-node-' + n.kind, 'data-id': n.id });
         const c = svgEl('circle', { r: r, class: 'graph-node-dot' });
         const ring = nodeColor(n);
-        if (ring) { c.style.stroke = ring; g.style.color = ring; }
-        const ic = iconGroup(n.kind === 'tag' ? 'hash' : 'file-text', r * 1.15);
-        const t = svgEl('text', { class: 'graph-node-label', x: 0, y: r + 14 });
+        if (ring) { c.style.fill = ring; g.style.color = ring; }
+        const t = svgEl('text', { class: 'graph-node-label', x: 0, y: r + 12 });
         t.textContent = n.label.length > 40 ? n.label.slice(0, 39) + '…' : n.label;
         const title = svgEl('title', {});
         title.textContent = n.label;
-        g.appendChild(c); g.appendChild(ic); g.appendChild(t); g.appendChild(title);
+        g.appendChild(c); g.appendChild(t); g.appendChild(title);
         nodeLayer.appendChild(g);
         n.r = r;
         nodeEls[n.id] = { el: g, dot: c, node: n };
@@ -455,7 +442,7 @@
   // 模擬：這麼小的框裡跑物理只看得到一團東西在抖，而且每次重畫位置都不一樣；
   // 放射佈局是資料的純函式，同一篇筆記每次畫出來都在同一個位置。
   const MINI_R = 62;        // 鄰居那一圈的半徑
-  const MINI_NODE = 9;      // 鄰居節點的半徑（中心節點大一點）
+  const MINI_NODE = 4.5;    // 鄰居節點的半徑（中心節點大一點）——跟大圖一樣是小圓點
   function mini(container, notes, noteId, opts) {
     opts = opts || {};
     if (!container) return;
@@ -515,13 +502,12 @@
       });
       const c = svgEl('circle', { r: radius, class: 'graph-node-dot' });
       const ring = nodeColor(n);
-      if (ring) { c.style.stroke = ring; g.style.color = ring; }
-      const t = svgEl('text', { class: 'graph-node-label', x: 0, y: radius + 12 });
+      if (ring) { c.style.fill = ring; g.style.color = ring; }
+      const t = svgEl('text', { class: 'graph-node-label', x: 0, y: radius + 10 });
       t.textContent = n.label.length > 14 ? n.label.slice(0, 13) + '…' : n.label;
       const tip = svgEl('title', {});
       tip.textContent = n.label;
       g.appendChild(c);
-      g.appendChild(iconGroup(n.kind === 'tag' ? 'hash' : 'file-text', radius * 1.15));
       g.appendChild(t);
       g.appendChild(tip);
       // 中心就是正在看的這一篇，點它沒有意義（也不該把自己重開一次）
@@ -535,7 +521,7 @@
       nodeLayer.appendChild(g);
     }
     near.forEach(function (it) { addNode(it.node, MINI_NODE, false); });
-    addNode(center, MINI_NODE + 3, true);   // 畫在最後，壓在線的上面
+    addNode(center, MINI_NODE + 2, true);   // 畫在最後，壓在線的上面
 
     container.appendChild(svg);
   }
