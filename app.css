@@ -412,10 +412,24 @@ input, select, textarea { transition: border-color var(--dur-1) var(--ease-out),
 /* 收到不能再收：連品牌字都放不下，只留水豚標記——圖示還在，回首頁的點擊區也還在，
    只是暫時看不到「StrikeNote」這幾個字。 */
 #topbar.topbar-lvl5 .logo-text { display: none; }
-/* 標題不讓步（flex-shrink 0）：空間不夠時先截前面的資料夾路徑，筆記名稱永遠完整 */
+/* 標題不讓步（flex-shrink 0）：空間不夠時先截前面的資料夾路徑（.note-path-text 自己的
+   30vw 上限，比這裡先啟動），筆記名稱盡量保持完整。但標題本身長到連資料夾路徑截光了
+   都放不下時（比如貼一整行 CVE／弱點描述當標題），要像 HackMD 一樣優雅省略成「…」，
+   不能讓文字看起來斷在一半、更不能讓輸入框的字撐出頂列甚至跑出畫面外——使用者截圖回報
+   過長標題最後一小段字直接被切齊視窗邊緣、完全沒有省略號，改名時（尤其新筆記按 50ms 後
+   的 titleEl.select() 全選）看起來更糟：一段被反白選取的字卡在正中間，前後都看不到。
+   兩層防護：
+   1. overflow:hidden + white-space:nowrap 讓 text-overflow:ellipsis 真的生效
+      （沒有 overflow:hidden，這行本來就有的 ellipsis 宣告完全是死的——標準行為，
+      不是這裡才有的問題）。
+   2. max-width 額外給一個跟視窗寬度掛勾、不靠 JS 算出來的硬上限（min(58vw, 860px)），
+      當作最後一道防線：不管 app.js 的 fitTopbar()/capTitle() 依 DOM 量測出來的
+      .note-title-wrap 寬度有沒有算對、算的時機有沒有搶在下一次畫面重繪之前——這個
+      上限永遠成立，標題絕對不會撐出頂列。100%（相對 wrap）留著當一般情況下真正算數
+      的那個（通常比這個硬上限更窄），min(58vw,860px) 純粹是保底。 */
 #topbar .note-title {
-  flex: 0 0 auto; width: auto; min-width: 40px; max-width: 100%;
-  text-align: left; margin: 0; text-overflow: ellipsis;
+  flex: 0 0 auto; width: auto; min-width: 40px; max-width: min(100%, 58vw, 860px);
+  text-align: left; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 /* 量標題文字寬度用的隱形 span：字型設定要跟 .note-title 一模一樣 */
 .note-title-measure {
