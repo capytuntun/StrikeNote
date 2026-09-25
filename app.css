@@ -3147,11 +3147,12 @@ select.sec-info-input { cursor: pointer; }
   font-size: 11px; pointer-events: none; user-select: none; transition: opacity .12s;
   paint-order: stroke; stroke: var(--bg-2); stroke-width: 3px; stroke-linejoin: round;
 }
-/* 只有度數高於平均的節點預設就有標籤——其餘的標籤還在 DOM 裡，只是透明，滑過
-   （既有的 is-hover）才現形，這樣一張連結很多的圖才不會滿版文字看不出結構。 */
-/* :not(.is-hover) 拉高特定度，讓這條贏過後面的 .is-dim 規則——不然滑過別的節點時，
-   被調暗的次要節點會以 .18 透明度浮出一片「未命名筆記」的鬼影標籤。 */
-.graph-node.is-minor:not(.is-hover) .graph-node-label { opacity: 0; }
+/* 名稱顯示與否由頂欄的「顯示名稱」核取方塊決定（js/graph.js，選擇記在 localStorage）：
+   勾起來每個節點都標名字，取消就整片不標——標籤還在 DOM 裡，只是透明，滑過去
+   （既有的 is-hover）照樣現形，連結很多的圖想看結構時就取消勾選。
+   :not(.is-hover) 拉高特定度，讓這條贏過後面的 .is-dim 規則——不然滑過別的節點時，
+   被調暗的節點會以 .18 透明度浮出一片「未命名筆記」的鬼影標籤。 */
+.graph-canvas.hide-labels .graph-node:not(.is-hover) .graph-node-label { opacity: 0; }
 .graph-node.is-dim .graph-node-dot,
 .graph-node.is-dim .graph-node-ic,
 .graph-node.is-dim .graph-node-label { opacity: .18; }

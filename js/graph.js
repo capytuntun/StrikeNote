@@ -135,12 +135,16 @@
     // opts.onClose，由 app.js 決定要切回哪個畫面——close() 不回呼，才不會兜回來。
     const host = opts.container;
     if (!host) return { close: function () {} };
+    // 「顯示名稱」：勾起來每個節點都標名字，取消就全部不標（滑過去還是看得到，
+    // 那是既有的 is-hover）。預設值與記憶由呼叫端給（app.js 的 localStorage）。
+    let showLabels = opts.showLabels !== false;
     host.innerHTML =
       '<div class="graph-editor">' +
       '<header class="graph-bar">' +
       '<span class="graph-bar-t">關聯圖</span>' +
       '<span class="graph-bar-hint">拖曳調整位置・滾輪縮放・點筆記開啟・點標籤篩選</span>' +
       '<label class="graph-tag-toggle"><input type="checkbox" class="graph-tags-cb" checked> 顯示標籤</label>' +
+      '<label class="graph-tag-toggle"><input type="checkbox" class="graph-labels-cb"' + (showLabels ? ' checked' : '') + '> 顯示名稱</label>' +
       '<span class="graph-bar-sp"></span>' +
       '<span class="graph-legend">' + (global.Icons ? Icons.svg('file-text') : '') + '筆記' + (global.Icons ? Icons.svg('hash') : '') + '標籤</span>' +
       '<button class="btn graph-close" type="button">返回</button>' +
@@ -162,6 +166,7 @@
     const zoomFitBtn = host.querySelector('.graph-zfit');
     const resetBtn = host.querySelector('.graph-reset-btn');
     const tagsCb = host.querySelector('.graph-tags-cb');
+    const labelsCb = host.querySelector('.graph-labels-cb');
     function back() { if (opts.onClose) opts.onClose(); }
 
     if (!data.nodes.length) {
@@ -194,9 +199,8 @@
     function visibleEdges() { return showTags ? data.edges : data.edges.filter(function (e) { return e.kind !== 'tag'; }); }
 
     // ---- DOM：每個節點/邊固定對應一個元素，之後每個 tick 只更新屬性 ----
-    // 邊是彎的（curvePath），節點顏色跟邊顏色都是雜湊出來的固定值，只有「度數」
-    // 高於平均的節點預設就顯示標籤——其餘節點的標籤還在，只是靠 CSS 的
-    // .is-minor 藏著，滑過去（既有的 is-hover）就會現形，不用另外接邏輯。
+    // 邊是彎的（curvePath），節點顏色跟邊顏色都是雜湊出來的固定值。名稱標不標由
+    // 頂欄的「顯示名稱」決定（畫布上的 .hide-labels，純 CSS，不重建 DOM）。
     const edgeEls = {}, nodeEls = {};
     function rebuildDom() {
       edgeLayer.innerHTML = ''; nodeLayer.innerHTML = '';
@@ -208,13 +212,10 @@
         edgeLayer.appendChild(path);
         edgeEls[e.a + '|' + e.b] = { el: path, edge: e, seed: hash(e.a + '|' + e.b) };
       });
-      const vn = visibleNodes();
-      const avgDeg = vn.length ? vn.reduce(function (s, n) { return s + n.deg; }, 0) / vn.length : 0;
-      vn.forEach(function (n) {
+      visibleNodes().forEach(function (n) {
         // 節點比之前大一號：白底圓盤裡要放得下一個看得出來的小圖示。
         const r = n.kind === 'tag' ? 8 : (10 + Math.min(n.deg * 1.6, 12));
-        const major = n.deg > avgDeg;
-        const g = svgEl('g', { class: 'graph-node graph-node-' + n.kind + (major ? '' : ' is-minor'), 'data-id': n.id });
+        const g = svgEl('g', { class: 'graph-node graph-node-' + n.kind, 'data-id': n.id });
         const c = svgEl('circle', { r: r, class: 'graph-node-dot' });
         const ring = nodeColor(n);
         if (ring) { c.style.stroke = ring; g.style.color = ring; }
@@ -419,6 +420,15 @@
       rebuildDom();
       kick();
     });
+    // 名稱顯示與否純粹是 CSS 的事（.graph-node-label 的 opacity），不用重建 DOM 也
+    // 不用重跑模擬——節點位置一點都沒變。
+    function applyLabels() { canvas.classList.toggle('hide-labels', !showLabels); }
+    applyLabels();
+    labelsCb.addEventListener('change', function () {
+      showLabels = labelsCb.checked;
+      applyLabels();
+      if (opts.onLabels) opts.onLabels(showLabels);
+    });
 
     function onKey(e) { if (e.key === 'Escape') back(); }
     document.addEventListener('keydown', onKey);
@@ -465,14 +475,11 @@
       seen[other] = true;
       near.push({ node: byId[other], kind: e.kind });
     });
-    if (!near.length) {
-      container.innerHTML = '<div class="graph-mini-empty">這篇還沒有 [[連結]] 或 #標籤。</div>';
-      return;
-    }
-
     // 位置：自己在原點，鄰居從正上方開始等角排一圈。鄰居多的時候把圈放大一點，
     // 圓周上才不會擠在一起（半徑跟著數量長，但有上限，免得整張圖縮到看不清）。
-    const r = Math.min(MINI_R + Math.max(0, near.length - 6) * 7, 108);
+    // 一個鄰居都沒有時不是顯示一段空白說明，而是就畫自己一顆——「這篇在圖上長這樣，
+    // 只是還沒連到別人」比一句話更直接，之後連上誰也是同一張圖長出來。
+    const r = near.length ? Math.min(MINI_R + Math.max(0, near.length - 6) * 7, 108) : 0;
     center.x = 0; center.y = 0;
     near.forEach(function (it, i) {
       const a = -Math.PI / 2 + (i * 2 * Math.PI) / near.length;
@@ -480,7 +487,8 @@
       it.node.y = r * Math.sin(a);
     });
 
-    const pad = MINI_NODE + 26;   // 節點半徑 + 標籤大概的高度
+    // 只有自己一顆時把可視範圍收小一點，不然那顆會變成一大片空白裡的小點
+    const pad = near.length ? MINI_NODE + 26 : MINI_NODE + 18;
     const box = r + pad;
     const svg = svgEl('svg', {
       class: 'graph-mini-svg', viewBox: (-box) + ' ' + (-box) + ' ' + (box * 2) + ' ' + (box * 2),

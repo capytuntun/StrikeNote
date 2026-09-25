@@ -1026,6 +1026,10 @@
   }
   function openGraphPage() {
     if (!window.Graph || !graphWrapEl) return;
+    // 從哪裡進來的，「返回」就回哪裡：從一篇筆記按小視窗的放大鈕（或側邊欄）進來，
+    // 返回要回到那篇筆記，不是把人丟回首頁。一定要在 leaveOtherViews() 之前記下來——
+    // 它會把 state.currentId 清成 null。
+    const from = state.currentId;
     leaveOtherViews();
     closeAreaViews();
     graphWrapEl.hidden = false;
@@ -1036,9 +1040,15 @@
     // 會互相 [[連結]] 的正經筆記，留著。
     graphView = Graph.open(graphNotes(), {
       container: graphWrapEl,
+      showLabels: LS.get('graphLabels', '1') === '1',
+      onLabels: function (on) { LS.set('graphLabels', on ? '1' : '0'); },
       onOpenNote: function (note) { openNote(note.id); },
       onOpenTag: function (tag) { browseTag(tag); },
-      onClose: function () { showEmpty(); }
+      onClose: function () {
+        // 那篇筆記可能在圖裡被刪掉／看不到了，找不到就退回首頁
+        if (from && state.notes.some(function (n) { return n.id === from; })) openNote(from);
+        else showEmpty();
+      }
     });
   }
   // 進關聯圖的那份筆記清單，小圖（Graph.mini）也用同一份，兩邊看到的關聯才一致。
