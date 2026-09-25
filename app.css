@@ -3066,19 +3066,13 @@ select.sec-info-input { cursor: pointer; }
 .rm-menu-hint { margin-top: 6px; padding: 8px 10px 4px; border-top: 1px solid var(--border); font-size: var(--fs-xs); line-height: 1.6; color: var(--text-faint); }
 .rm-menu-hint code { font-family: var(--mono); color: var(--text-dim); }
 
-/* ---------- 關聯圖（反向連結＋標籤，Obsidian 風格的力導向圖） ---------- */
-.graph-overlay {
-  position: fixed; inset: 0; z-index: 2000;
-  background: rgba(17, 20, 26, .55);
-  display: flex; align-items: center; justify-content: center;
-  padding: 24px;
-}
-.graph-editor {
-  width: min(1200px, 96vw); height: min(820px, 92vh);
-  display: flex; flex-direction: column;
-  background: var(--bg); border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-}
+/* ---------- 關聯圖（反向連結＋標籤，Obsidian 風格的力導向圖） ----------
+   整頁，不是浮在畫面上的對話框：跟垃圾桶／區域頁／關聯分析同一套「接管 #main」的
+   做法（見 app.js 的 openGraphPage）。原本是 .graph-overlay 罩一層半透明底、中間放一個
+   固定尺寸的視窗，等於在一個本來就佔滿畫面的 app 上面再疊一個小畫面——圖能用的面積
+   反而被邊框和留白吃掉。 */
+.graph-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.graph-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
 .graph-bar {
   display: flex; align-items: center; gap: 14px;
   padding: 10px 12px; border-bottom: 1px solid var(--border);
@@ -3162,6 +3156,47 @@ select.sec-info-input { cursor: pointer; }
 .graph-node.is-dim .graph-node-ic,
 .graph-node.is-dim .graph-node-label { opacity: .18; }
 .graph-node.is-hover .graph-node-dot { stroke-width: 4; }
+
+/* ---- 預覽右上角的小視窗：這篇筆記的局部關聯圖（Graph.mini）-------------------
+   目錄欄（.preview-toc）在預覽的左邊，右上角本來就是空的，所以這裡只要對著
+   .pane-preview 絕對定位就好，不會跟目錄搶位置。窄螢幕（RWD 區塊）整個收起來：
+   預覽本身都快沒地方了，不該再被一塊浮層佔走。 */
+.graph-mini {
+  position: absolute; top: 12px; right: 12px; z-index: 5; width: 208px;
+  background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+}
+.graph-mini-head {
+  display: flex; align-items: center; gap: 2px;
+  padding: 5px 5px 5px 10px; border-bottom: 1px solid var(--border); background: var(--bg-2);
+}
+.graph-mini-t {
+  flex: 1 1 auto; font-size: var(--fs-micro); font-weight: 700; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: .1em;
+}
+.graph-mini-btn {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0; border: none; background: transparent;
+  color: var(--text-dim); cursor: pointer;
+}
+.graph-mini-btn:hover { background: var(--row-hover); color: var(--text); }
+.graph-mini-btn .ic-svg { width: 14px; height: 14px; }
+.graph-mini-body { height: 168px; background: var(--bg-2); }
+.graph-mini-svg { width: 100%; height: 100%; display: block; }
+/* 收合：只留標題列。收合狀態記在 localStorage，換筆記、重新整理都還記得。 */
+.graph-mini.is-collapsed .graph-mini-body { display: none; }
+.graph-mini.is-collapsed #graph-mini-toggle .ic-svg { transform: rotate(180deg); }
+.graph-mini-empty {
+  height: 100%; display: flex; align-items: center; justify-content: center; text-align: center;
+  padding: 0 14px; color: var(--text-faint); font-size: var(--fs-xs); line-height: 1.5;
+}
+/* 小圖裡每個節點都看得到標籤（不像大圖那樣只留「度數高於平均」的），字再小一點；
+   中心那顆是「正在看的這篇」，圈粗一點、點不下去。 */
+.graph-mini .graph-node-label { font-size: 8px; opacity: 1; }
+.graph-mini .graph-node { cursor: default; }
+.graph-mini .graph-node.is-clickable { cursor: pointer; }
+.graph-mini .graph-node.is-clickable:hover .graph-node-dot { stroke-width: 4; }
+.graph-mini .graph-node.is-center .graph-node-dot { stroke-width: 3.5; }
+.graph-mini .graph-node.is-center .graph-node-label { font-weight: 700; }
 
 /* ---------- 版本紀錄 ---------- */
 .modal.ver-modal {
@@ -4032,10 +4067,12 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
   .rm-page .rm-bar { flex-wrap: wrap; row-gap: 6px; }
   .rm-title { flex: 1 1 160px; }
   .rm-rf-root .react-flow__minimap { transform: scale(.75); transform-origin: bottom right; }
-  /* 全螢幕類的對話框直接吃滿 */
-  .graph-overlay, .mm-overlay { padding: 8px; }
-  .graph-editor, .mm-editor { width: 100%; height: 100%; }
+  /* 全螢幕類的對話框直接吃滿（關聯圖已經是整頁，不在這一組裡） */
+  .mm-overlay { padding: 8px; }
+  .mm-editor { width: 100%; height: 100%; }
   .modal.imglib-modal { width: 100%; height: 100%; }
+  /* 預覽的關聯圖小視窗：窄螢幕預覽本身都快沒地方了，不該再被浮層佔走 */
+  .graph-mini { display: none; }
 }
 
 @media (max-width: 640px) {
@@ -4056,8 +4093,8 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
   /* 一般對話框：接近全寬，內容可捲 */
   .modal { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 18px 16px 16px; }
   .modal-actions { flex-wrap: wrap; }
-  .graph-overlay, .mm-overlay { padding: 0; }
-  .graph-editor, .mm-editor { border: 0; }
+  .mm-overlay { padding: 0; }
+  .mm-editor { border: 0; }
   .graph-bar, .mm-bar { flex-wrap: wrap; row-gap: 6px; }
   .graph-bar-hint, .mm-bar-hint { display: none; }
   /* 電子書：左側章節列也收起來，靠上一頁／下一頁走 */

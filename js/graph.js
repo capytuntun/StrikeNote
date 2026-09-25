@@ -8,7 +8,14 @@
  * 前後空白不分）。開圖時只算一次——這是瀏覽用的快照，筆記內容變動不會即時
  * 反映，要看最新關聯圖就重新打開。
  *
- *   Graph.open(notes, { onOpenNote(note), onOpenTag(tag) })
+ *   Graph.open(notes, { container, onOpenNote(note), onOpenTag(tag), onClose() })
+ *   Graph.mini(container, notes, noteId, { onOpenNote(note), onOpenTag(tag) })
+ *
+ * open() 畫在呼叫端給的容器裡（app.js 的 #graph-wrap），是一個整頁的檢視，
+ * 跟垃圾桶／區域頁／關聯分析同一套「接管 #main」的做法，不是浮在畫面上的對話框。
+ * mini() 是預覽右上角那個小視窗：只畫「目前這篇 + 直接相連的鄰居」，用固定的放射
+ * 佈局（不跑力導向模擬）——這麼小的框裡跑物理只會看到一團東西在抖，而且每次重畫
+ * 位置都不一樣；放射佈局是資料的純函式，同一篇筆記每次畫出來都一樣。
  */
 (function (global) {
   'use strict';
@@ -123,17 +130,20 @@
     opts = opts || {};
     const data = buildGraph(notes || []);
 
-    const overlay = document.createElement('div');
-    overlay.className = 'graph-overlay';
-    overlay.innerHTML =
-      '<div class="graph-editor" role="dialog" aria-label="關聯圖">' +
+    // 畫進呼叫端給的容器（整頁），不是自己往 body 塞一層疊層。close() 只負責拆掉
+    // 自己的東西（動畫、事件、DOM 內容），容器本身歸 app.js 管；「返回」與 Esc 走
+    // opts.onClose，由 app.js 決定要切回哪個畫面——close() 不回呼，才不會兜回來。
+    const host = opts.container;
+    if (!host) return { close: function () {} };
+    host.innerHTML =
+      '<div class="graph-editor">' +
       '<header class="graph-bar">' +
       '<span class="graph-bar-t">關聯圖</span>' +
       '<span class="graph-bar-hint">拖曳調整位置・滾輪縮放・點筆記開啟・點標籤篩選</span>' +
       '<label class="graph-tag-toggle"><input type="checkbox" class="graph-tags-cb" checked> 顯示標籤</label>' +
       '<span class="graph-bar-sp"></span>' +
       '<span class="graph-legend">' + (global.Icons ? Icons.svg('file-text') : '') + '筆記' + (global.Icons ? Icons.svg('hash') : '') + '標籤</span>' +
-      '<button class="btn graph-close" type="button">關閉</button>' +
+      '<button class="btn graph-close" type="button">返回</button>' +
       '</header>' +
       '<div class="graph-canvas" tabindex="0">' +
       '<div class="graph-zoom-ctrl">' +
@@ -144,25 +154,24 @@
       '<button class="graph-reset-btn" type="button" title="還原成一開始的佈局，重新跑一次模擬">重置視圖</button>' +
       '</div>' +
       '</div>';
-    document.body.appendChild(overlay);
 
-    const canvas = overlay.querySelector('.graph-canvas');
-    const closeBtn = overlay.querySelector('.graph-close');
-    const zoomOutBtn = overlay.querySelector('.graph-zo');
-    const zoomInBtn = overlay.querySelector('.graph-zi');
-    const zoomFitBtn = overlay.querySelector('.graph-zfit');
-    const resetBtn = overlay.querySelector('.graph-reset-btn');
-    const tagsCb = overlay.querySelector('.graph-tags-cb');
+    const canvas = host.querySelector('.graph-canvas');
+    const closeBtn = host.querySelector('.graph-close');
+    const zoomOutBtn = host.querySelector('.graph-zo');
+    const zoomInBtn = host.querySelector('.graph-zi');
+    const zoomFitBtn = host.querySelector('.graph-zfit');
+    const resetBtn = host.querySelector('.graph-reset-btn');
+    const tagsCb = host.querySelector('.graph-tags-cb');
+    function back() { if (opts.onClose) opts.onClose(); }
 
     if (!data.nodes.length) {
       canvas.innerHTML = '<div class="graph-empty">還沒有任何筆記可以畫成關聯圖。</div>';
-      function onKeyEmpty(e) { if (e.key === 'Escape') closeEmpty(); }
-      function closeEmpty() { document.removeEventListener('keydown', onKeyEmpty); overlay.remove(); }
+      const onKeyEmpty = function (e) { if (e.key === 'Escape') back(); };
       document.addEventListener('keydown', onKeyEmpty);
-      closeBtn.addEventListener('click', closeEmpty);
-      overlay.querySelector('.graph-tag-toggle').hidden = true;
-      overlay.querySelector('.graph-legend').hidden = true;
-      return { close: closeEmpty };
+      closeBtn.addEventListener('click', back);
+      host.querySelector('.graph-tag-toggle').hidden = true;
+      host.querySelector('.graph-legend').hidden = true;
+      return { close: function () { document.removeEventListener('keydown', onKeyEmpty); host.innerHTML = ''; } };
     }
 
     const svg = svgEl('svg', { class: 'graph-svg' });
@@ -411,9 +420,9 @@
       kick();
     });
 
-    function onKey(e) { if (e.key === 'Escape') close(); }
+    function onKey(e) { if (e.key === 'Escape') back(); }
     document.addEventListener('keydown', onKey);
-    closeBtn.addEventListener('click', close);
+    closeBtn.addEventListener('click', back);
     zoomOutBtn.addEventListener('click', function () { zoomStep(1 / 1.25); });
     zoomInBtn.addEventListener('click', function () { zoomStep(1.25); });
     zoomFitBtn.addEventListener('click', fitView);
@@ -424,12 +433,104 @@
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('mousemove', onWindowMove);
       window.removeEventListener('mouseup', onWindowUp);
-      overlay.remove();
+      host.innerHTML = '';
     }
 
     raf = requestAnimationFrame(tick);
     return { close: close };
   }
 
-  global.Graph = { open: open };
+  // ---- 預覽右上角的小視窗：這篇筆記的局部關聯圖 ------------------------------
+  // 只畫「這一篇 + 直接相連的鄰居」，中間是自己、鄰居等距排一圈。刻意不跑力導向
+  // 模擬：這麼小的框裡跑物理只看得到一團東西在抖，而且每次重畫位置都不一樣；
+  // 放射佈局是資料的純函式，同一篇筆記每次畫出來都在同一個位置。
+  const MINI_R = 62;        // 鄰居那一圈的半徑
+  const MINI_NODE = 9;      // 鄰居節點的半徑（中心節點大一點）
+  function mini(container, notes, noteId, opts) {
+    opts = opts || {};
+    if (!container) return;
+    container.innerHTML = '';
+    const data = buildGraph(notes || []);
+    const centerId = 'note:' + noteId;
+    const byId = {};
+    data.nodes.forEach(function (n) { byId[n.id] = n; });
+    const center = byId[centerId];
+    if (!center) { container.innerHTML = '<div class="graph-mini-empty">開一篇筆記就會顯示它的關聯。</div>'; return; }
+
+    const seen = {};
+    const near = [];
+    data.edges.forEach(function (e) {
+      const other = e.a === centerId ? e.b : (e.b === centerId ? e.a : null);
+      if (!other || seen[other] || !byId[other]) return;
+      seen[other] = true;
+      near.push({ node: byId[other], kind: e.kind });
+    });
+    if (!near.length) {
+      container.innerHTML = '<div class="graph-mini-empty">這篇還沒有 [[連結]] 或 #標籤。</div>';
+      return;
+    }
+
+    // 位置：自己在原點，鄰居從正上方開始等角排一圈。鄰居多的時候把圈放大一點，
+    // 圓周上才不會擠在一起（半徑跟著數量長，但有上限，免得整張圖縮到看不清）。
+    const r = Math.min(MINI_R + Math.max(0, near.length - 6) * 7, 108);
+    center.x = 0; center.y = 0;
+    near.forEach(function (it, i) {
+      const a = -Math.PI / 2 + (i * 2 * Math.PI) / near.length;
+      it.node.x = r * Math.cos(a);
+      it.node.y = r * Math.sin(a);
+    });
+
+    const pad = MINI_NODE + 26;   // 節點半徑 + 標籤大概的高度
+    const box = r + pad;
+    const svg = svgEl('svg', {
+      class: 'graph-mini-svg', viewBox: (-box) + ' ' + (-box) + ' ' + (box * 2) + ' ' + (box * 2),
+      preserveAspectRatio: 'xMidYMid meet'
+    });
+    const edgeLayer = svgEl('g', { class: 'graph-edges' });
+    const nodeLayer = svgEl('g', { class: 'graph-nodes' });
+    svg.appendChild(edgeLayer); svg.appendChild(nodeLayer);
+
+    near.forEach(function (it) {
+      const key = centerId + '|' + it.node.id;
+      const path = svgEl('path', {
+        class: 'graph-edge graph-edge-' + it.kind,
+        d: curvePath(0, 0, it.node.x, it.node.y, hash(key))
+      });
+      path.style.stroke = edgeColor({ a: centerId, b: it.node.id });
+      edgeLayer.appendChild(path);
+    });
+
+    function addNode(n, radius, isCenter) {
+      const g = svgEl('g', {
+        class: 'graph-node graph-node-' + n.kind + (isCenter ? ' is-center' : ''),
+        transform: 'translate(' + n.x + ',' + n.y + ')'
+      });
+      const c = svgEl('circle', { r: radius, class: 'graph-node-dot' });
+      const ring = nodeColor(n);
+      if (ring) { c.style.stroke = ring; g.style.color = ring; }
+      const t = svgEl('text', { class: 'graph-node-label', x: 0, y: radius + 12 });
+      t.textContent = n.label.length > 14 ? n.label.slice(0, 13) + '…' : n.label;
+      const tip = svgEl('title', {});
+      tip.textContent = n.label;
+      g.appendChild(c);
+      g.appendChild(iconGroup(n.kind === 'tag' ? 'hash' : 'file-text', radius * 1.15));
+      g.appendChild(t);
+      g.appendChild(tip);
+      // 中心就是正在看的這一篇，點它沒有意義（也不該把自己重開一次）
+      if (!isCenter) {
+        g.classList.add('is-clickable');
+        g.addEventListener('click', function () {
+          if (n.kind === 'tag' && opts.onOpenTag) opts.onOpenTag(n.label.replace(/^#/, ''));
+          else if (n.kind === 'note' && opts.onOpenNote && n.note) opts.onOpenNote(n.note);
+        });
+      }
+      nodeLayer.appendChild(g);
+    }
+    near.forEach(function (it) { addNode(it.node, MINI_NODE, false); });
+    addNode(center, MINI_NODE + 3, true);   // 畫在最後，壓在線的上面
+
+    container.appendChild(svg);
+  }
+
+  global.Graph = { open: open, mini: mini };
 })(window);
