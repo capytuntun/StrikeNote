@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=162">
+  <link rel="stylesheet" href="app.css?v=163">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -252,16 +252,6 @@
               <!-- outside #preview so it never lands in the PDF export -->
               <aside id="backlinks" class="backlinks" hidden></aside>
             </div>
-            <!-- 預覽右上角的小視窗：這篇筆記的局部關聯圖（js/graph.js 的 Graph.mini）。
-                 目錄欄在預覽的左邊，右上角是空的，所以這裡不會跟目錄打架。 -->
-            <aside id="graph-mini" class="graph-mini" hidden aria-label="這篇筆記的關聯圖">
-              <div class="graph-mini-head">
-                <span class="graph-mini-t">關聯圖</span>
-                <button id="graph-mini-open" class="graph-mini-btn" type="button" title="打開完整關聯圖" data-icon="maximize"></button>
-                <button id="graph-mini-toggle" class="graph-mini-btn" type="button" title="收合" data-icon="chevron-up"></button>
-              </div>
-              <div id="graph-mini-body" class="graph-mini-body"></div>
-            </aside>
           </section>
         </div>
         <div class="statusbar">
@@ -364,7 +354,7 @@
   <script src="js/mdimport.js?v=1"></script>
   <script src="js/mindmap.js?v=3"></script>
   <script src="js/relmap.js?v=4"></script>
-  <script src="js/graph.js?v=9"></script>
+  <script src="js/graph.js?v=10"></script>
   <script src="js/store.js?v=59"></script>
   <script src="js/auth.js?v=48"></script>
   <script src="js/migrate.js?v=41"></script>
@@ -393,6 +383,6 @@
   <script src="js/imagelib.js?v=4"></script>
   <script src="js/linesync.js?v=7"></script>
   <script src="js/embedswitch.js?v=2"></script>
-  <script src="js/app.js?v=120"></script>
+  <script src="js/app.js?v=121"></script>
 </body>
 </html>

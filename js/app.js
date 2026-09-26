@@ -1051,7 +1051,7 @@
       }
     });
   }
-  // 進關聯圖的那份筆記清單，小圖（Graph.mini）也用同一份，兩邊看到的關聯才一致。
+  // 進關聯圖的那份筆記清單。
   function graphNotes() {
     return state.notes.filter(function (n) {
       return n.area !== 'quick' && n.area !== 'novel' && !isFileNote(n) && !isStickyNote(n);
@@ -1826,7 +1826,6 @@
     if (window.MindMap && MindMap.restorePreview) MindMap.restorePreview();
     buildPreviewTOC();
     renderBacklinks();
-    syncGraphMini();
     scrollAnchorsDirty = true;
   }
 
@@ -1988,53 +1987,6 @@
       a.addEventListener('click', function () { saveNow(); openNote(n.id); });
       backlinksEl.appendChild(a);
     });
-  }
-
-  // ---- 預覽右上角的關聯圖小視窗（#graph-mini）----------------------------
-  // Graph.mini 只畫「這一篇 + 直接相連的鄰居」。重畫成本不高，但沒必要每次按鍵都做：
-  // 只有在這篇自己的 [[連結]]／#標籤 真的變了（miniSig）才重畫，其餘時候原地不動。
-  // 「別人連過來」那一側跟大圖一樣是開啟當下的快照——別篇筆記在別的分頁被改，這裡
-  // 不會即時反映。
-  const graphMiniEl = $('#graph-mini');
-  const graphMiniBodyEl = $('#graph-mini-body');
-  let miniSig = null;
-  function miniSignature() {
-    const cur = state.current;
-    if (!cur) return null;
-    const text = editorEl.value || '';
-    return cur.id + '\u0000' + MD.extractLinks(text).join('\u0001') + '\u0000' + MD.extractTags(text).join('\u0001');
-  }
-  // 小視窗只在「預覽看得到」的時候有意義：純編輯模式沒有預覽，整頁檢視（首頁、
-  // 垃圾桶、關聯圖自己…）也沒有。收合狀態記在 localStorage。
-  function syncGraphMini(force) {
-    if (!graphMiniEl || !graphMiniBodyEl) return;
-    const show = !!state.current && !wrapEl.hidden && state.mode !== 'edit';
-    graphMiniEl.hidden = !show;
-    if (!show) { miniSig = null; return; }
-    const collapsed = LS.get('graphMini', 'open') === 'closed';
-    graphMiniEl.classList.toggle('is-collapsed', collapsed);
-    const toggleBtn = $('#graph-mini-toggle');
-    if (toggleBtn) toggleBtn.title = collapsed ? '展開' : '收合';
-    if (collapsed) return;   // 收起來就不用重畫了，展開時 force 會補畫
-    const sig = miniSignature();
-    if (!force && sig === miniSig) return;
-    miniSig = sig;
-    if (window.Graph && Graph.mini) {
-      // 目前這篇用編輯器裡的即時內容與標題，不是 state.notes 裡那份——那份要等自動
-      // 存檔回來才更新，中間打的 [[連結]]／#標籤 小視窗就會晚個半秒才出現。標題也一樣：
-      // 反向連結是比對標題的，改名的當下就要算新的。
-      const live = graphNotes().map(function (n) {
-        if (n.id !== state.currentId) return n;
-        const copy = Object.assign({}, n);
-        copy.content = editorEl.value;
-        copy.title = titleEl.value || n.title;
-        return copy;
-      });
-      Graph.mini(graphMiniBodyEl, live, state.currentId, {
-        onOpenNote: function (note) { saveNow(); openNote(note.id); },
-        onOpenTag: function (tag) { browseTag(tag); }
-      });
-    }
   }
 
   // Follow a [[link]] from the preview; unresolved ones create the note first.
@@ -2804,7 +2756,6 @@
     document.querySelectorAll('.mode-btn').forEach(function (b) {
       b.classList.toggle('active', b.dataset.mode === mode);
     });
-    syncGraphMini();   // 純編輯模式沒有預覽，小視窗跟著收起來
     if (mode === 'preview') renderPreview();
   }
 
@@ -4491,15 +4442,6 @@
     if (newBook) newBook.addEventListener('click', pickBookFolder);
     const graphBtn = $('#graph-open-btn');
     if (graphBtn) graphBtn.addEventListener('click', openGraphPage);
-    // 預覽右上角的小視窗：放大鏡＝開整頁的關聯圖，箭頭＝收合（狀態記在 localStorage）
-    const miniOpen = $('#graph-mini-open');
-    if (miniOpen) miniOpen.addEventListener('click', openGraphPage);
-    const miniToggle = $('#graph-mini-toggle');
-    if (miniToggle) miniToggle.addEventListener('click', function () {
-      const nowCollapsed = LS.get('graphMini', 'open') !== 'closed';
-      LS.set('graphMini', nowCollapsed ? 'closed' : 'open');
-      syncGraphMini();
-    });
     // 垃圾桶：獨立頁面（#trash），見 openTrash()
     const trashBtn = $('#trash-open-btn');
     if (trashBtn) trashBtn.addEventListener('click', function () { openTrash(); });

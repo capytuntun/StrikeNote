@@ -3165,48 +3165,6 @@ select.sec-info-input { cursor: pointer; }
    整張圖在跳）。stroke 走 currentColor，而 g.style.color 已經是這顆節點的顏色。 */
 .graph-node.is-hover .graph-node-dot { stroke: currentColor; stroke-width: 3; stroke-opacity: .35; }
 
-/* ---- 預覽右上角的小視窗：這篇筆記的局部關聯圖（Graph.mini）-------------------
-   目錄欄（.preview-toc）在預覽的左邊，右上角本來就是空的，所以這裡只要對著
-   .pane-preview 絕對定位就好，不會跟目錄搶位置。窄螢幕（RWD 區塊）整個收起來：
-   預覽本身都快沒地方了，不該再被一塊浮層佔走。 */
-.graph-mini {
-  position: absolute; top: 12px; right: 12px; z-index: 5; width: 208px;
-  background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
-}
-.graph-mini-head {
-  display: flex; align-items: center; gap: 2px;
-  padding: 5px 5px 5px 10px; border-bottom: 1px solid var(--border); background: var(--bg-2);
-}
-.graph-mini-t {
-  flex: 1 1 auto; font-size: var(--fs-micro); font-weight: 700; color: var(--text-faint);
-  text-transform: uppercase; letter-spacing: .1em;
-}
-.graph-mini-btn {
-  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; padding: 0; border: none; background: transparent;
-  color: var(--text-dim); cursor: pointer;
-}
-.graph-mini-btn:hover { background: var(--row-hover); color: var(--text); }
-.graph-mini-btn .ic-svg { width: 14px; height: 14px; }
-.graph-mini-body { height: 168px; background: var(--bg-2); }
-.graph-mini-svg { width: 100%; height: 100%; display: block; }
-/* 收合：只留標題列。收合狀態記在 localStorage，換筆記、重新整理都還記得。 */
-.graph-mini.is-collapsed .graph-mini-body { display: none; }
-.graph-mini.is-collapsed #graph-mini-toggle .ic-svg { transform: rotate(180deg); }
-.graph-mini-empty {
-  height: 100%; display: flex; align-items: center; justify-content: center; text-align: center;
-  padding: 0 14px; color: var(--text-faint); font-size: var(--fs-xs); line-height: 1.5;
-}
-/* 小圖裡每個節點都看得到標籤（不像大圖那樣只留「度數高於平均」的），字再小一點；
-   中心那顆是「正在看的這篇」，圈粗一點、點不下去。 */
-.graph-mini .graph-node-label { font-size: 8px; opacity: 1; }
-.graph-mini .graph-node { cursor: default; }
-.graph-mini .graph-node.is-clickable { cursor: pointer; }
-/* 圓點是實心的（沒有外框），強調就補一圈同色細光暈——中心那顆常駐，滑過的那顆暫時 */
-.graph-mini .graph-node.is-clickable:hover .graph-node-dot { stroke: currentColor; stroke-width: 3; stroke-opacity: .35; }
-.graph-mini .graph-node.is-center .graph-node-dot { stroke: currentColor; stroke-width: 2.5; stroke-opacity: .3; }
-.graph-mini .graph-node.is-center .graph-node-label { font-weight: 700; }
-
 /* ---------- 版本紀錄 ---------- */
 .modal.ver-modal {
   width: min(1080px, 96vw);
@@ -4080,8 +4038,6 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
   .mm-overlay { padding: 8px; }
   .mm-editor { width: 100%; height: 100%; }
   .modal.imglib-modal { width: 100%; height: 100%; }
-  /* 預覽的關聯圖小視窗：窄螢幕預覽本身都快沒地方了，不該再被浮層佔走 */
-  .graph-mini { display: none; }
 }
 
 @media (max-width: 640px) {

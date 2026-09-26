@@ -9,13 +9,9 @@
  * 反映，要看最新關聯圖就重新打開。
  *
  *   Graph.open(notes, { container, onOpenNote(note), onOpenTag(tag), onClose() })
- *   Graph.mini(container, notes, noteId, { onOpenNote(note), onOpenTag(tag) })
  *
- * open() 畫在呼叫端給的容器裡（app.js 的 #graph-wrap），是一個整頁的檢視，
- * 跟垃圾桶／區域頁／關聯分析同一套「接管 #main」的做法，不是浮在畫面上的對話框。
- * mini() 是預覽右上角那個小視窗：只畫「目前這篇 + 直接相連的鄰居」，用固定的放射
- * 佈局（不跑力導向模擬）——這麼小的框裡跑物理只會看到一團東西在抖，而且每次重畫
- * 位置都不一樣；放射佈局是資料的純函式，同一篇筆記每次畫出來都一樣。
+ * 畫在呼叫端給的容器裡（app.js 的 #graph-wrap），是一個整頁的檢視，跟垃圾桶／
+ * 區域頁／關聯分析同一套「接管 #main」的做法，不是浮在畫面上的對話框。
  */
 (function (global) {
   'use strict';
@@ -437,97 +433,5 @@
     return { close: close };
   }
 
-  // ---- 預覽右上角的小視窗：這篇筆記的局部關聯圖 ------------------------------
-  // 只畫「這一篇 + 直接相連的鄰居」，中間是自己、鄰居等距排一圈。刻意不跑力導向
-  // 模擬：這麼小的框裡跑物理只看得到一團東西在抖，而且每次重畫位置都不一樣；
-  // 放射佈局是資料的純函式，同一篇筆記每次畫出來都在同一個位置。
-  const MINI_R = 62;        // 鄰居那一圈的半徑
-  const MINI_NODE = 4.5;    // 鄰居節點的半徑（中心節點大一點）——跟大圖一樣是小圓點
-  function mini(container, notes, noteId, opts) {
-    opts = opts || {};
-    if (!container) return;
-    container.innerHTML = '';
-    const data = buildGraph(notes || []);
-    const centerId = 'note:' + noteId;
-    const byId = {};
-    data.nodes.forEach(function (n) { byId[n.id] = n; });
-    const center = byId[centerId];
-    if (!center) { container.innerHTML = '<div class="graph-mini-empty">開一篇筆記就會顯示它的關聯。</div>'; return; }
-
-    const seen = {};
-    const near = [];
-    data.edges.forEach(function (e) {
-      const other = e.a === centerId ? e.b : (e.b === centerId ? e.a : null);
-      if (!other || seen[other] || !byId[other]) return;
-      seen[other] = true;
-      near.push({ node: byId[other], kind: e.kind });
-    });
-    // 位置：自己在原點，鄰居從正上方開始等角排一圈。鄰居多的時候把圈放大一點，
-    // 圓周上才不會擠在一起（半徑跟著數量長，但有上限，免得整張圖縮到看不清）。
-    // 一個鄰居都沒有時不是顯示一段空白說明，而是就畫自己一顆——「這篇在圖上長這樣，
-    // 只是還沒連到別人」比一句話更直接，之後連上誰也是同一張圖長出來。
-    const r = near.length ? Math.min(MINI_R + Math.max(0, near.length - 6) * 7, 108) : 0;
-    center.x = 0; center.y = 0;
-    near.forEach(function (it, i) {
-      const a = -Math.PI / 2 + (i * 2 * Math.PI) / near.length;
-      it.node.x = r * Math.cos(a);
-      it.node.y = r * Math.sin(a);
-    });
-
-    // viewBox 是「圖的座標範圍」，範圍越小、畫出來就被放得越大。只有自己一顆時
-    // r 是 0，範圍會縮到只剩那顆點，SVG 於是把它撐滿整張卡——一顆巨大的圓加一行
-    // 巨大的字（使用者截圖回報過）。所以給範圍一個下限，就用「一圈鄰居」時的大小：
-    // 同一篇筆記不會因為多連了一個人就忽然縮小，孤零零的時候也是一顆正常大小的點。
-    const pad = MINI_NODE + 26;
-    const box = Math.max(r + pad, MINI_R + pad);
-    const svg = svgEl('svg', {
-      class: 'graph-mini-svg', viewBox: (-box) + ' ' + (-box) + ' ' + (box * 2) + ' ' + (box * 2),
-      preserveAspectRatio: 'xMidYMid meet'
-    });
-    const edgeLayer = svgEl('g', { class: 'graph-edges' });
-    const nodeLayer = svgEl('g', { class: 'graph-nodes' });
-    svg.appendChild(edgeLayer); svg.appendChild(nodeLayer);
-
-    near.forEach(function (it) {
-      const key = centerId + '|' + it.node.id;
-      const path = svgEl('path', {
-        class: 'graph-edge graph-edge-' + it.kind,
-        d: curvePath(0, 0, it.node.x, it.node.y, hash(key))
-      });
-      path.style.stroke = edgeColor({ a: centerId, b: it.node.id });
-      edgeLayer.appendChild(path);
-    });
-
-    function addNode(n, radius, isCenter) {
-      const g = svgEl('g', {
-        class: 'graph-node graph-node-' + n.kind + (isCenter ? ' is-center' : ''),
-        transform: 'translate(' + n.x + ',' + n.y + ')'
-      });
-      const c = svgEl('circle', { r: radius, class: 'graph-node-dot' });
-      const ring = nodeColor(n);
-      if (ring) { c.style.fill = ring; g.style.color = ring; }
-      const t = svgEl('text', { class: 'graph-node-label', x: 0, y: radius + 10 });
-      t.textContent = n.label.length > 14 ? n.label.slice(0, 13) + '…' : n.label;
-      const tip = svgEl('title', {});
-      tip.textContent = n.label;
-      g.appendChild(c);
-      g.appendChild(t);
-      g.appendChild(tip);
-      // 中心就是正在看的這一篇，點它沒有意義（也不該把自己重開一次）
-      if (!isCenter) {
-        g.classList.add('is-clickable');
-        g.addEventListener('click', function () {
-          if (n.kind === 'tag' && opts.onOpenTag) opts.onOpenTag(n.label.replace(/^#/, ''));
-          else if (n.kind === 'note' && opts.onOpenNote && n.note) opts.onOpenNote(n.note);
-        });
-      }
-      nodeLayer.appendChild(g);
-    }
-    near.forEach(function (it) { addNode(it.node, MINI_NODE, false); });
-    addNode(center, MINI_NODE + 2, true);   // 畫在最後，壓在線的上面
-
-    container.appendChild(svg);
-  }
-
-  global.Graph = { open: open, mini: mini };
+  global.Graph = { open: open };
 })(window);
