@@ -337,6 +337,18 @@
       /* optional:每個 H1 大章節從新的一頁開始（第一個除外，否則會多一張空白頁） */
       (opts.breakH1 ? '.pdf-content h1 { break-before: page; }' : ''),
       (opts.breakH1 ? '.pdf-content > h1:first-child { break-before: avoid; }' : ''),
+      /* 資安院報告（opts.stepPages）：一步一頁。每個「## 步驟 N」都從新的一頁開始，
+         所以每一步都是從頁首寫起——這同時也是「不要切到」的作法：一步只有在它本身
+         比一整頁還高的時候才會被切開，其餘情況自然整步待在同一頁。
+         刻意「不」用 break-inside: avoid 把整步框起來：paged.js 對高過一頁的
+         break-inside:avoid 區塊沒有退路，它會把超出頁面的部分直接不畫出來（見下面
+         程式碼區塊那段說明）。報告是評分證據，寧可讓長步驟分頁，也不能默默吞掉內容。
+         圖片另外給一個高度上限：可列印高度是 A4 297mm 減去上下邊界 42mm＝255mm，
+         留給標題與描述文字之後，200mm 讓一張整頁截圖仍舊完整落在同一頁裡，
+         而不是跨頁被切成兩半（max-width 已經在，兩個一起用會等比例縮）。 */
+      (opts.stepPages ? '.pdf-content.pdf-steps h2 { break-before: page; }' : ''),
+      (opts.stepPages ? '.pdf-content.pdf-steps > h2:first-child { break-before: avoid; }' : ''),
+      (opts.stepPages ? '.pdf-content.pdf-steps img { max-height: 200mm; }' : ''),
       'html, body { margin: 0; padding: 0; }',
       // Same stack as the app. The print document carries a <base href> pointing
       // at the app origin, so vendor/fonts/ resolves and the PDF matches the screen.
@@ -615,7 +627,8 @@
       '</section>' +
       parts.toc +
       parts.summary +
-      '<article class="pdf-content markdown-body">' + parts.contentHTML + '</article>' +
+      '<article class="pdf-content markdown-body' + (opts.stepPages ? ' pdf-steps' : '') + '">' +
+      parts.contentHTML + '</article>' +
       '</body></html>';
   }
 
@@ -831,7 +844,9 @@
       print.disabled = true;
       const opts = {
         theme: theme, watermark: watermark, autoPrint: false,
-        tlp: meta.tlp, breakH1: breakH1, meta: meta
+        tlp: meta.tlp, breakH1: breakH1, meta: meta,
+        // 資安院報告是步驟式的，一步一頁（見 printCSS 的 stepPages）
+        stepPages: !!meta.secReport
       };
       // document.write (rather than srcdoc) keeps the frame same-origin, so the
       // vendor script loads under the app's own policy.
@@ -916,7 +931,8 @@
       const meta = note.meta || {};
       const opts = {
         theme: lsGet(LS_THEME, 'tech'), watermark: lsGet(LS_WM, ''), autoPrint: true,
-        tlp: meta.tlp, breakH1: lsGet(LS_H1, '0') === '1', meta: meta
+        tlp: meta.tlp, breakH1: lsGet(LS_H1, '0') === '1', meta: meta,
+        stepPages: !!meta.secReport
       };
       const w = global.open('', '_blank');
       if (!w) throw new Error('無法開啟新視窗，請允許彈出視窗後再試。');

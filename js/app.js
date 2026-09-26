@@ -987,6 +987,7 @@
     noteBar(false);
     if (notePathEl) notePathEl.textContent = '';
     state.currentId = null; state.current = null;
+    editorNoteId = null;
     emptyEl.hidden = true;
     wrapEl.hidden = true;
     if (secWrapEl) secWrapEl.hidden = true;
@@ -1539,6 +1540,7 @@
     noteBar(false);
     if (notePathEl) notePathEl.textContent = '';
     state.currentId = null; state.current = null;
+    editorNoteId = null;
     if (keepHash !== true) setHash('');
     emptyEl.hidden = false;
     wrapEl.hidden = true;
@@ -1594,6 +1596,7 @@
     noteBar(false);
     if (notePathEl) notePathEl.textContent = '';
     state.currentId = null; state.current = null;
+    editorNoteId = null;
     emptyEl.hidden = true;
     wrapEl.hidden = true;
     if (secWrapEl) secWrapEl.hidden = true;
@@ -1619,6 +1622,7 @@
     noteBar(false);
     if (notePathEl) notePathEl.textContent = '';
     state.currentId = null; state.current = null;
+    editorNoteId = null;
     emptyEl.hidden = true;
     wrapEl.hidden = true;
     if (secWrapEl) secWrapEl.hidden = true;
@@ -1709,6 +1713,9 @@
     if (isFileNote(known)) { openFileViewer(known); return; }
     if (isStickyNote(known) && goToSticky(known)) return;
     closeStream();   // stop listening to the note we're leaving
+    // 從這一刻起 #note-title/#editor 裝的還是上一篇，但 state.current 馬上要換人——
+    // 在「真的把新內容載進編輯器」之前，不准 saveNow 動它（見 editorNoteId）。
+    editorNoteId = null;
     if (multi) multi.clear();
     // 小說筆記在 state.notes 裡卻打不開，八成是 server/api.js 的一小時解鎖過期了
     // （見 novelIsUnlocked 宣告處）——跟一般「筆記不見了」分開處理，讓使用者知道
@@ -1776,6 +1783,7 @@
       if (secWrapEl) secWrapEl.hidden = true;
       if (perfWrapEl) perfWrapEl.hidden = true;
       wrapEl.hidden = false;
+      editorNoteId = note.id;   // 編輯器從這裡開始真的裝著這一篇
       titleEl.value = note.title || '';
       fitNoteTitle();
       editorEl.value = note.content || '';
@@ -2652,6 +2660,14 @@
   }
 
   let saveTimer = null;
+  // 這個 md 編輯器（#note-title + #editor）現在裝的是哪一篇。saveNow() 會把這兩個輸入框
+  // 的內容寫進 state.current，所以「state.current 是這一篇」跟「編輯器裡裝的是這一篇」
+  // 必須同時成立才能存——資安院報告／成效報告／關聯分析有自己的編輯器，openNote() 走到
+  // 它們的分支就直接 return，根本沒碰過 #note-title，裡面留的還是上一篇的標題與內文。
+  // 少了這個檢查，任何一次 saveNow（打字排的計時器、goHome()、leaveOtherViews()…）就會
+  // 把上一篇的標題和內文蓋到新報告上——使用者回報過：新增的資安院報告，名字變成剛剛
+  // 在課程筆記裡看的那篇筆記的名字。
+  let editorNoteId = null;
   // Alone, a save half a second after the last keystroke is plenty. With someone else in
   // the note, that half second is also how late they see each word, so it drops to
   // 150 ms — still one save per burst of typing, and still only one in flight at a time
@@ -2674,6 +2690,7 @@
   function saveNow() {
     const cur = state.current;
     if (!cur || cur.perm === 'read') return;
+    if (cur.id !== editorNoteId) return;   // 編輯器裡裝的不是這一篇，見 editorNoteId
     // Record the text on the note even when queuing: if the user switches notes
     // before the reply, the queued save still carries this note's latest text.
     cur.title = titleEl.value || '未命名筆記';
