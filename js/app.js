@@ -3511,43 +3511,87 @@
   // 共用對話框（Google Drive 式）：
   //   1. 新增使用者 + 角色（檢視者／編輯者）
   //   2. 「具有存取權的使用者」：擁有者一列（固定），其他人可就地改角色或移除存取權
-  //   3. 「一般存取權」：限制（預設）或此站台的所有使用者（可再選檢視／編輯）
+  //   3. 「一般存取權」：限制（預設）或網站內所有人（可再選可以檢視／可以編輯）
   //   4. 複製連結（開啟仍需登入且有權限）
   // 沒有「知道連結的任何人」——這台伺服器上放的是考試報告，不開匿名存取。
-  function showShareDialog(note) {
+  //
+  // 同一個對話框也負責「一次套用到很多篇」：showShareDialog(note) 是單篇（批次只是
+  // 底下多一個勾選框，把同樣的一般存取權順便套到選取的其他幾篇），showShareDialog(null, ids)
+  // 則是批次列的「共用」鈕開的純批次模式——指定使用者與複製連結對一堆筆記沒有意義，
+  // 那兩塊在批次模式下不出現，其餘完全同一份程式與同一份樣式。
+  let shareSeq = 0;
+  // 一般存取權從一個下拉選單改成兩列明白寫著的選項：下拉只有拉開才看得到「還有另一種」，
+  // 而這裡最重要的資訊是「現在到底是誰看得到」。
+  function generalAccessHTML(name) {
+    return '<div class="share-general">' +
+      '<div class="share-opt-row">' +
+        '<label class="share-opt">' +
+          '<input type="radio" name="' + name + '" value="restricted">' +
+          '<span class="share-opt-ic">' + Icons.svg('lock') + '</span>' +
+          '<span class="share-opt-body">' +
+            '<span class="share-opt-title">限制</span>' +
+            '<span class="share-opt-desc">只有我和我指定的人可以開啟。</span>' +
+          '</span>' +
+        '</label>' +
+      '</div>' +
+      '<div class="share-opt-row">' +
+        '<label class="share-opt">' +
+          '<input type="radio" name="' + name + '" value="site">' +
+          '<span class="share-opt-ic">' + Icons.svg('globe') + '</span>' +
+          '<span class="share-opt-body">' +
+            '<span class="share-opt-title">網站內所有人</span>' +
+            '<span class="share-opt-desc share-site-desc">這個網站上任何登入的人都能開啟。</span>' +
+          '</span>' +
+        '</label>' +
+        '<select class="share-access-perm" title="網站內所有人的權限">' +
+          '<option value="read">可以檢視</option><option value="edit">可以編輯</option>' +
+        '</select>' +
+      '</div>' +
+      '</div>';
+  }
+  // 選取中、我自己的、還能改存取權的筆記（小說怎麼樣都不開放，伺服器也會擋）
+  function shareableSelection(exceptId) {
+    return Array.from(selected)
+      .map(function (id) { return state.notes.find(function (x) { return x.id === id; }); })
+      .filter(function (n) { return n && n.id !== exceptId && isMine(n) && n.area !== 'novel'; });
+  }
+  function showShareDialog(note, batchNotes) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const modal = document.createElement('div');
     modal.className = 'modal share-modal';
     const me = (Auth.user && Auth.user()) ? Auth.user().username : '';
+    const single = !!note;
+    // 單篇：其他也被勾選的筆記是「順便一起套用」的對象；批次：那份清單就是全部對象。
+    const extras = single ? shareableSelection(note.id) : (batchNotes || []);
+    const radioName = 'share-access-' + (++shareSeq);
     modal.innerHTML =
-      '<div class="modal-title">' + Icons.svg('users') + ' 共用「' + MD.escapeHtml(note.title || '未命名筆記') + '」</div>' +
-      '<div class="share-add">' +
-      '<input class="share-user" type="text" placeholder="新增使用者（輸入帳號）" autocomplete="off" spellcheck="false">' +
-      '<select class="share-perm" title="角色">' +
-      '<option value="read">檢視者</option><option value="edit">編輯者</option>' +
-      '</select>' +
-      '<button class="btn btn-primary share-add-btn" type="button">' + Icons.svg('user-plus') + '<span>新增</span></button>' +
+      '<div class="modal-title">' + Icons.svg('users') + ' ' +
+        (single ? '共用「' + MD.escapeHtml(note.title || '未命名筆記') + '」' : '共用 ' + extras.length + ' 篇筆記') +
       '</div>' +
-      '<div class="share-error" hidden></div>' +
-      '<div class="share-section-title">具有存取權的使用者</div>' +
-      '<div class="share-people"></div>' +
-      '<div class="share-section-title">一般存取權</div>' +
-      '<div class="share-general">' +
-        '<span class="share-general-ic"></span>' +
-        '<div class="share-general-body">' +
-          '<select class="share-access">' +
-            '<option value="restricted">限制</option>' +
-            '<option value="site">此站台的所有使用者</option>' +
-          '</select>' +
-          '<div class="share-general-desc"></div>' +
-        '</div>' +
-        '<select class="share-access-perm" title="站台使用者的角色" hidden>' +
-          '<option value="read">檢視者</option><option value="edit">編輯者</option>' +
+      (single ?
+        '<div class="share-add">' +
+        '<input class="share-user" type="text" placeholder="新增使用者（輸入帳號）" autocomplete="off" spellcheck="false">' +
+        '<select class="share-perm" title="角色">' +
+        '<option value="read">檢視者</option><option value="edit">編輯者</option>' +
         '</select>' +
-      '</div>' +
+        '<button class="btn btn-primary share-add-btn" type="button">' + Icons.svg('user-plus') + '<span>新增</span></button>' +
+        '</div>' : '') +
+      '<div class="share-error" hidden></div>' +
+      (single ?
+        '<div class="share-section-title">具有存取權的使用者</div>' +
+        '<div class="share-people"></div>' : '') +
+      '<div class="share-section-title">一般存取權</div>' +
+      generalAccessHTML(radioName) +
+      '<div class="share-mixed" hidden></div>' +
+      (single && extras.length ?
+        '<label class="share-batch">' +
+        '<input type="checkbox" class="share-batch-cb">' +
+        '<span>同時套用到選取的其他 ' + extras.length + ' 篇筆記</span>' +
+        '</label>' : '') +
+      (!single ? '<div class="share-batch-list"></div>' : '') +
       '<div class="share-footer">' +
-        '<button class="btn share-link-btn" type="button">' + Icons.svg('link') + '<span>複製連結</span></button>' +
+        (single ? '<button class="btn share-link-btn" type="button">' + Icons.svg('link') + '<span>複製連結</span></button>' : '<span></span>') +
         '<button class="btn btn-primary modal-cancel" type="button">完成</button>' +
       '</div>';
     overlay.appendChild(modal);
@@ -3557,11 +3601,28 @@
     const errEl = modal.querySelector('.share-error');
     const userEl = modal.querySelector('.share-user');
     const permEl = modal.querySelector('.share-perm');
-    const accessEl = modal.querySelector('.share-access');
     const accessPermEl = modal.querySelector('.share-access-perm');
     const generalEl = modal.querySelector('.share-general');
-    const generalIc = modal.querySelector('.share-general-ic');
-    const generalDesc = modal.querySelector('.share-general-desc');
+    const siteDescEl = modal.querySelector('.share-site-desc');
+    const mixedEl = modal.querySelector('.share-mixed');
+    const batchCb = modal.querySelector('.share-batch-cb');
+    const radios = Array.prototype.slice.call(modal.querySelectorAll('input[name="' + radioName + '"]'));
+
+    if (!single) {
+      const listEl = modal.querySelector('.share-batch-list');
+      extras.slice(0, 8).forEach(function (n) {
+        const row = document.createElement('div');
+        row.className = 'share-batch-item';
+        row.textContent = n.title || '未命名筆記';
+        listEl.appendChild(row);
+      });
+      if (extras.length > 8) {
+        const more = document.createElement('div');
+        more.className = 'share-batch-item is-more';
+        more.textContent = '…還有 ' + (extras.length - 8) + ' 篇';
+        listEl.appendChild(more);
+      }
+    }
 
     function err(msg) { errEl.textContent = msg || ''; errEl.hidden = !msg; }
     function avatar(name) {
@@ -3586,32 +3647,95 @@
       return row;
     }
 
+    // 目前的一般存取權。批次時全部一致才顯示成某一個選項，不一致就兩個都不勾（並說明
+    // 「目前設定不一致」）——硬選一個顯示等於騙人，使用者會以為按了「完成」就沒事了。
+    function targets() {
+      if (!single) return extras;
+      return batchCb && batchCb.checked ? [note].concat(extras) : [note];
+    }
+    function currentAccess() {
+      const list = single ? [note] : extras;
+      if (!list.length) return { mode: '', perm: 'edit' };
+      const modes = {}, perms = {};
+      list.forEach(function (n) {
+        modes[(n.access || 'restricted') === 'site' ? 'site' : 'restricted'] = 1;
+        perms[n.accessPerm === 'edit' ? 'edit' : 'read'] = 1;
+      });
+      const mk = Object.keys(modes), pk = Object.keys(perms);
+      return { mode: mk.length === 1 ? mk[0] : '', perm: pk.length === 1 ? pk[0] : 'edit' };
+    }
     function paintGeneral() {
-      const site = (note.access || 'restricted') === 'site';
-      accessEl.value = site ? 'site' : 'restricted';
-      accessPermEl.hidden = !site;
-      accessPermEl.value = note.accessPerm === 'edit' ? 'edit' : 'read';
+      const cur = currentAccess();
+      const site = cur.mode === 'site';
+      radios.forEach(function (r) { r.checked = r.value === cur.mode; });
+      accessPermEl.value = cur.perm === 'edit' ? 'edit' : 'read';
+      accessPermEl.disabled = !site;
       generalEl.classList.toggle('site', site);
-      generalIc.innerHTML = Icons.svg(site ? 'globe' : 'lock');
-      generalDesc.textContent = site
-        ? '這個站台上任何登入的使用者都能' + (note.accessPerm === 'edit' ? '編輯' : '檢視') + '這篇筆記。'
-        : '只有上面列出的使用者可以開啟。';
+      const what = single ? '這篇筆記' : '這些筆記';
+      siteDescEl.textContent = site
+        ? '這個網站上任何登入的人都能' + (cur.perm === 'edit' ? '編輯' : '檢視') + what + '。'
+        : '這個網站上任何登入的人都能開啟' + what + '。';
+      mixedEl.hidden = !!cur.mode;
+      mixedEl.textContent = cur.mode ? '' : '選取的筆記目前設定不一致，選一個就會全部套用。';
     }
-    function saveAccess() {
+    // 一篇一篇送：伺服器每次都是一個交易，而且失敗的只算數量、不中斷後面——一篇沒成功
+    // 不該讓另外九篇停在半路，哪幾篇沒成功後面會說。
+    function applyAccess(list, mode, perm) {
+      let failed = 0;
+      return list.reduce(function (p, n) {
+        return p.then(function () {
+          return Store.setAccess(n.id, mode, perm).then(function (r) {
+            n.access = r.access; n.accessPerm = r.accessPerm;
+            const s = state.notes.find(function (x) { return x.id === n.id; });
+            if (s && s !== n) { s.access = r.access; s.accessPerm = r.accessPerm; }
+          }).catch(function () { failed++; });
+        });
+      }, Promise.resolve()).then(function () { return failed; });
+    }
+    let saving = false;
+    function setBusy(v) {
+      saving = v;
+      radios.forEach(function (r) { r.disabled = v; });
+      accessPermEl.disabled = v || currentAccess().mode !== 'site';
+      if (batchCb) batchCb.disabled = v;
+    }
+    function saveAccess(mode, perm) {
+      if (saving) return;
       err('');
-      const mode = accessEl.value === 'site' ? 'site' : 'restricted';
-      const perm = accessPermEl.value === 'edit' ? 'edit' : 'read';
-      Store.setAccess(note.id, mode, perm).then(function (r) {
-        note.access = r.access; note.accessPerm = r.accessPerm;
-        const n = state.notes.find(function (x) { return x.id === note.id; });
-        if (n) { n.access = r.access; n.accessPerm = r.accessPerm; }
+      const list = targets();
+      if (!list.length) return;
+      setBusy(true);
+      applyAccess(list, mode, perm).then(function (failed) {
+        setBusy(false);
         paintGeneral();
-      }).catch(function (e) { err(e.message); paintGeneral(); });
+        if (failed) err(failed + ' 篇沒有套用成功（可能不是你的筆記，或是小說區的筆記）。');
+        else if (list.length > 1) toast('已套用到 ' + list.length + ' 篇筆記');
+        refreshViews();
+      });
     }
-    accessEl.addEventListener('change', saveAccess);
-    accessPermEl.addEventListener('change', saveAccess);
+    radios.forEach(function (r) {
+      r.addEventListener('change', function () {
+        if (!r.checked) return;
+        // 從「限制」切到「網站內所有人」預設給「可以編輯」：共用出去就是要一起弄，
+        // 想改成唯讀旁邊那個下拉隨時可以換。已經是 site 的則沿用它原本的權限。
+        if (r.value === 'site' && currentAccess().mode !== 'site') accessPermEl.value = 'edit';
+        saveAccess(r.value, accessPermEl.value);
+      });
+    });
+    accessPermEl.addEventListener('change', function () { saveAccess('site', accessPermEl.value); });
+    if (batchCb) {
+      // 勾起來就馬上把現在這篇的設定套過去（不是等按「完成」——這個對話框沒有「儲存」，
+      // 每一個動作都是立即生效，勾選框自己也該照這個規則）。
+      batchCb.addEventListener('change', function () {
+        if (!batchCb.checked) return;
+        const cur = currentAccess();
+        if (!cur.mode) return;
+        saveAccess(cur.mode, accessPermEl.value);
+      });
+    }
 
     function refresh() {
+      if (!single) return;     // 批次模式沒有「指定使用者」那一段
       Store.getShares(note.id).then(function (shares) {
         peopleEl.innerHTML = '';
         const ownerTag = document.createElement('span');
@@ -3647,21 +3771,29 @@
         refresh();
       }).catch(function (e) { err(e.message); });
     }
-    modal.querySelector('.share-add-btn').addEventListener('click', add);
-    userEl.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); add(); }
-      e.stopPropagation();
-    });
-    modal.querySelector('.share-link-btn').addEventListener('click', function () { copyNoteLink(note); });
+    if (single) {
+      modal.querySelector('.share-add-btn').addEventListener('click', add);
+      userEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); add(); }
+        e.stopPropagation();
+      });
+      modal.querySelector('.share-link-btn').addEventListener('click', function () { copyNoteLink(note); });
+    }
 
     function close() { overlay.remove(); document.removeEventListener('keydown', onKey, true); }
     function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
     document.addEventListener('keydown', onKey, true);
     overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) close(); });
     modal.querySelector('.modal-cancel').addEventListener('click', close);
-    setTimeout(function () { userEl.focus(); }, 30);
+    setTimeout(function () { if (userEl) userEl.focus(); }, 30);
     paintGeneral();
     refresh();
+  }
+  // 批次列的「共用」：一次把一般存取權套到所有勾起來的筆記
+  function batchShare() {
+    const notes = shareableSelection(null);
+    if (!notes.length) { toast('選取的項目裡沒有可以共用的筆記'); return; }
+    showShareDialog(null, notes);
   }
 
   // Removing myself from a share is done by the owner's endpoint — I can only ask
@@ -4414,6 +4546,7 @@
 
     // 批次操作列
     const bMove = $('#batch-move'); if (bMove) bMove.addEventListener('click', batchMove);
+    const bShare = $('#batch-share'); if (bShare) bShare.addEventListener('click', batchShare);
     const bDel = $('#batch-delete'); if (bDel) bDel.addEventListener('click', batchDelete);
     const bClr = $('#batch-clear'); if (bClr) bClr.addEventListener('click', clearSelection);
 

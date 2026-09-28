@@ -603,15 +603,43 @@ input, select, textarea { transition: border-color var(--dur-1) var(--ease-out),
 .share-role-select:hover, .share-access:hover, .share-access-perm:hover { background: var(--bg-3); }
 .share-role-select:focus, .share-access:focus, .share-access-perm:focus { border-color: var(--accent); }
 .share-role-select:disabled { opacity: .6; cursor: default; }
-.share-general { display: flex; align-items: center; gap: 10px; padding: 8px 4px; }
-.share-general-ic {
+/* 一般存取權：兩列寫明白的選項，不是一個下拉。下拉只有拉開才看得到「還有另一種」，
+   但這一段最重要的資訊就是「現在到底誰看得到」，那必須不用點就看得見。
+   整列都是 <label>（點哪裡都選得到），右邊的權限下拉刻意放在 label 外面——包在裡面時
+   點下拉會連帶觸發 label 的預設動作去選那顆 radio，兩個控制項會互相打架。 */
+.share-general { display: flex; flex-direction: column; gap: 2px; padding: 2px 0; }
+.share-opt-row { display: flex; align-items: center; gap: 8px; }
+.share-opt {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
+  padding: 8px 6px; cursor: pointer;
+}
+.share-opt:hover { background: var(--row-hover); }
+.share-opt input[type="radio"] { flex: 0 0 auto; width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.share-opt-ic {
   width: 28px; height: 28px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
   background: var(--bg-3); color: var(--text-dim);
 }
-.share-general-ic .ic-svg { width: 15px; height: 15px; }
-.share-general.site .share-general-ic { background: var(--success-weak); color: var(--success); }
-.share-general-body { flex: 1; min-width: 0; }
-.share-general-desc { font-size: var(--fs-xs); color: var(--text-faint); margin-top: 2px; padding-left: 6px; }
+.share-opt-ic .ic-svg { width: 15px; height: 15px; }
+/* 開放出去的那一列在生效時才變綠：一眼看出「現在是開著的」 */
+.share-general.site .share-opt-row:last-child .share-opt-ic { background: var(--success-weak); color: var(--success); }
+.share-opt-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.share-opt-title { font-size: var(--fs-base); font-weight: 600; }
+.share-opt-desc { font-size: var(--fs-xs); color: var(--text-faint); }
+.share-access-perm:disabled { opacity: .45; cursor: default; }
+/* 批次：目前設定不一致的說明，以及「同時套用到其他 N 篇」 */
+.share-mixed { font-size: var(--fs-xs); color: var(--text-dim); padding: 4px 6px 0; }
+.share-mixed[hidden] { display: none; }
+.share-batch {
+  display: flex; align-items: center; gap: 8px; margin-top: 8px;
+  padding: 8px 10px; background: var(--bg-2); font-size: var(--fs-sm); cursor: pointer;
+}
+.share-batch input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.share-batch-list { margin-top: 8px; max-height: 148px; overflow: auto; }
+.share-batch-item {
+  font-size: var(--fs-sm); color: var(--text-dim); padding: 4px 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.share-batch-item.is-more { color: var(--text-faint); }
 .share-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 18px; }
 .share-footer .btn { flex: 0 0 auto; }
 
@@ -820,16 +848,18 @@ mark.search-hit {
 .tree-row.selected .label { color: var(--accent); }
 
 /* 批次操作列（勾選後出現於樹狀清單上方）*/
+/* 抽屜只有 255px 寬，動作鈕一多（移動／共用／刪除／取消）就會把「已選 N 篇」擠成一個字。
+   讓整條可以換行、計數自己一行到底，動作鈕就掉到第二行去——不是把文字截掉。 */
 .batch-bar {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 4px 8px; flex-wrap: wrap;
   margin: 4px 12px 0; padding: 6px 8px 6px 10px;
   background: var(--accent-weak);
 }
 .batch-count {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  flex: 1 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   font-size: var(--fs-sm); font-weight: 600; color: var(--accent); white-space: nowrap;
 }
-.batch-actions { display: flex; gap: 4px; flex: 0 0 auto; }
+.batch-actions { display: flex; gap: 4px; flex: 0 0 auto; margin-left: auto; }
 .batch-btn {
   display: inline-flex; align-items: center; gap: 4px;
   border: none; background: transparent; color: var(--text);
@@ -881,6 +911,10 @@ mark.search-hit {
 .dash-row-act.on:hover { background: var(--accent-weak); }
 .dash-row-pin { display: inline-flex; flex: 0 0 auto; color: var(--accent); }
 .dash-row-pin .ic-svg { width: 12px; height: 12px; }
+/* 開放給網站內所有人的標記（js/dashboard.js、js/areabrowser.js）：跟釘選同一個位置與
+   尺寸，用 --success 是因為它是「已經開出去了」的狀態，不是警告。 */
+.dash-row-shared { display: inline-flex; flex: 0 0 auto; color: var(--success); }
+.dash-row-shared .ic-svg { width: 12px; height: 12px; }
 .dash-row-edit, .dash-folder-edit {
   min-width: 0; font: inherit; padding: 2px 6px;
   border: 1px solid var(--accent); background: var(--bg); color: var(--text); outline: none;

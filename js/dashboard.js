@@ -568,6 +568,13 @@
     const titleEl = el('span', 'dash-row-title', esc(note.title || '未命名筆記'));
     row.appendChild(titleEl);
     if (pinned) row.appendChild(el('span', 'dash-row-pin', ic('pin')));
+    // 開放給網站內所有人的筆記要看得出來：設定完就把對話框關掉了，清單上沒有任何標記
+    // 的話，等於沒辦法知道自己到底開放了哪幾篇（不小心開的那幾篇尤其重要）。
+    if ((note.access || 'restricted') === 'site') {
+      const g = el('span', 'dash-row-shared', ic('globe'));
+      g.title = '網站內所有人可以' + (note.accessPerm === 'edit' ? '編輯' : '檢視');
+      row.appendChild(g);
+    }
     const meta = el('span', 'dash-row-meta');
     if (k.label) meta.appendChild(el('span', 'dash-row-kind ' + k.cls, k.label));
     meta.appendChild(el('span', 'dash-row-time', esc(relTime(note.updatedAt))));

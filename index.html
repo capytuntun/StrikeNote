@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=167">
+  <link rel="stylesheet" href="app.css?v=168">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -174,6 +174,7 @@
         <span class="batch-count"></span>
         <div class="batch-actions">
           <button id="batch-move" class="batch-btn" type="button" title="移動所選項目到資料夾" data-icon="folder">移動</button>
+          <button id="batch-share" class="batch-btn" type="button" title="一次設定所選筆記的一般存取權（例如開放給網站內所有人）" data-icon="users">共用</button>
           <button id="batch-delete" class="batch-btn danger" type="button" title="刪除所選項目（資料夾直接刪除，筆記移到垃圾桶）" data-icon="trash">刪除</button>
           <button id="batch-clear" class="batch-btn ghost" type="button" title="取消選取" data-icon="x"></button>
         </div>
@@ -372,8 +373,8 @@
   <script src="js/seceditor.js?v=43"></script>
   <script src="js/perfreport.js?v=43"></script>
   <script src="js/sorting.js?v=1"></script>
-  <script src="js/dashboard.js?v=63"></script>
-  <script src="js/areabrowser.js?v=10"></script>
+  <script src="js/dashboard.js?v=64"></script>
+  <script src="js/areabrowser.js?v=11"></script>
   <script src="js/quicknotes.js?v=9"></script>
   <script src="js/annotate.js?v=42"></script>
   <script src="js/pdf.js?v=54"></script>
@@ -383,6 +384,6 @@
   <script src="js/imagelib.js?v=4"></script>
   <script src="js/linesync.js?v=7"></script>
   <script src="js/embedswitch.js?v=2"></script>
-  <script src="js/app.js?v=124"></script>
+  <script src="js/app.js?v=125"></script>
 </body>
 </html>
