@@ -446,6 +446,11 @@
       '.pdf-content .rm-edge-lbg { fill: #ffffff; stroke: #d0d7de; }',
       '.pdf-content .rm-edge-lbl { fill: #57606a; }',
       '.pdf-content .rm-arrowhead { fill: context-stroke; }',
+      /* 便條紙：紙本上還是一張紙，但用比較淡的暖黃（列印出來不會糊成一塊），
+         色帶壓深一點才印得出來。 */
+      '.pdf-content .rm-note .rm-note-paper { fill: #fbf3cf; stroke: #c9b678; stroke-width: 1; }',
+      '.pdf-content .rm-note .rm-note-band { fill: #d8bf6a; }',
+      '.pdf-content .rm-note .rm-note-txt { fill: #2b2a1f; }',
       '.pdf-content .rm-node.rm-red .rm-disc { stroke: #d6293e; } .pdf-content .rm-node.rm-red .rm-mono { fill: #d6293e; }',
       '.pdf-content .rm-node.rm-orange .rm-disc { stroke: #c9701c; } .pdf-content .rm-node.rm-orange .rm-mono { fill: #c9701c; }',
       '.pdf-content .rm-node.rm-yellow .rm-disc { stroke: #a68a00; } .pdf-content .rm-node.rm-yellow .rm-mono { fill: #a68a00; }',

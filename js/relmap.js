@@ -30,11 +30,21 @@
 
   // ---------------- DSL：剖析 / 序列化 ----------------------------------------
   // 一行一個 token：`"引號內含空白"` 當一個 token，其餘以空白分隔。
+  // 引號裡允許 \" 、\\ 與 \n（便條紙的換行）三種跳脫，其餘反斜線原樣保留——舊圖裡的
+  // "C:\path\to" 不能被當成跳脫而變成 "C:pathto"。原本的 tokenize 連 \" 都讀不回來
+  // （[^"]* 碰到第一個引號就停），標籤裡有引號的圖存檔後會壞掉；便條紙是整段自由
+  // 文字，踩到的機會更高。
+  // 跳脫與反解必須是同一層的一對一動作（見 quote）：換行本來是先包成 \n、再讓 quote
+  // 把那個反斜線又跳脫一次（存成 \\n），兩層疊起來就不可逆——文字裡原本就有的
+  // "C:\new" 讀回來會變成換行。
+  function unescapeStr(s) {
+    return String(s).replace(/\\(["\\n])/g, function (m, c) { return c === 'n' ? '\n' : c; });
+  }
   function tokenize(line) {
     const out = [];
-    const re = /"([^"]*)"|(\S+)/g;
+    const re = /"((?:[^"\\]|\\.)*)"|(\S+)/g;
     let m;
-    while ((m = re.exec(line))) out.push(m[1] !== undefined ? m[1] : m[2]);
+    while ((m = re.exec(line))) out.push(m[1] !== undefined ? unescapeStr(m[1]) : m[2]);
     return out;
   }
   function attrsOf(tokens) {
@@ -45,14 +55,19 @@
     });
     return a;
   }
-  function quote(s) { return '"' + String(s || '').replace(/"/g, '\\"') + '"'; }
+  // 便條紙是多行的，但 DSL 一行一個項目，所以換行寫成兩個字元的 \n，跟 \" 、\\ 同一層。
+  function quote(s) {
+    return '"' + String(s || '').replace(/\r\n?/g, '\n').replace(/([\\"])/g, '\\$1').replace(/\n/g, '\\n') + '"';
+  }
 
   // 連線要往哪邊彎：沒寫就照雜湊自動決定（見 edgeGeometry），寫了就聽使用者的。
   // 方向是相對「從 from 往 to 看過去」的左右，straight 則是直線。
   const BENDS = { left: 1, right: 1, straight: 1 };
+  // 便條紙的預設寬度（DSL 的 w=），高度一律由文字換行後的行數算出來。
+  const NOTE_W = 190, NOTE_MIN_W = 90, NOTE_PAD = 10, NOTE_LH = 17, NOTE_FS = 12;
 
   function parse(text) {
-    const nodes = [], edges = [];
+    const nodes = [], edges = [], notes = [];
     String(text || '').split('\n').forEach(function (raw) {
       const line = raw.trim();
       if (!line || line[0] === '#') return;
@@ -71,9 +86,17 @@
         if (rest.length && rest[0].indexOf('=') < 0) { label = rest[0]; rest = rest.slice(1); }
         const ea = attrsOf(rest);
         edges.push({ from: t[1], to: t[2], label: label, bend: BENDS[ea.bend] ? ea.bend : '' });
+      } else if (t[0] === 'note' && t[1]) {
+        // 便條紙：畫布上的自由備註，不跟任何節點相連。
+        const na = attrsOf(t.slice(3));
+        notes.push({
+          id: t[1], text: t[2] || '',
+          x: na.x ? parseFloat(na.x) : 0, y: na.y ? parseFloat(na.y) : 0,
+          w: na.w ? Math.max(NOTE_MIN_W, parseFloat(na.w) || NOTE_W) : NOTE_W
+        });
       }
     });
-    return { nodes: nodes, edges: edges };
+    return { nodes: nodes, edges: edges, notes: notes };
   }
 
   function serialize(model) {
@@ -82,6 +105,12 @@
       let l = 'node ' + n.id + ' ' + quote(n.label) + ' x=' + Math.round(n.x) + ' y=' + Math.round(n.y);
       if (n.color) l += ' color=' + n.color;
       if (n.shape) l += ' shape=' + n.shape;
+      lines.push(l);
+    });
+    (model.notes || []).forEach(function (n) {
+      let l = 'note ' + n.id + ' ' + quote(n.text) +
+        ' x=' + Math.round(n.x) + ' y=' + Math.round(n.y);
+      if (Math.round(n.w || NOTE_W) !== NOTE_W) l += ' w=' + Math.round(n.w);
       lines.push(l);
     });
     model.edges.forEach(function (e) {
@@ -118,6 +147,32 @@
     return model.nodes.map(function (n) {
       const s = nodeSize(n);
       return { id: n.id, label: n.label, x: n.x, y: n.y, w: s.w, h: s.h, color: n.color, shape: n.shape };
+    });
+  }
+  // 便條紙的文字換行：先照使用者自己打的換行切段，每段再依估出來的字寬塞滿一行就折。
+  // 跟節點標籤同一招（textWidth 估寬，不量真的 DOM），所以螢幕、PDF、電子書算出來
+  // 的行數一致，高度也就一致。
+  function wrapNote(text, w) {
+    const max = Math.max(20, (w || NOTE_W) - NOTE_PAD * 2);
+    const out = [];
+    String(text || '').split('\n').forEach(function (para) {
+      let line = '';
+      for (const ch of para) {
+        if (textWidth(line + ch) > max && line) { out.push(line); line = ch; }
+        else line += ch;
+      }
+      out.push(line);
+    });
+    return out.length ? out : [''];
+  }
+  function noteSize(n) {
+    const lines = wrapNote(n.text, n.w);
+    return { w: n.w || NOTE_W, h: NOTE_PAD * 2 + lines.length * NOTE_LH, lines: lines };
+  }
+  function sizedNotes(model) {
+    return (model.notes || []).map(function (n) {
+      const s = noteSize(n);
+      return { id: n.id, text: n.text, x: n.x, y: n.y, w: s.w, h: s.h, lines: s.lines };
     });
   }
   function bbox(nodes) {
@@ -211,6 +266,19 @@
     }
     return s + '</g>';
   }
+  // 便條紙：一張紙 + 左上角一條色帶（跟課程筆記的便條紙同一個語彙）+ 逐行文字。
+  // 顏色一樣走 CSS class，pdf.js 才能在列印文件裡換成紙本配色。
+  function noteSVG(n, ox, oy, idx, selected) {
+    const x = n.x + ox, y = n.y + oy;
+    let s = '<g class="rm-note' + (selected ? ' rm-sel' : '') + '" data-n="' + idx + '">' +
+      '<rect class="rm-note-paper" x="' + x + '" y="' + y + '" width="' + n.w + '" height="' + n.h + '" rx="2"></rect>' +
+      '<rect class="rm-note-band" x="' + x + '" y="' + y + '" width="' + n.w + '" height="4" rx="2"></rect>';
+    n.lines.forEach(function (ln, i) {
+      s += '<text class="rm-note-txt" x="' + (x + NOTE_PAD) + '" y="' + (y + NOTE_PAD + 4 + i * NOTE_LH + NOTE_FS) + '">' +
+        esc(ln) + '</text>';
+    });
+    return s + '</g>';
+  }
   function markerDef(id) {
     return '<defs><marker id="' + id + '" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
       '<path d="M0,0L10,5L0,10z" class="rm-arrowhead"></path></marker></defs>';
@@ -218,10 +286,12 @@
 
   function renderSVG(text, sel) {
     const model = parse(text);
-    if (!model.nodes.length) return '';
+    const notes = sizedNotes(model);
+    // 只有便條紙、沒有節點的圖也要畫得出來（先貼幾張備註再開始連線是很自然的順序）
+    if (!model.nodes.length && !notes.length) return '';
     const nodes = sizedNodes(model);
     const byId = {}; nodes.forEach(function (n) { byId[n.id] = n; });
-    const box = bbox(nodes);
+    const box = bbox(nodes.concat(notes));
     const PAD = 28;
     const ox = PAD - box.minX, oy = PAD - box.minY;
     const W = Math.max(1, box.maxX - box.minX) + PAD * 2, H = Math.max(1, box.maxY - box.minY) + PAD * 2;
@@ -234,8 +304,12 @@
     const nodesSVG = nodes.map(function (n, i) {
       return nodeSVG(n, ox, oy, i, sel && sel.type === 'node' && sel.i === i);
     }).join('');
+    // 便條紙畫在最底層：它是背景上的備註，不該蓋住線跟節點
+    const notesSVG = notes.map(function (n, i) {
+      return noteSVG(n, ox, oy, i, sel && sel.type === 'note' && sel.i === i);
+    }).join('');
     return '<svg class="relmap-svg" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">' +
-      markerDef('rm-arrow') + edgesSVG + nodesSVG + '</svg>';
+      markerDef('rm-arrow') + notesSVG + edgesSVG + nodesSVG + '</svg>';
   }
 
 
@@ -576,6 +650,7 @@
       '<button class="btn btn-ghost rm-redo" type="button" title="重做 (Ctrl+Shift+Z)">' + ic('redo') + '</button>' +
       '<span class="rm-bar-sep"></span>' +
       '<button class="btn btn-ghost rm-add" type="button" title="在畫面中央新增一個節點（也可以雙擊空白處）">' + ic('plus') + ' 節點</button>' +
+      '<button class="btn btn-ghost rm-note-btn" type="button" title="在畫面中央貼一張便條紙，寫備註用（雙擊便條紙可以改字）">' + ic('sticky-note') + ' 便條紙</button>' +
       '<button class="btn btn-ghost rm-color" type="button" title="選取一個節點後可以換它的顏色" disabled>' + ic('grid') + ' 顏色</button>' +
       '<button class="btn btn-ghost rm-csv" type="button" title="匯入 CSV、下載 CSV 範本、把目前的圖匯出成 CSV">' + ic('table') + ' CSV ' + ic('chevron-down') + '</button>' +
       '<button class="btn btn-ghost rm-layout" type="button" title="用力導向把所有節點重新排開">' + ic('wand') + ' 自動排版</button>' +
@@ -609,21 +684,43 @@
         markerEnd: { type: 'arrowclosed', color: EDGE_HEX[k], width: 18, height: 18 }
       };
     }
+    // 便條紙跟節點都住在 React Flow 的同一個 nodes 陣列裡，用 type 分。RF 的 id 加
+    // 'note:' 前綴，這樣便條紙的 id 跟節點的 id 就算撞名也不會互相蓋掉。
+    const NOTE_PREFIX = 'note:';
+    function rfNote(n) {
+      return {
+        id: NOTE_PREFIX + n.id, type: 'sticky', position: { x: n.x, y: n.y },
+        data: { text: n.text || '', w: n.w || NOTE_W }, style: { width: n.w || NOTE_W },
+        // 壓在節點與連線下面，跟靜態 SVG 一樣（noteSVG 畫在最底層）：便條紙是背景上的
+        // 備註，畫布上看到的疊法要跟預覽／PDF 印出來的一致
+        zIndex: -1, connectable: false
+      };
+    }
+    function isNoteNode(n) { return n.type === 'sticky'; }
     function currentModel() {
       return {
-        nodes: latestNodes.map(function (n) { return { id: n.id, label: n.data.label || '', x: n.position.x, y: n.position.y, color: n.data.color || '', shape: '' }; }),
-        edges: latestEdges.map(function (e) { return { from: e.source, to: e.target, label: e.label || '', bend: (e.data && e.data.bend) || '' }; })
+        nodes: latestNodes.filter(function (n) { return !isNoteNode(n); }).map(function (n) {
+          return { id: n.id, label: n.data.label || '', x: n.position.x, y: n.position.y, color: n.data.color || '', shape: '' };
+        }),
+        edges: latestEdges.map(function (e) { return { from: e.source, to: e.target, label: e.label || '', bend: (e.data && e.data.bend) || '' }; }),
+        notes: latestNodes.filter(isNoteNode).map(function (n) {
+          return { id: n.id.slice(NOTE_PREFIX.length), text: n.data.text || '', x: n.position.x, y: n.position.y, w: n.data.w || NOTE_W };
+        })
       };
     }
     function setAll(model) {
-      latestNodes = model.nodes.map(rfNode);
+      latestNodes = model.nodes.map(rfNode).concat((model.notes || []).map(rfNote));
       latestEdges = model.edges.map(rfEdge);
       if (bound) { bound.setNodes(latestNodes); bound.setEdges(latestEdges); }
       refreshChrome();
     }
     function applyNodes(fn) { const next = fn(latestNodes); latestNodes = next; if (bound) bound.setNodes(next); refreshChrome(); }
     function applyEdges(fn) { const next = fn(latestEdges); latestEdges = next; if (bound) bound.setEdges(next); }
-    (function () { const m = parse(text); latestNodes = m.nodes.map(rfNode); latestEdges = m.edges.map(rfEdge); })();
+    (function () {
+      const m = parse(text);
+      latestNodes = m.nodes.map(rfNode).concat((m.notes || []).map(rfNote));
+      latestEdges = m.edges.map(rfEdge);
+    })();
 
     // ---- 存檔／復原 ----
     let saveTimer = null, dirty = false;
@@ -646,7 +743,9 @@
     }
     function doUndo() { if (!undo.length) return; redo.push(serialize(currentModel())); setAll(parse(undo.pop())); changed(); updateUndoBtns(); }
     function doRedo() { if (!redo.length) return; undo.push(serialize(currentModel())); setAll(parse(redo.pop())); changed(); updateUndoBtns(); }
-    function selectedNode() { return latestNodes.find(function (n) { return n.selected; }); }
+    // 顏色只對「節點」有意義，便條紙不算——不然選了一張紙，顏色鈕會亮著卻改不了東西
+    function selectedNode() { return latestNodes.find(function (n) { return n.selected && !isNoteNode(n); }); }
+    function selectedNote() { return latestNodes.find(function (n) { return n.selected && isNoteNode(n); }); }
     function refreshChrome() {
       colorBtn.disabled = !selectedNode();
       host.querySelector('.rm-empty').hidden = !!latestNodes.length;
@@ -689,7 +788,16 @@
           labelShowBg: true, labelBgStyle: { fill: '#1c2331', stroke: '#2a3242' }, labelBgPadding: [7, 3], labelBgBorderRadius: 9
         });
       }
-      const nodeTypes = { disc: DiscNode }, edgeTypes = { floating: FloatingEdge };
+      // 便條紙：畫布上的自由備註。沒有 Handle，所以連不到它、也拉不出線——它不是
+      // 圖的一部分，只是貼在旁邊的一張紙。
+      function StickyNode(p) {
+        const d = p.data;
+        return h('div', { className: 'rm-rf-note' + (p.selected ? ' is-sel' : ''), style: { width: (d.w || NOTE_W) + 'px' } },
+          h('div', { className: 'rm-rf-note-band' }),
+          h('div', { className: 'rm-rf-note-text' }, d.text || '（雙擊輸入備註）')
+        );
+      }
+      const nodeTypes = { disc: DiscNode, sticky: StickyNode }, edgeTypes = { floating: FloatingEdge };
 
       function Flow() {
         const ns = RF.useNodesState(latestNodes), es = RF.useEdgesState(latestEdges);
@@ -734,7 +842,9 @@
               undo.push(before); if (undo.length > 100) undo.shift(); redo.length = 0; updateUndoBtns(); changed();
             }, 0);
           },
-          onNodeDoubleClick: function (ev, node) { openInput(node.id); },
+          onNodeDoubleClick: function (ev, node) {
+            if (node.type === 'sticky') openNoteInput(node.id); else openInput(node.id);
+          },
           onEdgeDoubleClick: function (ev, edge) { openEdgeInput(edge.id, ev.clientX, ev.clientY); },
           // 右鍵選連線的彎法（雙擊仍然是改文字）
           onEdgeContextMenu: function (ev, edge) { ev.preventDefault(); bendMenu(edge.id, ev.clientX, ev.clientY); },
@@ -748,7 +858,7 @@
           h(RF.Controls, { position: 'bottom-left' }),
           h(RF.MiniMap, {
             position: 'bottom-right', pannable: true, zoomable: true,
-            nodeColor: function (n) { return nodeHex(n.id, n.data && n.data.color); },
+            nodeColor: function (n) { return n.type === 'sticky' ? '#e0c674' : nodeHex(n.id, n.data && n.data.color); },
             nodeStrokeWidth: 0, nodeBorderRadius: 40, maskColor: 'rgba(15, 19, 26, .62)'
           })
         );
@@ -830,6 +940,64 @@
         else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
       });
       el.addEventListener('blur', function () { finish(true); });
+    }
+    // 便條紙是多行的，所以用 textarea 疊在那張紙上，而不是上面那個單行 .rm-input：
+    // Enter 要能換行，離開（blur / Esc）才收。
+    function openNoteInput(rfId) {
+      closeInput();
+      const node = latestNodes.find(function (n) { return n.id === rfId; });
+      const el = rootEl.querySelector('.react-flow__node[data-id="' + cssEsc(rfId) + '"] .rm-rf-note');
+      if (!node || !el) return;
+      const r = el.getBoundingClientRect();
+      const ta = document.createElement('textarea');
+      ta.className = 'rm-input rm-note-input';
+      ta.value = node.data.text || '';
+      ta.placeholder = '備註…';
+      ta.style.left = Math.max(4, r.left) + 'px';
+      ta.style.top = r.top + 'px';
+      ta.style.width = r.width + 'px';
+      ta.style.height = Math.max(r.height, 56) + 'px';
+      host.appendChild(ta);
+      input = ta;
+      ta.focus(); ta.select();
+      let done = false;
+      function finish(save) {
+        if (done) return; done = true;
+        const v = ta.value;
+        if (input === ta) input = null;
+        ta.remove();
+        if (!save || v === (node.data.text || '')) return;
+        snapshot();
+        applyNodes(function (list) {
+          return list.map(function (n) { return n.id === rfId ? Object.assign({}, n, { data: Object.assign({}, n.data, { text: v }) }) : n; });
+        });
+        changed();
+      }
+      ta.addEventListener('keydown', function (e) {
+        e.stopPropagation();   // 別讓畫布的 Delete／Ctrl+Z 之類的快捷鍵吃掉打字
+        if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      });
+      ta.addEventListener('blur', function () { finish(true); });
+    }
+    // 在畫面中央貼一張便條紙，貼完直接進入編輯
+    function addNoteAt(clientX, clientY) {
+      if (!bound) return;
+      const p = bound.rf.screenToFlowPosition({ x: clientX, y: clientY });
+      const n = { id: newNoteId(), text: '', x: Math.round(p.x - NOTE_W / 2), y: Math.round(p.y - 30), w: NOTE_W };
+      snapshot();
+      applyNodes(function (list) {
+        return list.map(function (x) { return x.selected ? Object.assign({}, x, { selected: false }) : x; })
+          .concat([Object.assign(rfNote(n), { selected: true })]);
+      });
+      changed();
+      setTimeout(function () { openNoteInput(NOTE_PREFIX + n.id); }, 80);
+    }
+    function newNoteId() {
+      const used = {};
+      latestNodes.forEach(function (n) { if (isNoteNode(n)) used[n.id.slice(NOTE_PREFIX.length)] = 1; });
+      let i = 1;
+      while (used['m' + i]) i++;
+      return 'm' + i;
     }
     function closeInput() { if (input) { const el = input; input = null; el.blur(); } }
     function cssEsc(s) { return (global.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/"/g, '\\"'); }
@@ -977,7 +1145,13 @@
     // ---- 鍵盤：Delete／Backspace 交給 React Flow；這裡只管復原、F2 ----
     function onKey(e) {
       if (input || e.target === titleEl) return;
-      if (e.key === 'F2') { const s = selectedNode(); if (s) { e.preventDefault(); openInput(s.id); } return; }
+      if (e.key === 'F2') {
+        const s = selectedNode();
+        if (s) { e.preventDefault(); openInput(s.id); return; }
+        const m = selectedNote();
+        if (m) { e.preventDefault(); openNoteInput(m.id); }
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) doRedo(); else doUndo(); }
     }
     host.addEventListener('keydown', onKey);
@@ -986,6 +1160,10 @@
     host.querySelector('.rm-add').addEventListener('click', function () {
       const r = canvas.getBoundingClientRect();
       addNodeAt(r.left + r.width / 2, r.top + r.height / 2);
+    });
+    host.querySelector('.rm-note-btn').addEventListener('click', function () {
+      const r = canvas.getBoundingClientRect();
+      addNoteAt(r.left + r.width / 2, r.top + r.height / 2);
     });
     colorBtn.addEventListener('click', colorMenu);
     host.querySelector('.rm-csv').addEventListener('click', csvMenu);

@@ -2953,6 +2953,15 @@ select.sec-info-input { cursor: pointer; }
 /* 選取色排在所有顏色 class 之後，同特定度靠來源順序贏，不用 !important */
 .rm-node.rm-sel .rm-disc { stroke: var(--accent); stroke-width: 4; }
 
+/* 便條紙（唯讀渲染）＝一張紙 + 上緣一條色帶 + 逐行文字。深色畫布上刻意畫成「紙」的
+   樣子（暖黃紙、深色字），一眼就跟節點／連線分得開；顏色寫在 class 上，pdf.js 才能在
+   列印文件裡換成紙本配色。高度由 js 依換行後的行數算出來，字級必須跟 relmap.js 的
+   NOTE_FS（12px）一致，不然換行估的行數跟畫出來的不一樣，紙會裝不住字。 */
+.rm-note .rm-note-paper { fill: #f6e7ad; stroke: #cdb268; stroke-width: 1; }
+.rm-note .rm-note-band { fill: #e0c674; }
+.rm-note .rm-note-txt { fill: #2b2a1f; font-size: 12px; font-weight: 500; white-space: pre; }
+.rm-note.rm-sel .rm-note-paper { stroke: var(--accent); stroke-width: 2.5; }
+
 /* 連線：彎的虛線，橘棕為主（.rm-e0～e4）、零星藍紅紫青（.rm-e5～e8），箭頭跟著線的
    顏色（context-stroke；不支援的瀏覽器退回 .rm-arrowhead 的屬性色）。.rm-hit 是一條
    看不見的粗底線，讓細虛線好點選。 */
@@ -3048,6 +3057,21 @@ select.sec-info-input { cursor: pointer; }
 .rm-rf-node:hover .rm-rf-source, .rm-rf-node.is-sel .rm-rf-source { opacity: 1; }
 .rm-rf-root .react-flow__handle.rm-rf-source:hover { background: var(--accent); border-color: #fff; opacity: 1; }
 .rm-rf-root .react-flow__edge { cursor: pointer; }
+/* 便條紙（編輯器裡的 React Flow 節點）：跟靜態 SVG 同一張紙，換成 DOM。寬度由 js 給
+   （DSL 的 w=），高度自己長——兩邊的字級／行高／內距一致，所以看起來一樣高。沒有 Handle，
+   連不到它也拉不出線：它不是圖的一部分，只是貼在旁邊的一張紙。 */
+.rm-rf-note {
+  position: relative; box-sizing: border-box; min-height: 34px; cursor: grab;
+  padding: 10px; padding-top: 14px; background: #f6e7ad; border: 1px solid #cdb268;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .45);
+}
+.rm-rf-note-band { position: absolute; left: 0; right: 0; top: 0; height: 4px; background: #e0c674; }
+.rm-rf-note-text {
+  font-size: 12px; line-height: 17px; font-weight: 500; color: #2b2a1f;
+  white-space: pre-wrap; overflow-wrap: anywhere; user-select: none;
+}
+.rm-rf-note:hover { box-shadow: 0 3px 10px rgba(0, 0, 0, .45), 0 0 0 2px rgba(255, 255, 255, .18); }
+.rm-rf-note.is-sel { box-shadow: 0 3px 10px rgba(0, 0, 0, .45), 0 0 0 2px var(--accent); }
 .rm-drop {
   position: absolute; inset: 12px; z-index: 6; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
   border: 2px dashed var(--accent); background: rgba(46, 108, 246, .12); color: var(--rm-text); font-weight: 600; pointer-events: none;
@@ -3074,6 +3098,13 @@ select.sec-info-input { cursor: pointer; }
   border: 2px solid var(--accent); border-radius: 4px; background: var(--rm-lbg); color: var(--rm-text);
   outline: none; box-shadow: 0 4px 14px rgba(0, 0, 0, .4);
 }
+/* 便條紙的輸入框是 textarea（Enter 換行，離開才收），所以文字靠左、可以捲動，
+   而且字級／行高要跟紙上的文字一樣，打字時看起來才是在同一張紙上改。 */
+.rm-input.rm-note-input {
+  padding: 8px 9px; text-align: left; font-size: 12px; line-height: 17px; font-weight: 500;
+  background: #fff7d6; color: #2b2a1f; resize: none; overflow: auto;
+}
+.rm-input.rm-note-input::placeholder { color: #8a8266; }
 /* 工具列的兩個浮層：顏色盤（圓形色板，「自動」那格是斜紋）跟 CSV 選單 */
 .rm-colors {
   position: fixed; z-index: 2100; display: flex; flex-wrap: wrap; gap: 7px; width: 148px;
