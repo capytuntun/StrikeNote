@@ -3091,6 +3091,13 @@ select.sec-info-input { cursor: pointer; }
 .rm-rf-node:hover .rm-rf-source, .rm-rf-node.is-sel .rm-rf-source { opacity: 1; }
 .rm-rf-root .react-flow__handle.rm-rf-source:hover { background: var(--accent); border-color: #fff; opacity: 1; }
 .rm-rf-root .react-flow__edge { cursor: pointer; }
+/* 點一下節點：跟它有關的線跟點標出來（relmap.js Flow 的 focus）。相連的線與另一頭的
+   節點是 .rm-near／.rm-hi（維持原樣、線加粗——粗細是 inline，在 FloatingEdge 決定），
+   其餘的 .rm-dim 整片壓暗。透明度掛在 RF 的外框上，圓盤、標籤、把手一起暗。 */
+.rm-rf-root .react-flow__node.rm-dim { opacity: .22; transition: opacity .12s; }
+.rm-rf-root .react-flow__node.rm-near { transition: opacity .12s; }
+.rm-rf-root .react-flow__edge.rm-dim { opacity: .12; transition: opacity .12s; }
+.rm-rf-root .react-flow__edge.rm-hi { opacity: 1; }
 /* 便條紙（編輯器裡的 React Flow 節點）：跟靜態 SVG 同一張紙，換成 DOM。寬度由 js 給
    （DSL 的 w=），高度自己長——兩邊的字級／行高／內距一致，所以看起來一樣高。沒有 Handle，
    連不到它也拉不出線：它不是圖的一部分，只是貼在旁邊的一張紙。 */

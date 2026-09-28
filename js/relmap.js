@@ -780,9 +780,13 @@
         function box(n) { return { x: n.internals.positionAbsolute.x, y: n.internals.positionAbsolute.y, w: n.measured.width || (R * 2 + 8), h: n.measured.height || (R * 2 + LABEL_H) }; }
         const g = edgeGeometry(box(s), box(t), hash(p.source + '|' + p.target), p.data && p.data.bend);
         const hex = EDGE_HEX[(p.data && p.data.k) || 0];
+        // data.hi：連到目前選取節點的線（Flow 的 focus 算出來的），畫粗一點；寬度是 inline
+        // style，CSS 蓋不掉，所以在這裡決定。
+        const hi = !!(p.data && p.data.hi);
         return h(RF.BaseEdge, {
           id: p.id, path: pathD(g, 0, 0), markerEnd: p.markerEnd, interactionWidth: 18,
-          style: p.selected ? { stroke: '#4c8dff', strokeWidth: 2.5 } : { stroke: hex, strokeWidth: 1.6, strokeDasharray: '6 4', strokeLinecap: 'round' },
+          style: p.selected ? { stroke: '#4c8dff', strokeWidth: 2.5 }
+            : { stroke: hex, strokeWidth: hi ? 2.6 : 1.6, strokeDasharray: '6 4', strokeLinecap: 'round' },
           label: p.label || undefined, labelX: g.mid.x, labelY: g.mid.y,
           labelStyle: { fill: '#9aa4b5', fontSize: 11, fontWeight: 600 },
           labelShowBg: true, labelBgStyle: { fill: '#1c2331', stroke: '#2a3242' }, labelBgPadding: [7, 3], labelBgBorderRadius: 9
@@ -829,8 +833,38 @@
           snapshot(); pendingChange = true;
           setEdges(function (list) { return list.concat([rfEdge({ from: c.source, to: c.target, label: '' })]); });
         }, []);
+        // 點一下節點＝把跟它有關的標出來：連到它的線加粗、另一頭的節點維持原樣，其餘整片
+        // 調暗（跟關聯圖同一套）。選取本身是 React Flow 的（node.selected），這裡只是從
+        // 「現在選了誰」推出一份焦點集合，再以 className／data.hi 掛到要餵給 RF 的那份
+        // 副本上——state 裡的 nodes/edges 不動，currentModel() 讀的還是原本那份，DSL 不會
+        // 因為誰被選到而多出任何東西。沒有選取時直接回傳原陣列（同一個參照），RF 不用重算。
+        const focus = RE.useMemo(function () {
+          const sel = {};
+          let any = false;
+          nodes.forEach(function (n) { if (n.selected && !isNoteNode(n)) { sel[n.id] = true; any = true; } });
+          if (!any) return null;
+          const near = Object.assign({}, sel), hi = {};
+          edges.forEach(function (e) {
+            if (sel[e.source] || sel[e.target]) { hi[e.id] = true; near[e.source] = true; near[e.target] = true; }
+          });
+          return { near: near, hi: hi };
+        }, [nodes, edges]);
+        const viewNodes = RE.useMemo(function () {
+          if (!focus) return nodes;
+          return nodes.map(function (n) {
+            if (isNoteNode(n)) return n;                       // 便條紙是備註，不參與、也不調暗
+            return Object.assign({}, n, { className: focus.near[n.id] ? 'rm-near' : 'rm-dim' });
+          });
+        }, [nodes, focus]);
+        const viewEdges = RE.useMemo(function () {
+          if (!focus) return edges;
+          return edges.map(function (e) {
+            const on = !!focus.hi[e.id];
+            return Object.assign({}, e, { className: on ? 'rm-hi' : 'rm-dim', data: Object.assign({}, e.data, { hi: on }) });
+          });
+        }, [edges, focus]);
         return h(RF.ReactFlow, {
-          nodes: nodes, edges: edges, nodeTypes: nodeTypes, edgeTypes: edgeTypes,
+          nodes: viewNodes, edges: viewEdges, nodeTypes: nodeTypes, edgeTypes: edgeTypes,
           onNodesChange: handleNodes, onEdgesChange: handleEdges, onConnect: onConnect,
           onNodeDragStart: function () { dragSnap.current = serialize(currentModel()); },
           onNodeDragStop: function () {
@@ -1150,6 +1184,16 @@
         if (s) { e.preventDefault(); openInput(s.id); return; }
         const m = selectedNote();
         if (m) { e.preventDefault(); openNoteInput(m.id); }
+        return;
+      }
+      // Esc：取消選取（連帶收掉「相關的線跟點」那片調暗）。RF 自己不處理 Esc。
+      if (e.key === 'Escape' && bound) {
+        const anyN = latestNodes.some(function (n) { return n.selected; });
+        const anyE = latestEdges.some(function (x) { return x.selected; });
+        if (!anyN && !anyE) return;
+        e.preventDefault();
+        if (anyN) applyNodes(function (list) { return list.map(function (n) { return n.selected ? Object.assign({}, n, { selected: false }) : n; }); });
+        if (anyE) applyEdges(function (list) { return list.map(function (x) { return x.selected ? Object.assign({}, x, { selected: false }) : x; }); });
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) doRedo(); else doUndo(); }
