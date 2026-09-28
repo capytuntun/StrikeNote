@@ -47,6 +47,10 @@
   }
   function quote(s) { return '"' + String(s || '').replace(/"/g, '\\"') + '"'; }
 
+  // 連線要往哪邊彎：沒寫就照雜湊自動決定（見 edgeGeometry），寫了就聽使用者的。
+  // 方向是相對「從 from 往 to 看過去」的左右，straight 則是直線。
+  const BENDS = { left: 1, right: 1, straight: 1 };
+
   function parse(text) {
     const nodes = [], edges = [];
     String(text || '').split('\n').forEach(function (raw) {
@@ -62,10 +66,11 @@
         });
       } else if (t[0] === 'edge' && t[1] && t[2]) {
         // 標籤是第 4 個 token，但只在它不是 key=value 的時候算——沒有標籤時
-        // edge 後面可能直接接 style=... 這種屬性。
+        // edge 後面可能直接接 bend=... 這種屬性。
         let label = '', rest = t.slice(3);
         if (rest.length && rest[0].indexOf('=') < 0) { label = rest[0]; rest = rest.slice(1); }
-        edges.push({ from: t[1], to: t[2], label: label });
+        const ea = attrsOf(rest);
+        edges.push({ from: t[1], to: t[2], label: label, bend: BENDS[ea.bend] ? ea.bend : '' });
       }
     });
     return { nodes: nodes, edges: edges };
@@ -82,6 +87,9 @@
     model.edges.forEach(function (e) {
       let l = 'edge ' + e.from + ' ' + e.to;
       if (e.label) l += ' ' + quote(e.label);
+      // 沒有標籤時寫成 `edge a b bend=left`，parse 那邊靠「第一個 token 有沒有 =」
+      // 分辨標籤與屬性，所以這樣也讀得回來。
+      if (e.bend) l += ' bend=' + e.bend;
       lines.push(l);
     });
     return lines.join('\n');
@@ -134,15 +142,20 @@
   function edgeColorClass(e) { return 'rm-e' + (hash(e.from + '|' + e.to) % EDGE_COLORS); }
 
   // 連線的幾何：兩端停在圓盤邊緣（留 3px 給箭頭），中間是二次貝茲曲線，控制點
-  // 從連線中點往垂直方向偏，偏移量隨線長縮放、方向照雜湊奇偶決定，整張圖的線才
-  // 會有的往左彎有的往右彎。mid 是曲線 t=0.5 的點，標籤跟就地編輯框都放那裡。
-  function edgeGeometry(a, b, seed) {
+  // 從連線中點往垂直方向偏，偏移量隨線長縮放。mid 是曲線 t=0.5 的點，標籤跟就地
+  // 編輯框都放那裡。
+  // 方向：DSL 有寫 bend=left|right|straight 就聽它的，沒寫才照雜湊奇偶自動分配
+  // （這樣整張圖有的往左有的往右，而且同一張圖每次畫都一樣、不會跳動）。
+  // 「左右」是站在 from 往 to 看的左右：螢幕的 y 軸向下，所以把 (ux,uy) 轉 90° 得到
+  // 的 (-uy,ux) 在畫面上指向行進方向的右手邊，right 取正、left 取負。
+  function edgeGeometry(a, b, seed, bend) {
     const ca = center(a), cb = center(b);
     const dx = cb.x - ca.x, dy = cb.y - ca.y;
     const len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
     const ux = dx / len, uy = dy / len;
-    const bend = (seed % 2 === 0 ? 1 : -1) * Math.min(len * 0.18, 60);
-    const c = { x: (ca.x + cb.x) / 2 - uy * bend, y: (ca.y + cb.y) / 2 + ux * bend };
+    const dir = bend === 'right' ? 1 : bend === 'left' ? -1 : (seed % 2 === 0 ? 1 : -1);
+    const off = bend === 'straight' ? 0 : dir * Math.min(len * 0.18, 60);
+    const c = { x: (ca.x + cb.x) / 2 - uy * off, y: (ca.y + cb.y) / 2 + ux * off };
     // 起終點：從圓心朝控制點方向走 R，這樣曲線離開圓盤的方向才跟弧線一致
     function edgePoint(cen, toward) {
       const vx = toward.x - cen.x, vy = toward.y - cen.y;
@@ -184,7 +197,7 @@
       esc(n.label || '（未命名）') + '</text></g>';
   }
   function edgeSVG(a, b, e, ox, oy, idx, selected, markerId) {
-    const g = edgeGeometry(a, b, hash(e.from + '|' + e.to));
+    const g = edgeGeometry(a, b, hash(e.from + '|' + e.to), e.bend);
     let s = '<g class="rm-edge ' + edgeColorClass(e) + (selected ? ' rm-sel' : '') + '" data-i="' + idx + '">' +
       // 粗一點的透明底線：讓細虛線也好點選
       '<path class="rm-hit" d="' + pathD(g, ox, oy) + '"></path>' +
@@ -592,14 +605,14 @@
     function rfEdge(e) {
       const k = hash(e.from + '|' + e.to) % EDGE_COLORS;
       return {
-        id: e.from + '>' + e.to, source: e.from, target: e.to, type: 'floating', label: e.label || '', data: { k: k },
+        id: e.from + '>' + e.to, source: e.from, target: e.to, type: 'floating', label: e.label || '', data: { k: k, bend: e.bend || '' },
         markerEnd: { type: 'arrowclosed', color: EDGE_HEX[k], width: 18, height: 18 }
       };
     }
     function currentModel() {
       return {
         nodes: latestNodes.map(function (n) { return { id: n.id, label: n.data.label || '', x: n.position.x, y: n.position.y, color: n.data.color || '', shape: '' }; }),
-        edges: latestEdges.map(function (e) { return { from: e.source, to: e.target, label: e.label || '' }; })
+        edges: latestEdges.map(function (e) { return { from: e.source, to: e.target, label: e.label || '', bend: (e.data && e.data.bend) || '' }; })
       };
     }
     function setAll(model) {
@@ -666,7 +679,7 @@
         const s = RF.useInternalNode(p.source), t = RF.useInternalNode(p.target);
         if (!s || !t || !s.measured || !t.measured) return null;
         function box(n) { return { x: n.internals.positionAbsolute.x, y: n.internals.positionAbsolute.y, w: n.measured.width || (R * 2 + 8), h: n.measured.height || (R * 2 + LABEL_H) }; }
-        const g = edgeGeometry(box(s), box(t), hash(p.source + '|' + p.target));
+        const g = edgeGeometry(box(s), box(t), hash(p.source + '|' + p.target), p.data && p.data.bend);
         const hex = EDGE_HEX[(p.data && p.data.k) || 0];
         return h(RF.BaseEdge, {
           id: p.id, path: pathD(g, 0, 0), markerEnd: p.markerEnd, interactionWidth: 18,
@@ -723,6 +736,8 @@
           },
           onNodeDoubleClick: function (ev, node) { openInput(node.id); },
           onEdgeDoubleClick: function (ev, edge) { openEdgeInput(edge.id, ev.clientX, ev.clientY); },
+          // 右鍵選連線的彎法（雙擊仍然是改文字）
+          onEdgeContextMenu: function (ev, edge) { ev.preventDefault(); bendMenu(edge.id, ev.clientX, ev.clientY); },
           colorMode: 'dark', connectionMode: 'loose', connectionRadius: 34, zoomOnDoubleClick: false,
           deleteKeyCode: ['Backspace', 'Delete'], minZoom: 0.15, maxZoom: 3,
           fitView: true, fitViewOptions: { padding: 0.2, maxZoom: 1.25 },
@@ -843,6 +858,41 @@
       showPopup(pop, colorBtn);
     }
 
+    // ---- 連線要往哪邊彎：在連線上按右鍵 ----
+    // 預設是照雜湊自動分左右（同一張圖每次都一樣），這個選單讓使用者自己指定；
+    // 選了之後寫進 DSL 的 bend=，所以預覽、PDF、電子書、嵌入到別篇筆記都一樣彎法。
+    function bendMenu(edgeId, x, y) {
+      closePopups();
+      const cur = latestEdges.find(function (e) { return e.id === edgeId; });
+      if (!cur) return;
+      const now = (cur.data && cur.data.bend) || '';
+      const pop = document.createElement('div');
+      pop.className = 'rm-menu rm-pop';
+      [
+        { v: 'left', icon: 'arrow-left', label: '往左彎' },
+        { v: 'right', icon: 'arrow-right', label: '往右彎' },
+        { v: 'straight', icon: 'minus', label: '直線' },
+        { v: '', icon: 'wand', label: '自動（預設）' }
+      ].forEach(function (it) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'rm-menu-item' + (now === it.v ? ' on' : '');
+        b.innerHTML = ic(it.icon) + '<span>' + esc(it.label) + '</span>';
+        b.addEventListener('click', function () {
+          closePopups();
+          snapshot();
+          applyEdges(function (list) {
+            return list.map(function (e) {
+              return e.id === edgeId ? Object.assign({}, e, { data: Object.assign({}, e.data, { bend: it.v }) }) : e;
+            });
+          });
+          changed();
+        });
+        pop.appendChild(b);
+      });
+      showPopupAt(pop, x, y);
+    }
+
     // ---- CSV 選單：匯入／下載範本／匯出 ----
     function csvMenu() {
       closePopups();
@@ -871,10 +921,15 @@
       showPopup(pop, host.querySelector('.rm-csv'));
     }
     function showPopup(pop, anchor) {
-      host.appendChild(pop);
       const r = anchor.getBoundingClientRect();
-      pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - pop.offsetWidth - 8)) + 'px';
-      pop.style.top = (r.bottom + 6) + 'px';
+      showPopupAt(pop, r.left, r.bottom + 6, true);
+    }
+    // 直接給座標（右鍵選單用）：貼著游標開，但不可以開到畫面外。
+    function showPopupAt(pop, x, y, noClamp) {
+      host.appendChild(pop);
+      const w = pop.offsetWidth, hgt = pop.offsetHeight;
+      pop.style.left = Math.max(8, Math.min(x, window.innerWidth - w - 8)) + 'px';
+      pop.style.top = (noClamp ? y : Math.max(8, Math.min(y, window.innerHeight - hgt - 8))) + 'px';
       setTimeout(function () { document.addEventListener('mousedown', onPopOutside, true); }, 0);
     }
     function onPopOutside(e) { if (!e.target.closest('.rm-pop')) closePopups(); }

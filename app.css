@@ -3096,6 +3096,9 @@ select.sec-info-input { cursor: pointer; }
   background: transparent; color: var(--text); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer;
 }
 .rm-menu-item:hover { background: var(--row-hover); }
+/* 目前生效的那一項（連線彎法的右鍵選單用）：底色標起來，不用另外畫勾 */
+.rm-menu-item.on { background: var(--row-active); color: var(--accent); }
+.rm-menu-item.on .ic-svg { color: var(--accent); }
 .rm-menu-item .ic-svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--text-dim); }
 .rm-menu-hint { margin-top: 6px; padding: 8px 10px 4px; border-top: 1px solid var(--border); font-size: var(--fs-xs); line-height: 1.6; color: var(--text-faint); }
 .rm-menu-hint code { font-family: var(--mono); color: var(--text-dim); }
