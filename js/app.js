@@ -2196,19 +2196,51 @@
     setHash('note/' + note.id);
     function syncState(n) {
       const idx = state.notes.findIndex(function (x) { return x.id === n.id; });
-      if (idx >= 0) { state.notes[idx].title = n.title; state.notes[idx].content = n.content; state.notes[idx].rev = n.rev; state.notes[idx].updatedAt = n.updatedAt; }
-      note.title = n.title; note.content = n.content; note.rev = n.rev; note.updatedAt = n.updatedAt;
+      if (idx >= 0) { state.notes[idx].rev = n.rev; state.notes[idx].updatedAt = n.updatedAt; }
+      note.rev = n.rev; note.updatedAt = n.updatedAt;
+    }
+    // 這一頁有兩個存檔入口——上方的標題欄跟畫布的自動存檔——但**只能有一個寫入路徑**。
+    // 原本兩邊各自 `Store.updateNote(Object.assign({}, note, {…}))`，於是：
+    //   1. 每個 PUT 都把「整篇筆記」送上去，而改名那一邊手上的 content 是打開這一頁時
+    //      那一份（onChange 只有在伺服器回覆之後才把新 DSL 寫回 note）。動過圖之後、
+    //      回覆還沒回來就改名，改名那個 PUT 後到，整張圖就倒退回打開時的樣子——在
+    //      Cloudflare Tunnel 那種延遲下這個窗口有好幾百毫秒，改個名字就洗掉一整段工作。
+    //   2. 兩個 PUT 會同時在路上，先送的後到同樣會蓋回去。
+    //   3. 從側邊欄／首頁改名會重建 state.notes，這裡抓著的 note 就成了孤兒，之後每次
+    //      自動存檔都把舊標題寫回去。
+    // 所以：改動先寫進記憶體（live() 永遠去 state.notes 拿現在那一篇），送出時才把
+    // 當下的 title+content 一起帶走，而且同一時間只有一個請求在路上，其餘的併成一次
+    // 補送（跟 markdown 編輯器的 _saving/_saveAgain 同一套規則）。
+    function live() {
+      return state.notes.find(function (x) { return x.id === note.id; }) || note;
+    }
+    let saving = false, again = false;
+    function flushSave() {
+      if (saving) { again = true; return; }
+      saving = true;
+      const n = live();
+      Store.updateNote({ id: n.id, title: n.title, content: n.content, folderId: n.folderId, meta: n.meta })
+        .then(syncState, function (e) { toast('儲存失敗：' + (e && e.message || e)); })
+        .then(function () {
+          saving = false;
+          if (again) { again = false; flushSave(); }
+        });
+    }
+    function setLocal(patch) {
+      const n = live();
+      Object.assign(n, patch);
+      if (n !== note) Object.assign(note, patch);
+      flushSave();
     }
     const view = RelMap.open(note.content || '', {
       container: relmapWrapEl,
       title: note.title === '未命名筆記' ? '' : (note.title || ''),
       onTitle: function (t) {
-        Store.updateNote(Object.assign({}, note, { title: t || '未命名關聯分析' })).then(function (n) { syncState(n); renderTree(); },
-          function (e) { toast('改名失敗：' + (e && e.message || e)); });
+        setLocal({ title: t || '未命名關聯分析' });
+        renderTree();
       },
       onChange: function (dsl) {
-        Store.updateNote(Object.assign({}, note, { content: '```relmap\n' + dsl + '\n```\n' })).then(syncState,
-          function (e) { toast('儲存失敗：' + (e && e.message || e)); });
+        setLocal({ content: '```relmap\n' + dsl + '\n```\n' });
       },
       onClose: function () {
         const mine = relmapView === view;
