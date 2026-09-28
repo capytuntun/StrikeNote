@@ -226,6 +226,76 @@
   }
 
 
+  // ---------------- 嵌入用的拖曳／縮放 -----------------------------------------
+  // 給 markdown.js 的 ![名稱](relmap:<id>) 嵌入框用：直接改 SVG 的 viewBox，不動內容。
+  // 用 viewBox 而不是在外面包一層 <g transform>，是因為 renderSVG() 要維持「同一段
+  // DSL 永遠產生同一段字串」的純函式性質（預覽、PDF、電子書共用它）；縮放只是換一個
+  // 觀景窗，不改任何一個節點的座標。
+  // 滾輪縮放會 preventDefault，所以游標在圖上時捲不動頁面——嵌入框的高度因此固定
+  // 在一個適中的值（見 app.css 的 .relmap-embed-canvas），圖的上下一定留得下捲動的地方。
+  function attachPanZoom(svg) {
+    if (!svg || svg._rmPanZoom) return;
+    const vb = String(svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+    if (vb.length !== 4 || vb.some(function (v) { return !isFinite(v); })) return;
+    svg._rmPanZoom = true;
+    // renderSVG 給的 width/height 是圖本身的尺寸；嵌入框要的是「塞進框裡」，
+    // 尺寸交給 CSS，座標系交給 viewBox。
+    svg.removeAttribute('width');
+    svg.removeAttribute('height');
+    const base = { x: vb[0], y: vb[1], w: vb[2], h: vb[3] };
+    let cur = { x: base.x, y: base.y, w: base.w, h: base.h };
+    function apply() { svg.setAttribute('viewBox', cur.x + ' ' + cur.y + ' ' + cur.w + ' ' + cur.h); }
+    // 以某一點為中心縮放：那個點在畫面上的位置不動，viewBox 繞著它收放。
+    function zoomAt(px, py, k) {
+      const nw = Math.max(base.w / 12, Math.min(base.w * 6, cur.w * k));
+      const nh = nw * (base.h / base.w);
+      cur.x = px - (px - cur.x) * (nw / cur.w);
+      cur.y = py - (py - cur.y) * (nh / cur.h);
+      cur.w = nw; cur.h = nh;
+      apply();
+    }
+    function atCentre(k) { zoomAt(cur.x + cur.w / 2, cur.y + cur.h / 2, k); }
+    svg.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      const r = svg.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      zoomAt(cur.x + (e.clientX - r.left) / r.width * cur.w,
+             cur.y + (e.clientY - r.top) / r.height * cur.h,
+             e.deltaY > 0 ? 1.15 : 1 / 1.15);
+    }, { passive: false });
+    let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
+    function move(e) {
+      if (!dragging) return;
+      const r = svg.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      cur.x = ox - (e.clientX - sx) / r.width * cur.w;
+      cur.y = oy - (e.clientY - sy) / r.height * cur.h;
+      apply();
+    }
+    function up() {
+      if (!dragging) return;
+      dragging = false;
+      svg.classList.remove('is-panning');
+      // 滑鼠常常放在圖外面才鬆開（拖到邊緣），所以 move/up 掛在 window 上，
+      // 只有按下去的那一刻起才監聽，鬆手就拆掉。
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    }
+    svg.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      dragging = true; sx = e.clientX; sy = e.clientY; ox = cur.x; oy = cur.y;
+      svg.classList.add('is-panning');
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    });
+    svg._rmZoom = function (what) {
+      if (what === 'in') atCentre(1 / 1.25);
+      else if (what === 'out') atCentre(1.25);
+      else { cur = { x: base.x, y: base.y, w: base.w, h: base.h }; apply(); }
+    };
+  }
+
   // ---------------- 筆記種類（meta.relMap）------------------------------------
   function isRelNote(note) { return !!(note && note.meta && note.meta.relMap); }
   const TEMPLATE = 'node n1 "起點" x=40 y=80\nnode n2 "目標" x=320 y=80\nedge n1 n2 "利用"';
@@ -905,6 +975,7 @@
     parse: parse,
     serialize: serialize,
     renderSVG: renderSVG,
+    attachPanZoom: attachPanZoom,
     open: open,
     isRelNote: isRelNote,
     generate: generate,

@@ -674,6 +674,22 @@
           '<iframe class="pdf-embed-frame" data-pdf-id="' + escapeHtml(id) + '" title="' + name + '" loading="lazy"></iframe>' +
           '</span>';
       }
+      // ![名稱](relmap:<noteId>)：把另一篇「關聯分析」筆記嵌進來。存的是那篇筆記的 id，
+      // 不是圖的副本——原圖改了，所有引用它的筆記下次渲染就跟著更新。畫面上是可以
+      // 拖曳平移、滾輪縮放的（resolveRelMaps 會接上 RelMap.attachPanZoom）。
+      if (href && href.indexOf('relmap:') === 0) {
+        const rid = href.slice(7);
+        const rname = escapeHtml(text || '關聯分析');
+        return '<span class="relmap-embed" data-relmap-note="' + escapeHtml(rid) + '">' +
+          '<span class="relmap-embed-bar">' +
+          '<span class="relmap-embed-name">' + rname + '</span>' +
+          '<button class="relmap-embed-btn" type="button" data-relmap-zoom="out" title="縮小">−</button>' +
+          '<button class="relmap-embed-btn" type="button" data-relmap-zoom="in" title="放大">＋</button>' +
+          '<button class="relmap-embed-btn" type="button" data-relmap-zoom="reset" title="回到剛好塞滿">重置</button>' +
+          '<button class="relmap-embed-btn" type="button" data-relmap-open="' + escapeHtml(rid) + '">全螢幕</button>' +
+          '</span>' +
+          '<span class="relmap-embed-canvas"></span></span>';
+      }
       if (href && href.indexOf('img:') === 0) {
         // ![說明](img:<id>) 是一般圖片，結尾多一個 #frame 表示這張要加黑框（報告裡的截圖
         // 底色常常跟紙一樣白，沒有框會糊成一片）。標記寫在 markdown 裡而不是 note.meta，
@@ -773,6 +789,7 @@
         'data-task',   // 待辦清單：勾選框在文件中的序號，用來回寫原始 markdown
         'data-mindmap', 'data-i',    // 心智圖：原始大綱文字，以及節點索引
         'data-relmap',    // 關聯分析：原始 DSL 文字（js/relmap.js）
+        'data-relmap-note', 'data-relmap-open', 'data-relmap-zoom',   // 嵌入別篇關聯分析
         'data-link-url', 'data-file-id', 'data-file-kind', 'rel'],   // 網址預覽卡片、附件連結
       ADD_TAGS: ['input', 'button', 'iframe'] // checkboxes, annotate button, PDF embed
     });
@@ -825,6 +842,7 @@
       if (id) a.href = '/api/images/' + encodeURIComponent(id);
     });
     resolveLinkCards(container);
+    resolveRelMaps(container);
   }
 
   // Fill {%preview url %} cards from /api/link-preview. Resolves once every card
@@ -865,6 +883,45 @@
           ic.src = previewImageUrl(info.icon);
           icon.appendChild(ic);
         }
+      });
+    }));
+  }
+
+  // ---- 嵌入別篇關聯分析 ![名稱](relmap:<noteId>) ------------------------------
+  // 引用的是筆記 id，所以每次渲染都去拿那篇的現況——原圖改了，引用它的筆記自然跟著新。
+  // 快取存的是「進行中的 promise」而不是拿回來的值，理由跟圖片快取一模一樣：同一張圖
+  // 在一篇筆記裡被引用好幾次時，resolveRelMaps 是同步走訪每一個嵌入框的，只快取結果
+  // 會讓它們全部錯過空的快取、各自發一次請求。失敗的那筆會把自己從快取刪掉，下次才
+  // 有機會重試，不會被一個 null 永久毒死。
+  const relNoteCache = {};
+  function relNoteText(id) {
+    if (!global.Store || !Store.getNote) return Promise.resolve(null);
+    if (relNoteCache[id]) return relNoteCache[id];
+    const p = Store.getNote(id).then(function (n) { return n ? (n.content || '') : null; })
+      .catch(function () { if (relNoteCache[id] === p) delete relNoteCache[id]; return null; });
+    relNoteCache[id] = p;
+    return p;
+  }
+  function invalidateRelNote(id) { delete relNoteCache[id]; }
+  function resolveRelMaps(container) {
+    const boxes = Array.prototype.slice.call(container.querySelectorAll('.relmap-embed[data-relmap-note]'));
+    if (!boxes.length) return Promise.resolve();
+    return Promise.all(boxes.map(function (box) {
+      if (box.classList.contains('is-loaded') || box.classList.contains('is-failed')) return null;
+      const canvas = box.querySelector('.relmap-embed-canvas');
+      if (!canvas) return null;
+      return relNoteText(box.getAttribute('data-relmap-note')).then(function (text) {
+        const svg = (text != null && global.RelMap) ? RelMap.renderSVG(text) : '';
+        if (!svg) {
+          box.classList.add('is-failed');
+          canvas.textContent = text == null ? '找不到這張關聯分析（可能已刪除，或你沒有權限）' : '這張關聯分析還沒有任何節點。';
+          return;
+        }
+        box.classList.add('is-loaded');
+        canvas.innerHTML = svg;
+        // 拖曳平移／滾輪縮放只有在真的瀏覽器裡才接：PDF 與電子書拿到的是同一段 SVG，
+        // 但那邊是靜態文件，沒有（也不需要）任何事件。
+        if (global.RelMap && RelMap.attachPanZoom) RelMap.attachPanZoom(canvas.querySelector('svg'));
       });
     }));
   }
@@ -955,7 +1012,9 @@
           .catch(function () { img.remove(); });
       }));
     });
-    return Promise.all([stored, cards]);
+    // 嵌入的關聯分析同理：SVG 是現場向伺服器要那篇筆記才畫得出來的，列印文件與
+    // 出版檔都抓不到（電子書的 CSP 連 same-origin 都不准 fetch），所以要在這裡等它畫完。
+    return Promise.all([stored, cards, resolveRelMaps(container)]);
   }
 
   function blobToDataURL(blob) {
@@ -979,6 +1038,8 @@
     extractTags: extractTags,
     invalidateImage: invalidateImage,
     resolveLinkCards: resolveLinkCards,
+    resolveRelMaps: resolveRelMaps,
+    invalidateRelNote: invalidateRelNote,
     switchEmbed: switchEmbed,
     toggleImageFrame: toggleImageFrame,
     applyColWidths: applyColWidths,

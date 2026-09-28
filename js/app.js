@@ -3077,6 +3077,54 @@
     });
     inp.click();
   }
+  // 嵌入一張畫過的關聯分析：選一篇 meta.relMap 的筆記，插入 ![標題](relmap:<id>)。
+  // 存的是 id 不是圖的副本，所以原圖之後改了，引用它的筆記下次渲染就是新的。
+  function pickRelMapEmbed() {
+    const maps = state.notes.filter(function (n) {
+      return window.RelMap && RelMap.isRelNote(n) && !n.trashed;
+    }).sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+    if (!maps.length) {
+      toast('還沒有任何關聯分析——側邊欄「新增 → 關聯分析」先畫一張');
+      return;
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML =
+      '<div class="modal-title">嵌入關聯分析</div>' +
+      '<div class="modal-body"><select class="folder-picker">' +
+      maps.map(function (n) {
+        return '<option value="' + MD.escapeHtml(n.id) + '">' + MD.escapeHtml(n.title || '未命名關聯分析') + '</option>';
+      }).join('') +
+      '</select></div>' +
+      '<div class="modal-actions">' +
+      '<button class="btn modal-cancel" type="button">取消</button>' +
+      '<button class="btn btn-primary modal-ok" type="button">嵌入</button>' +
+      '</div>';
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    const sel = modal.querySelector('.folder-picker');
+    function close() { overlay.remove(); document.removeEventListener('keydown', onKey, true); }
+    function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+    document.addEventListener('keydown', onKey, true);
+    overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) close(); });
+    modal.querySelector('.modal-cancel').addEventListener('click', close);
+    modal.querySelector('.modal-ok').addEventListener('click', function () {
+      const id = sel.value;
+      const hit = maps.find(function (n) { return n.id === id; });
+      close();
+      if (!hit) return;
+      const name = cleanName(hit.title, '關聯分析');
+      insertAtCursor('\n![' + name + '](relmap:' + id + ')\n',
+        { s: editorEl.selectionStart, e: editorEl.selectionEnd, noteId: state.currentId });
+      if (editorEl._hlRefresh) editorEl._hlRefresh();
+      scheduleSave();
+      renderPreviewNow();
+    });
+    setTimeout(function () { sel.focus(); }, 30);
+  }
+
   // ---- Copy to clipboard (works on file://) ------------------------------
   function copyText(text, btn) {
     function done() {
@@ -4278,7 +4326,8 @@
     // /file、/upload：打開檔案挑選器
     if (window.Editor && Editor.setActionSnippets) Editor.setActionSnippets([
       { cmd: 'file', hint: '上傳檔案（圖片、PDF、任何附件）', action: pickFiles },
-      { cmd: 'upload', hint: '上傳檔案（圖片、PDF、任何附件）', action: pickFiles }
+      { cmd: 'upload', hint: '上傳檔案（圖片、PDF、任何附件）', action: pickFiles },
+      { cmd: 'relmap', hint: '嵌入一張你畫過的關聯分析（可拖曳縮放）', action: pickRelMapEmbed }
     ]);
     // 排序方式：側邊欄搜尋框旁的鈕；換了就重畫側邊欄與首頁
     const sortBtn = $('#sort-btn');
@@ -4601,6 +4650,18 @@
       if (mmBtn) { e.preventDefault(); openMindMapBlock(mmBtn.closest('.mindmap-block')); return; }
       const rmBtn = e.target.closest('.rm-edit-btn');
       if (rmBtn) { e.preventDefault(); openRelMapBlock(rmBtn.closest('.relmap-block')); return; }
+      // 嵌入的關聯分析（![名稱](relmap:id)）：縮放鈕改 SVG 的 viewBox，全螢幕鈕直接
+      // 打開被引用的那一篇（它是 meta.relMap，openNote 會送進整頁編輯器）。
+      const rmZoom = e.target.closest('[data-relmap-zoom]');
+      if (rmZoom) {
+        e.preventDefault();
+        const box = rmZoom.closest('.relmap-embed');
+        const svg = box && box.querySelector('svg');
+        if (svg && svg._rmZoom) svg._rmZoom(rmZoom.getAttribute('data-relmap-zoom'));
+        return;
+      }
+      const rmOpen = e.target.closest('[data-relmap-open]');
+      if (rmOpen) { e.preventDefault(); saveNow(); openNote(rmOpen.getAttribute('data-relmap-open')); return; }
       const link = e.target.closest('.note-link');
       if (link) { e.preventDefault(); handleNoteLink(link); return; }
       const tag = e.target.closest('.hashtag');

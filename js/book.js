@@ -352,6 +352,13 @@
           n.replaceWith(span);
         });
         work.querySelectorAll('.img-tools, .code-copy, .mm-edit-btn, .mm-hint').forEach(function (n) { n.remove(); });
+        // 嵌入的關聯分析：出版檔沒有 relmap.js，拖曳縮放不會動，所以拿掉工具列並標成
+        // is-static（把螢幕上那個固定高度的取景框放開，整張圖直接攤平顯示）。
+        work.querySelectorAll('.relmap-embed').forEach(function (n) {
+          n.classList.add('is-static');
+          const bar = n.querySelector('.relmap-embed-bar');
+          if (bar) bar.remove();
+        });
         // 出版檔沒有編輯器可以回寫，勾選框只是一份紀錄——留著勾選狀態，但不讓讀者
         // 以為自己改得動它。
         work.querySelectorAll('.task-check').forEach(function (n) { n.disabled = true; });

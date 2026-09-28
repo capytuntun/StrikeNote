@@ -432,6 +432,13 @@
       '.pdf-content .relmap-block { border: 1px solid #d0d7de; background: #ffffff; padding: 8pt; margin: 0 0 12pt;',
       '  break-inside: avoid; overflow: hidden; }',
       '.pdf-content .relmap-svg { display: block; max-width: 100%; height: auto; }',
+      /* 嵌入別篇關聯分析（![名稱](relmap:id)）：紙上是一張靜態圖，工具列拿掉，
+         螢幕上那個固定高度的取景框也要放開成自動高度，不然只印得到框裡那一截。 */
+      '.pdf-content .relmap-embed { border: 1px solid #d0d7de; background: #ffffff; margin: 0 0 12pt;',
+      '  break-inside: avoid; overflow: hidden; }',
+      '.pdf-content .relmap-embed-bar { display: none; }',
+      '.pdf-content .relmap-embed-canvas { display: block; height: auto; padding: 8pt; }',
+      '.pdf-content .relmap-embed-canvas .relmap-svg { width: auto; height: auto; }',
       '.pdf-content .rm-node .rm-disc { fill: #ffffff; stroke: #57606a; stroke-width: 2; }',
       '.pdf-content .rm-node .rm-mono { fill: #57606a; }',
       '.pdf-content .rm-node .rm-lbl { fill: #1f2430; stroke: #ffffff; }',

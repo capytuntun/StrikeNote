@@ -2892,6 +2892,40 @@ select.sec-info-input { cursor: pointer; }
 .relmap-block .rm-edit-btn .ic-svg { width: 14px; height: 14px; }
 .relmap-svg { display: block; max-width: 100%; height: auto; font-family: var(--sans); }
 
+/* ---- 嵌入別篇關聯分析：![名稱](relmap:<noteId>)（markdown.js 的 resolveRelMaps）----
+   跟 ```relmap 那種「圖就寫在這篇裡」不同，這是引用另一篇關聯分析筆記，而且可以
+   拖曳平移、滾輪縮放（relmap.js 的 attachPanZoom 改 viewBox）。
+   高度固定：滾輪縮放會吃掉捲動事件，圖若長到整個視窗高，游標放上去就再也捲不動
+   頁面了——固定一個適中的高度，圖的上下永遠留得下可以捲的地方。 */
+.relmap-embed {
+  display: block; position: relative; margin: 0 0 14px;
+  border: 1px solid var(--rm-border); background: var(--rm-bg);
+}
+.relmap-embed-bar {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 8px; border-bottom: 1px solid var(--rm-border); background: var(--rm-lbg);
+}
+.relmap-embed-name {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-xs); font-weight: 600; color: var(--rm-text-dim);
+}
+.relmap-embed-btn {
+  flex: 0 0 auto; padding: 3px 8px; font: inherit; font-size: var(--fs-xs); font-weight: 600;
+  border: 1px solid var(--rm-border); background: transparent; color: var(--rm-text-dim); cursor: pointer;
+}
+.relmap-embed-btn:hover { color: var(--rm-text); border-color: var(--rm-text-dim); }
+.relmap-embed-canvas { display: block; height: 340px; overflow: hidden; }
+.relmap-embed-canvas .relmap-svg { width: 100%; height: 100%; cursor: grab; }
+.relmap-embed-canvas .relmap-svg.is-panning { cursor: grabbing; }
+.relmap-embed.is-failed .relmap-embed-canvas {
+  height: auto; padding: 18px 14px; text-align: center;
+  color: var(--rm-text-dim); font-size: var(--fs-sm);
+}
+/* 出版成電子書時（book.js 會加上 is-static 並移除工具列）：那份檔案沒有 relmap.js，
+   拖曳縮放不會動，所以取景框放開成自動高度，整張圖直接攤平。 */
+.relmap-embed.is-static .relmap-embed-canvas { height: auto; padding: 10px; }
+.relmap-embed.is-static .relmap-embed-canvas .relmap-svg { width: auto; height: auto; cursor: default; }
+
 /* 節點 = 白色圓盤 + 彩色圓環 + 盤裡標籤首字（.rm-mono）+ 盤下完整標籤（.rm-lbl，
    帶一圈畫布色描邊，壓在線上也讀得出來）。顏色一律走 class——使用者選的 .rm-<色名>，
    沒選就是 id 雜湊出來的 .rm-auto-k——沒有 inline，pdf.js 才能用列印樣式表整批覆寫。 */
