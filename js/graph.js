@@ -122,7 +122,7 @@
       '<div class="graph-editor">' +
       '<header class="graph-bar">' +
       '<span class="graph-bar-t">關聯圖</span>' +
-      '<span class="graph-bar-hint">拖曳調整位置・滾輪縮放・點筆記開啟・點標籤篩選</span>' +
+      '<span class="graph-bar-hint">拖曳調整位置・滾輪縮放・點一下看關聯・雙擊開啟筆記或篩選標籤</span>' +
       '<label class="graph-tag-toggle"><input type="checkbox" class="graph-tags-cb" checked> 顯示標籤</label>' +
       '<label class="graph-tag-toggle"><input type="checkbox" class="graph-labels-cb"' + (showLabels ? ' checked' : '') + '> 顯示名稱</label>' +
       '<span class="graph-bar-sp"></span>' +
@@ -148,6 +148,8 @@
     const resetBtn = host.querySelector('.graph-reset-btn');
     const tagsCb = host.querySelector('.graph-tags-cb');
     const labelsCb = host.querySelector('.graph-labels-cb');
+    const hintEl = host.querySelector('.graph-bar-hint');
+    const HINT_DEFAULT = hintEl ? hintEl.textContent : '';
     function back() { if (opts.onClose) opts.onClose(); }
 
     if (!data.nodes.length) {
@@ -174,7 +176,7 @@
     let showTags = true;
     let zoom = 1, panX = 0, panY = 0;
     let raf = null, active = true;
-    let hoverId = null;
+    let hoverId = null, selectedId = null;
 
     function visibleNodes() { return showTags ? data.nodes : data.nodes.filter(function (n) { return n.kind !== 'tag'; }); }
     function visibleEdges() { return showTags ? data.edges : data.edges.filter(function (e) { return e.kind !== 'tag'; }); }
@@ -213,6 +215,11 @@
         nodeEls[n.id] = { el: g, dot: c, node: n };
         bindNodeDrag(g, n);
       });
+      // 這裡把 DOM 整個換掉，class 也跟著沒了——選取是釘住的狀態，重建後要再貼回去。
+      // 取消勾「顯示標籤」時被選取的那顆可能已經不在畫面上，那就當作沒選。
+      if (selectedId && !nodeEls[selectedId]) selectedId = null;
+      if (hoverId && !nodeEls[hoverId]) hoverId = null;
+      applyFocus();
     }
     rebuildDom();
 
@@ -226,17 +233,54 @@
       return set;
     }
 
-    function applyHover() {
-      const near = hoverId ? neighborsOf(hoverId) : null;
+    // 點一下節點＝把「跟它有關的」釘起來：它自己跟直接相鄰的節點維持原樣，其餘整片
+    // 調暗，滑鼠移開也不會散掉（滑過去的預覽是既有的 hoverId，只是暫時蓋過選取的那顆，
+    // 滑走就還原）。所以「現在在看誰」永遠只有一顆：滑鼠指著的優先，沒有才輪到選取的。
+    function focusId() { return hoverId || selectedId; }
+    function applyFocus() {
+      const fid = focusId();
+      const near = fid ? neighborsOf(fid) : null;
       Object.keys(nodeEls).forEach(function (id) {
-        nodeEls[id].el.classList.toggle('is-dim', !!near && !near[id]);
-        nodeEls[id].el.classList.toggle('is-hover', id === hoverId);
+        const el = nodeEls[id].el;
+        el.classList.toggle('is-dim', !!near && !near[id]);
+        // is-near 是「這顆要看得清楚」：關掉「顯示名稱」時，只有這些節點的名字會現形
+        // （見 app.css 的 hide-labels 規則）——點一下就想知道相關的是「哪幾篇」。
+        el.classList.toggle('is-near', !!near && !!near[id]);
+        el.classList.toggle('is-hover', id === hoverId);
+        el.classList.toggle('is-sel', id === selectedId);
       });
       Object.keys(edgeEls).forEach(function (k) {
         const e = edgeEls[k].edge;
-        const dim = !!near && !(near[e.a] && near[e.b]);
-        edgeEls[k].el.classList.toggle('is-dim', dim);
+        edgeEls[k].el.classList.toggle('is-dim', !!near && !(near[e.a] && near[e.b]));
+        // 直接連到焦點那幾條才加粗：相鄰節點彼此之間的線沒被調暗（看得到這一小群的
+        // 形狀），但「從這顆連出去的」要一眼分得出來。
+        edgeEls[k].el.classList.toggle('is-hi', !!fid && (e.a === fid || e.b === fid));
       });
+      updateHint();
+    }
+    // 選取時頂欄那行提示換成「選了誰、有幾個相關、怎麼取消」——點下去沒有任何文字
+    // 回饋的話，使用者只會看到畫面暗了一片，不知道是自己點出來的還是壞掉了。
+    function updateHint() {
+      if (!hintEl) return;
+      if (!selectedId || !nodeEls[selectedId]) {
+        hintEl.textContent = HINT_DEFAULT;
+        hintEl.classList.remove('is-sel');
+        return;
+      }
+      const n = nodeEls[selectedId].node;
+      const cnt = Object.keys(neighborsOf(selectedId)).length - 1;
+      hintEl.textContent = '「' + n.label + '」' + (cnt ? '有 ' + cnt + ' 個相關' : '沒有相關的節點') + '・Esc 或點空白處取消';
+      hintEl.classList.add('is-sel');
+    }
+    function selectNode(id) {
+      selectedId = selectedId === id ? null : id;   // 再點同一顆＝取消
+      applyFocus();
+    }
+    function clearSelection() {
+      if (selectedId === null) return false;
+      selectedId = null;
+      applyFocus();
+      return true;
     }
 
     // ---- 力導向模擬：排斥＋沿邊彈簧＋微弱回中，速度阻尼到穩定就停 ----
@@ -355,18 +399,33 @@
         n.vx = 0; n.vy = 0;
         kick();
       });
-      g.addEventListener('mouseenter', function () { hoverId = n.id; applyHover(); });
-      g.addEventListener('mouseleave', function () { if (hoverId === n.id) { hoverId = null; applyHover(); } });
+      g.addEventListener('mouseenter', function () { hoverId = n.id; applyFocus(); });
+      g.addEventListener('mouseleave', function () { if (hoverId === n.id) { hoverId = null; applyFocus(); } });
+      // 單擊＝看關聯（釘住），雙擊才是開啟。以前單擊就直接離開關聯圖去開那篇筆記，
+      // 等於整張圖只能看不能查——想知道「這篇跟哪些有關」得一直把滑鼠壓在那顆點上。
       g.addEventListener('click', function () {
+        if (dragMoved) return;
+        selectNode(n.id);
+      });
+      g.addEventListener('dblclick', function (e) {
+        e.preventDefault();
         if (dragMoved) return;
         if (n.kind === 'note' && opts.onOpenNote) { close(); opts.onOpenNote(n.note); }
         else if (n.kind === 'tag' && opts.onOpenTag) { close(); opts.onOpenTag(n.label.replace(/^#/, '')); }
       });
     }
-    let panning = false, panStart = null;
+    let panning = false, panStart = null, panMoved = false;
     canvas.addEventListener('mousedown', function (e) {
       if (e.target !== canvas && e.target !== svg) return;
-      panning = true; panStart = { x: e.clientX, y: e.clientY, panX: panX, panY: panY };
+      panning = true; panMoved = false; panStart = { x: e.clientX, y: e.clientY, panX: panX, panY: panY };
+    });
+    // 點空白處＝取消選取。目標必須真的是畫布或 svg 本身（節點的圓點／名字都是它們的
+    // 子元素，所以節點上的點擊不會落到這裡），而且拖過畫面平移不算——平移完手一放
+    // 就把剛剛選的清掉會很惱人。
+    canvas.addEventListener('click', function (e) {
+      if (e.target !== canvas && e.target !== svg) return;
+      if (panMoved) return;
+      clearSelection();
     });
     function onWindowMove(e) {
       if (draggingId) {
@@ -376,6 +435,7 @@
         n.x = w.x; n.y = w.y;
         render();
       } else if (panning) {
+        if (Math.hypot(e.clientX - panStart.x, e.clientY - panStart.y) > DRAG_THRESHOLD) panMoved = true;
         panX = panStart.panX + (e.clientX - panStart.x);
         panY = panStart.panY + (e.clientY - panStart.y);
         render();
@@ -413,7 +473,9 @@
       if (opts.onLabels) opts.onLabels(showLabels);
     });
 
-    function onKey(e) { if (e.key === 'Escape') back(); }
+    // Esc 先取消選取，沒有選取才離開關聯圖——選了一顆看得正起勁時按 Esc，想取消的
+    // 是那片變暗，不是整張圖。
+    function onKey(e) { if (e.key === 'Escape') { if (clearSelection()) return; back(); } }
     document.addEventListener('keydown', onKey);
     closeBtn.addEventListener('click', back);
     zoomOutBtn.addEventListener('click', function () { zoomStep(1 / 1.25); });

@@ -3148,6 +3148,9 @@ select.sec-info-input { cursor: pointer; }
 }
 .graph-bar-t { font-weight: 700; font-size: var(--fs-md); flex: 0 0 auto; }
 .graph-bar-hint { font-size: var(--fs-xs); color: var(--text-faint); flex: 0 0 auto; }
+/* 選了某顆節點時，這行提示換成「選了誰、有幾個相關、怎麼取消」（graph.js 的
+   updateHint），用重音色標起來，跟平常的操作說明分得開。 */
+.graph-bar-hint.is-sel { color: var(--accent); font-weight: 600; }
 .graph-bar-sp { flex: 1 1 auto; }
 .graph-bar .btn { flex: 0 0 auto; }
 .graph-tag-toggle {
@@ -3225,13 +3228,21 @@ select.sec-info-input { cursor: pointer; }
    勾起來每個節點都標名字，取消就整片不標——標籤還在 DOM 裡，只是透明，滑過去
    （既有的 is-hover）照樣現形，連結很多的圖想看結構時就取消勾選。
    :not(.is-hover) 拉高特定度，讓這條贏過後面的 .is-dim 規則——不然滑過別的節點時，
-   被調暗的節點會以 .18 透明度浮出一片「未命名筆記」的鬼影標籤。 */
-.graph-canvas.hide-labels .graph-node:not(.is-hover) .graph-node-label { opacity: 0; }
+   被調暗的節點會以 .18 透明度浮出一片「未命名筆記」的鬼影標籤。
+   .is-near（焦點自己與它的鄰居，見 graph.js 的 applyFocus）同樣要現形：點一下節點就是
+   為了知道相關的是「哪幾篇」，名字沒出來等於只看到一團亮著的點。 */
+.graph-canvas.hide-labels .graph-node:not(.is-hover):not(.is-near) .graph-node-label { opacity: 0; }
 .graph-node.is-dim .graph-node-dot,
 .graph-node.is-dim .graph-node-label { opacity: .18; }
 /* 滑過去：圓點外面補一圈同色的細光暈，點本身不變大（變大會把周圍的線推開，看起來像
    整張圖在跳）。stroke 走 currentColor，而 g.style.color 已經是這顆節點的顏色。 */
 .graph-node.is-hover .graph-node-dot { stroke: currentColor; stroke-width: 3; stroke-opacity: .35; }
+/* 點一下釘住的那顆：同一圈光暈但更厚更實，跟「只是滑過去」分得出來；一樣不改半徑。 */
+.graph-node.is-sel .graph-node-dot { stroke: currentColor; stroke-width: 6; stroke-opacity: .5; }
+.graph-node.is-sel .graph-node-label { font-weight: 700; }
+/* 直接連到焦點的那幾條線：不透明且粗一點，「從這顆連出去的是這幾條」一眼看得出來。
+   排在 .is-dim 後面，同特定度靠來源順序贏（兩者互斥，這裡只是保險）。 */
+.graph-edge.is-hi { opacity: 1; stroke-width: 2.2; }
 
 /* ---------- 版本紀錄 ---------- */
 .modal.ver-modal {
