@@ -23,6 +23,16 @@
     return n;
   }
   function icon(name) { return global.Icons ? Icons.svg(name) : ''; }
+  // 伺服器只回「哪一種」（api.js 的 kindOfMeta），圖示跟顏色照首頁清單的那一套
+  const KINDS = {
+    '': { icon: 'file-text', cls: '' },
+    relmap: { icon: 'network', cls: 'kind-relmap' },
+    drawio: { icon: 'shapes', cls: 'kind-drawio' },
+    sec: { icon: 'shield', cls: 'kind-sec' },
+    perf: { icon: 'chart', cls: 'kind-perf' },
+    file: { icon: 'paperclip', cls: '' },
+    sticky: { icon: 'pin', cls: '' }
+  };
   function button(cls, iconName, label) {
     const b = el('button', cls);
     b.type = 'button';
@@ -246,8 +256,10 @@
       main.tabIndex = 0;
       main.setAttribute('role', 'button');
       main.setAttribute('aria-pressed', on ? 'true' : 'false');
-      const ic = el('span', 'dash-row-ic');
-      ic.innerHTML = icon('file-text');
+      // 每一種筆記用它在清單上的那個圖示，丟進垃圾桶之後還認得出哪個是哪個
+      const k = KINDS[n.kind] || KINDS[''];
+      const ic = el('span', 'dash-row-ic' + (k.cls ? ' ' + k.cls : ''));
+      ic.innerHTML = icon(k.icon);
       main.appendChild(ic);
       const text = el('span', 'trash-row-text');
       text.appendChild(el('span', 'dash-row-title', titleOf(n)));

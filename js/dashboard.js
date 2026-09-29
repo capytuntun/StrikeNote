@@ -40,6 +40,9 @@
   function noteKind(n) {
     if (n.meta && n.meta.perfReport) return { icon: 'chart', label: '成效報告', cls: 'kind-perf' };
     if (n.meta && n.meta.secReport) return { icon: 'shield', label: '資安院報告', cls: 'kind-sec' };
+    // 關聯分析：這裡原本漏了，落到最後一行，在首頁看起來跟一般筆記一模一樣（側邊欄的樹
+    // 跟區域頁倒是有分）。圖示跟「新增 → 關聯分析」、側邊欄用的是同一個。
+    if (n.meta && n.meta.relMap) return { icon: 'network', label: '關聯分析', cls: 'kind-relmap' };
     if (n.meta && n.meta.drawio) return { icon: 'shapes', label: 'drawio', cls: 'kind-drawio' };
     return { icon: 'file-text', label: '', cls: '' };
   }

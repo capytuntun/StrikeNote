@@ -1056,7 +1056,24 @@
     });
     // 嵌入的關聯分析同理：SVG 是現場向伺服器要那篇筆記才畫得出來的，列印文件與
     // 出版檔都抓不到（電子書的 CSP 連 same-origin 都不准 fetch），所以要在這裡等它畫完。
-    return Promise.all([stored, cards, resolveRelMaps(container), resolveDrawios(container)]);
+    // drawio 圖裡的圖示（<image data-img-id>）要等嵌入的圖畫出來之後才找得到，所以排在
+    // resolveDrawios 後面，不是跟它並排。
+    const drawios = resolveDrawios(container).then(function () { return inlineSvgImages(container); });
+    return Promise.all([stored, cards, resolveRelMaps(container), drawios]);
+  }
+  // drawio 圖裡的圖示：畫面上是直接跟伺服器要（href="/api/images/<id>"），要帶走的文件
+  // 就得把圖片本身包進去。同一個圖示在一張圖裡用十次也只抓一次（getImageBlob 自己有快取）。
+  function inlineSvgImages(container) {
+    const els = Array.prototype.slice.call(container.querySelectorAll('svg image[data-img-id]'));
+    return Promise.all(els.map(function (el) {
+      return Store.getImageBlob(el.getAttribute('data-img-id')).then(function (blob) {
+        if (!blob) return;
+        return blobToDataURL(blob).then(function (durl) {
+          el.setAttribute('href', durl);
+          el.removeAttribute('data-img-id');
+        });
+      });
+    }));
   }
 
   function blobToDataURL(blob) {

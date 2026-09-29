@@ -559,7 +559,7 @@
   function noteKind(n) {
     if (n.meta && n.meta.perfReport) return { icon: 'chart', label: '成效報告', cls: 'kind-perf' };
     if (n.meta && n.meta.secReport) return { icon: 'shield', label: '資安院報告', cls: 'kind-sec' };
-    if (n.meta && n.meta.relMap) return { icon: 'network', label: '', cls: '' };
+    if (n.meta && n.meta.relMap) return { icon: 'network', label: '關聯分析', cls: 'kind-relmap' };
     if (n.meta && n.meta.drawio) return { icon: 'shapes', label: 'drawio', cls: 'kind-drawio' };
     return { icon: 'file-text', label: '', cls: '' };
   }

@@ -1024,6 +1024,8 @@ mark.search-hit {
 .dash-row-ic.kind-sec { background: var(--accent-weak); color: var(--accent); }
 .dash-row-ic.kind-perf { background: var(--success-weak); color: var(--success); }
 .dash-row-ic.kind-drawio { background: rgba(240, 135, 5, .14); color: #d07005; }
+.dash-row-ic.kind-relmap, .dash-row-kind.kind-relmap { background: rgba(124, 92, 219, .14); color: #6f4fd0; }
+:root[data-theme="dark"] .dash-row-ic.kind-relmap, :root[data-theme="dark"] .dash-row-kind.kind-relmap { color: #ab97f2; }
 .dash-row-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 類型與時間收在右側一組固定寬度的欄位裡，不會被拉到畫面最邊緣 */
 .dash-row-meta { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex: 0 0 auto; }
@@ -3188,6 +3190,9 @@ select.sec-info-input { cursor: pointer; }
 #app.tool-open #topbar .mode-switch,
 #app.tool-open #topbar #capybara,
 #app.tool-open #topbar #presence { display: none; }
+/* 視窗左緣那個拉出側邊欄的把手也收起來：它剛好壓在左邊那排圖形上，要點最左邊那一欄會先
+   把側邊欄滑出來。最上面的按鈕跟 Ctrl+\ 照樣開得了側邊欄。 */
+#app.tool-open #sidebar-reopen { display: none; }
 .dio-status { flex: 0 0 auto; padding: 0 6px; font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; }
 .dio-status.is-ok { color: var(--success); }
 .dio-status.is-err { color: var(--danger); font-weight: 600; }
@@ -3254,13 +3259,41 @@ select.sec-info-input { cursor: pointer; }
 /* 縮圖用跟畫布一樣的黑線白底畫出來的；深色主題下外框是深的，把線反成淺色才看得見 */
 .dio-pal svg { display: block; overflow: visible; }
 :root[data-theme="dark"] .dio-pal svg { filter: invert(1) hue-rotate(180deg); }
-/* 左邊留一點：視窗左緣那個拉出側邊欄的把手（#sidebar-reopen）剛好壓在這段字上 */
-.dio-side-hint { margin-top: 14px; padding-left: 10px; font-size: var(--fs-xs); line-height: 1.7; color: var(--text-faint); }
+.dio-side-hint { margin-top: 14px; font-size: var(--fs-xs); line-height: 1.7; color: var(--text-faint); }
 .dio-ghost {
   position: fixed; z-index: 2200; pointer-events: none; transform: translate(-50%, -50%) scale(1.6);
   padding: 2px; background: rgba(255, 255, 255, .9); border: 1px dashed #4c8dff;
 }
 .dio-ghost[hidden] { display: none; }
+.dio-ghost img { display: block; width: 36px; height: 28px; object-fit: contain; }
+
+/* 我的圖示：自己上傳、每張圖都能重複用的圖片（圖示庫只有本人拿得到）。每一格是白底——
+   圖示是要放到白紙上的，深色主題下在這裡看到的也要是它放上去的樣子；所以這幾格不像上面
+   那些線條縮圖要反色。 */
+.dio-icons-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.dio-icon-add {
+  display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; padding: 2px 7px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text-dim);
+  font: inherit; font-size: var(--fs-xs); font-weight: 500; cursor: pointer;
+}
+.dio-icon-add:hover { color: var(--accent); border-color: var(--accent); }
+.dio-icon-add .ic-svg { width: 12px; height: 12px; }
+.dio-side.is-uploading .dio-icon-add { opacity: .5; pointer-events: none; }
+.dio-icon { position: relative; background: #fff; border-color: var(--border); }
+.dio-icon:hover { background: #fff; }
+.dio-icon img { display: block; width: 36px; height: 30px; object-fit: contain; pointer-events: none; }
+.dio-icon-del {
+  position: absolute; top: -1px; right: -1px; width: 15px; height: 15px;
+  display: none; align-items: center; justify-content: center;
+  background: var(--danger); color: #fff; font-size: 12px; line-height: 1; cursor: pointer;
+}
+.dio-icon:hover .dio-icon-del, .dio-icon:focus-visible .dio-icon-del { display: flex; }
+@media (hover: none) { .dio-icon-del { display: flex; } }   /* 觸控沒有「滑過去」 */
+.dio-icon-empty { padding: 2px 0 4px; font-size: var(--fs-xs); line-height: 1.7; color: var(--text-faint); }
+.dio-icon-empty[hidden] { display: none; }
+/* 從電腦拖圖片檔進來的時候 */
+.dio-page.is-filedrag .dio-icons { outline: 2px dashed var(--accent); outline-offset: 3px; }
+.dio-page.is-filedrag .dio-canvas { box-shadow: inset 0 0 0 2px #4c8dff; }
 
 .dio-canvas { flex: 1 1 auto; min-width: 0; position: relative; overflow: hidden; outline: none; background: #fff; cursor: default; }
 .dio-canvas.can-pan { cursor: grab; }
@@ -3388,6 +3421,10 @@ span.dio-tab { cursor: default; }
   .dio-side { flex-basis: 56px; scrollbar-width: none; }
   .dio-sec-grid { grid-template-columns: 1fr; }
   .dio-sec-t { display: none; }
+  /* 「我的圖示」那一列標題要留著——上傳鈕在上面；字收掉，只留「＋」 */
+  .dio-icons-head { display: flex; justify-content: center; margin: 10px 0 6px; }
+  .dio-icons-head > span, .dio-icon-add > span, .dio-icon-empty { display: none; }
+  .dio-icon-add { padding: 4px 10px; }
 }
 
 /* ---------- 關聯圖（反向連結＋標籤，Obsidian 風格的力導向圖） ----------
@@ -3902,6 +3939,7 @@ div.ver-item.ver-now { cursor: default; }
   display: inline-flex; align-items: center; justify-content: center; background: rgba(17, 20, 26, .62); color: #fff;
 }
 .imglib-flag .ic-svg { width: 13px; height: 13px; }
+.imglib-flag + .imglib-flag { left: 34px; }   /* 已標註又是 drawio 圖示：兩個並排 */
 .imglib-check {
   position: absolute; right: 8px; top: 8px; width: 22px; height: 22px; padding: 0;
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer;

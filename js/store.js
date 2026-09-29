@@ -394,6 +394,15 @@
     updateFile: function (id, body) { return req('PUT', '/api/images/' + id + '/file', body); },
     // Image library: every upload of mine (no bytes) with the notes that embed it.
     listImages: function () { return req('GET', '/api/images'); },
+    // drawio 的圖示庫（js/drawio.js 左邊的「我的圖示」）：只有自己的。
+    // removeIcon 回 { kept }：那個圖示還有圖在用的話檔案會留著，只是從庫裡拿掉。
+    listIcons: function () { return req('GET', '/api/icons').then(function (r) { return r.icons || []; }); },
+    putIcon: function (file) {
+      const h = { 'Content-Type': file.type || 'application/octet-stream' };
+      if (file.name) h['X-File-Name'] = encodeURIComponent(String(file.name));
+      return req('POST', '/api/icons', file, { raw: true, headers: h }).then(function (r) { return r.icon; });
+    },
+    removeIcon: function (id) { return req('DELETE', '/api/icons/' + id); },
 
     // Auth
     login: function (username, password) {

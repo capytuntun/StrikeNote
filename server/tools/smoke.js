@@ -284,6 +284,86 @@ async function main() {
   r = await call(bob, 'GET', '/api/images/' + fileId, undefined, { buffer: true });
   ok(r.status === 200, 'attachment visible once a shared note links it with file:', r.status);
 
+  // drawio 的圖示庫（js/drawio.js 左邊的「我的圖示」）。圖示庫是私人的：清單只有本人拿得到。
+  // 圖示畫進圖裡是 src=img:<id>，所以讀得到那張圖的人看得到圖片本身（不然分享出去的圖
+  // 會缺一塊），但他的圖示庫裡不會多出別人的東西，也動不了別人的圖示。
+  section('drawio icon library');
+  {
+    const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#c00"/></svg>');
+    const before = (await call(admin, 'GET', '/api/images')).data.images.length;
+    r = await call(admin, 'GET', '/api/icons');
+    ok(r.status === 200 && Array.isArray(r.data.icons) && r.data.icons.length === 0, 'the icon library starts empty', r.data);
+    r = await call(admin, 'POST', '/api/icons', PNG, { raw: true, contentType: 'image/png', headers: { 'X-File-Name': encodeURIComponent('防火牆.png') } });
+    ok(r.status === 200 && r.data.icon && r.data.icon.id && r.data.icon.name === '防火牆.png' && r.data.icon.bytes === PNG.length, 'upload an icon', r.data);
+    const icon1 = r.data.icon.id;
+    r = await call(admin, 'POST', '/api/icons', SVG, { raw: true, contentType: 'image/svg+xml', headers: { 'X-File-Name': 'server.svg' } });
+    ok(r.status === 200 && r.data.icon.mime === 'image/svg+xml', 'an SVG icon is accepted', r.data);
+    const icon2 = r.data.icon.id;
+    r = await call(admin, 'GET', '/api/icons');
+    ok(r.data.icons.length === 2 && r.data.icons[0].id === icon1 && r.data.icons[1].id === icon2, 'the owner lists their icons, oldest first', r.data.icons.map(i => i.id));
+    r = await call(admin, 'GET', '/api/images/' + icon2, undefined, { buffer: true });
+    ok(r.status === 200 && r.data.equals(SVG) && /sandbox/.test(r.headers.get('content-security-policy') || ''),
+      'an SVG icon is served like any uploaded SVG: as itself, under a sandbox policy', r.headers.get('content-security-policy'));
+
+    r = await call(bob, 'GET', '/api/icons');
+    ok(r.status === 200 && r.data.icons.length === 0, "another user's library does not show my icons", r.data);
+    r = await call(bob, 'GET', '/api/images/' + icon1, undefined, { buffer: true });
+    ok(r.status === 404, 'nor can they fetch the icon itself', r.status);
+    r = await call(bob, 'DELETE', '/api/icons/' + icon1);
+    ok(r.status === 404, 'nor remove it', r.status);
+    r = await call(null, 'GET', '/api/icons');
+    ok(r.status === 401, 'the icon library needs a session', r.status);
+
+    r = await call(admin, 'POST', '/api/icons', Buffer.from('<script>alert(1)</script>'), { raw: true, contentType: 'text/html' });
+    ok(r.status === 400, 'only images can be icons (text/html refused)', r.status);
+    r = await call(admin, 'POST', '/api/icons', Buffer.from('%PDF-1.4'), { raw: true, contentType: 'application/pdf' });
+    ok(r.status === 400, 'a PDF is not an icon', r.status);
+    r = await call(admin, 'POST', '/api/icons', Buffer.alloc(0), { raw: true, contentType: 'image/png' });
+    ok(r.status === 400, 'an empty file is refused', r.status);
+    let bigStatus = 0;
+    try { bigStatus = (await call(admin, 'POST', '/api/icons', Buffer.alloc(2 * 1024 * 1024 + 1024, 1), { raw: true, contentType: 'image/png' })).status; }
+    catch (e) { bigStatus = 413; }   // the server may hang up before the body is through
+    ok(bigStatus === 413, 'an icon over 2 MB is refused', bigStatus);
+    r = await call(admin, 'GET', '/api/icons');
+    ok(r.data.icons.length === 2, 'none of the refused uploads got in', r.data.icons.length);
+
+    // A diagram using the icon, shared with bob.
+    const dsl = 'shape s1 image x=0 y=0 w=60 h=60 "FW" src=img:' + icon1 + ' fill=none stroke=none';
+    r = await call(admin, 'POST', '/api/notes', { title: '圖示測試圖', content: '```drawio\n' + dsl + '\n```\n', meta: { drawio: true } });
+    const dNote = r.data.note.id;
+    await call(admin, 'POST', '/api/notes/' + dNote + '/shares', { username: BOB, perm: 'read' });
+    r = await call(bob, 'GET', '/api/images/' + icon1, undefined, { buffer: true });
+    ok(r.status === 200 && r.data.equals(PNG), 'someone who can read the diagram can see the icon drawn on it', r.status);
+    r = await call(bob, 'GET', '/api/images/' + icon2, undefined, { buffer: true });
+    ok(r.status === 404, 'but not the icons the diagram does not use', r.status);
+    r = await call(bob, 'GET', '/api/icons');
+    ok(r.data.icons.length === 0, "and their own library still has nothing of mine", r.data);
+    r = await call(admin, 'GET', '/api/images');
+    const row1 = r.data.images.find(x => x.id === icon1), row2 = r.data.images.find(x => x.id === icon2);
+    ok(row1 && row1.icon === true && row1.notes.some(n => n.id === dNote), '檔案管理 shows the icon as used by the diagram, flagged as an icon', row1);
+    ok(row2 && row2.icon === true && row2.notes.length === 0, 'an icon not drawn anywhere is flagged too (so it is not mistaken for junk)', row2);
+
+    // Removing: a used icon leaves the library but keeps its file; an unused one goes entirely.
+    r = await call(admin, 'DELETE', '/api/icons/' + icon1);
+    ok(r.status === 200 && r.data.kept === true, 'removing an icon that a diagram uses keeps the file', r.data);
+    r = await call(bob, 'GET', '/api/images/' + icon1, undefined, { buffer: true });
+    ok(r.status === 200 && r.data.equals(PNG), 'the diagram still shows it', r.status);
+    r = await call(admin, 'DELETE', '/api/icons/' + icon2);
+    ok(r.status === 200 && r.data.kept === false, 'removing an unused icon deletes the file', r.data);
+    ok((await call(admin, 'GET', '/api/images/' + icon2)).status === 404, 'it is gone');
+    r = await call(admin, 'GET', '/api/icons');
+    ok(r.data.icons.length === 0, 'both are out of the library', r.data);
+    r = await call(admin, 'DELETE', '/api/icons/' + icon1);
+    ok(r.status === 404, 'a file that is no longer an icon cannot be removed as one', r.status);
+
+    // Leave the fixture as it was: later sections count notes and files.
+    await call(admin, 'DELETE', '/api/notes/' + dNote);
+    await call(admin, 'DELETE', '/api/trash/' + dNote);
+    await call(admin, 'DELETE', '/api/images/' + icon1);
+    r = await call(admin, 'GET', '/api/images');
+    ok(r.data.images.length === before, 'cleaned up', { before: before, after: r.data.images.length });
+  }
+
   section('book versions');
   r = await call(admin, 'POST', '/api/books/' + fid + '/versions', { title: '專案 A', label: '初版', chapters: noteIds });
   ok(r.status === 200 && r.data.version && r.data.version.chapters === 3, 'create book version', r.data);
@@ -637,8 +717,9 @@ async function main() {
     ok(r.status === 200, 'carol registered', r.data);
     r = await call(carol, 'POST', '/api/folders', { name: '備份資料夾' });
     const cFolder = r.data.folder.id;
-    r = await call(carol, 'POST', '/api/images', PNG, { raw: true, contentType: 'image/png', headers: { 'X-File-Name': encodeURIComponent('截圖.png') } });
-    const cImg = r.data.id;
+    // 從圖示庫上傳（drawio 的「我的圖示」）：檔案本身跟一般上傳一樣，多一個要跟著備份走的標記
+    r = await call(carol, 'POST', '/api/icons', PNG, { raw: true, contentType: 'image/png', headers: { 'X-File-Name': encodeURIComponent('截圖.png') } });
+    const cImg = r.data.icon.id;
     r = await call(carol, 'POST', '/api/notes', { title: '第一章', content: '# 第一章\n\n![截圖](img:' + cImg + ')\n\n內文 🚀', folderId: cFolder });
     const cNote = r.data.note;
     r = await call(carol, 'PUT', '/api/notes/' + cNote.id, { title: cNote.title, content: cNote.content + '\n\n第二段', baseContent: cNote.content, folderId: cFolder });
@@ -668,6 +749,7 @@ async function main() {
     ok(nBin && nBin.deletedAt && /^notes\/_垃圾桶\//.test(nBin.file), 'a trashed note sits under _垃圾桶', nBin && nBin.file);
     ok(filesIdx.length === 1 && filesIdx[0].file === 'files/' + cImg + '.png' && z.zr.read(filesIdx[0].file).equals(PNG) && filesIdx[0].name === '截圖.png',
       'an upload is stored byte for byte with its name', filesIdx[0]);
+    ok(filesIdx[0].icon === true, 'an icon is marked as one in files.json', filesIdx[0]);
     ok(!z.zr.has('users.json'), 'a mine backup carries no accounts');
     z.zr.close(); fs.unlinkSync(z.f);
 
@@ -711,6 +793,9 @@ async function main() {
       'the note is back with its content, folder and rev', r.data && r.data.note && { rev: r.data.note.rev, folder: r.data.note.folderId });
     r = await call(carol2, 'GET', '/api/images/' + cImg, undefined, { buffer: true });
     ok(r.status === 200 && r.data.equals(PNG), 'the image is back byte for byte', r.status);
+    r = await call(carol2, 'GET', '/api/icons');
+    ok(r.status === 200 && r.data.icons.length === 1 && r.data.icons[0].id === cImg && r.data.icons[0].name === '截圖.png',
+      'and it is back in the icon library', r.data);
     r = await call(carol2, 'GET', '/api/notes/' + cNote.id + '/versions');
     ok(r.status === 200 && r.data.versions.some(v => v.label === '備份前標記'), 'the labelled version is back', r.data && r.data.versions.map(v => v.label));
     r = await call(bob, 'GET', '/api/notes/' + cNote.id);

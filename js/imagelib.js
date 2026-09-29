@@ -878,6 +878,14 @@
         flag.title = '已標註';
         thumb.appendChild(flag);
       }
+      // drawio 圖示庫裡的圖示：還沒畫進任何一張圖的時候會被算成「未使用」，標出來，
+      // 清未使用的檔案時才不會順手把圖示庫清掉
+      if (img.icon) {
+        const flag = el('span', 'imglib-flag');
+        flag.innerHTML = icon('shapes');
+        flag.title = 'drawio 圖示庫裡的圖示';
+        thumb.appendChild(flag);
+      }
       const check = el('button', 'imglib-check');
       check.type = 'button';
       check.tabIndex = -1;
@@ -1112,6 +1120,7 @@
       prop('大小', size(img.bytes) + (img.annotated ? '（含標註前的原圖）' : ''));
       if (isImage(img)) dimsEl = prop('尺寸', dims[img.id] || '—');
       prop('上傳', fullDate(img.createdAt));
+      if (img.icon) prop('用途', 'drawio 圖示庫');
       main.appendChild(props);
 
       const uses = el('div');

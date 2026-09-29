@@ -17,6 +17,10 @@
  *                                     [end=none|arrow] [stroke=] [sw=] [dash=1] [fs=] [fc=]
  *   opt   grid=0
  *
+ * 種類是 image 的圖形是一張圖片（左邊「我的圖示」裡上傳的）：多一個 src=img:<檔案 id>。
+ * 寫成 img:<id> 是故意的——伺服器判斷「誰看得到這個上傳」就是看筆記內容裡有沒有這串字，
+ * 所以圖分享出去，對方也看得到上面的圖示，不用另外開權限。
+ *
  * 起點／終點是圖形的 id（連線會跟著圖形走），或 @x,y（畫布上的一個點）。圖形在清單裡的
  * 順序就是疊放順序；連線一律畫在圖形上面。顏色是使用者自己挑的，所以直接寫在 SVG 的屬性
  * 上（不像關聯分析走 CSS class）；畫布永遠是白紙，印出來也是白紙，不跟主題變色。
@@ -36,7 +40,11 @@
   const FONT = "Helvetica, Arial, 'Noto Sans TC', 'Microsoft JhengHei', sans-serif";
   const SHAPE_DEF = { fill: '#ffffff', stroke: '#000000', sw: 1, dash: 0, fs: 12, fc: '#000000', bold: 0, align: 'center' };
   const EDGE_DEF = { stroke: '#000000', sw: 1, dash: 0, fs: 11, fc: '#000000', bold: 0, style: 'straight', start: 'none', end: 'arrow' };
-  const TYPES = ['rect', 'round', 'pill', 'ellipse', 'diamond', 'para', 'hex', 'tri', 'cyl', 'cloud', 'doc', 'actor', 'text'];
+  const TYPES = ['rect', 'round', 'pill', 'ellipse', 'diamond', 'para', 'hex', 'tri', 'cyl', 'cloud', 'doc', 'actor', 'text', 'image'];
+  // 圖片的來源只收 img:<id>，id 只有英數、底線、點、連字號——這個值會寫進 SVG 的 href
+  const SRC_RE = /^img:([A-Za-z0-9_][\w.-]{0,63})$/;
+  // 文字放在圖形下面的那幾種（本身沒有地方寫字）
+  function labelBelow(s) { return s.type === 'actor' || s.type === 'image'; }
   const ALIGNS = ['left', 'center', 'right'];
   const STYLES = ['straight', 'elbow', 'curve'];
   const GRID = 10, MIN_SIZE = 10;
@@ -133,6 +141,8 @@
         const id = t[1].v, type = t[2].v;
         if (!ID_RE.test(id) || seen[id] || TYPES.indexOf(type) < 0) return;
         const r = split(t.slice(3)), a = r.attrs;
+        const src = type === 'image' ? SRC_RE.exec(a.src || '') : null;
+        if (type === 'image' && !src) return;      // 沒有來源的圖片畫不出東西
         seen[id] = true;
         model.shapes.push({
           id: id, type: type, label: r.label,
@@ -143,6 +153,7 @@
           fs: num(a.fs, SHAPE_DEF.fs, 6, 96), fc: color(a.fc, SHAPE_DEF.fc, false),
           bold: a.bold === '1' ? 1 : 0, align: ALIGNS.indexOf(a.align) >= 0 ? a.align : SHAPE_DEF.align
         });
+        if (src) model.shapes[model.shapes.length - 1].src = src[1];
       } else if (kind === 'edge' && t[1] && t[2] && t[3] && !t[1].q && !t[2].q && !t[3].q) {
         const id = t[1].v;
         const from = endpointOf(t[2].v), to = endpointOf(t[3].v);
@@ -172,6 +183,7 @@
     model.shapes.forEach(function (s) {
       let l = 'shape ' + s.id + ' ' + s.type + ' x=' + fmt(s.x) + ' y=' + fmt(s.y) + ' w=' + fmt(s.w) + ' h=' + fmt(s.h);
       if (s.label) l += ' ' + quote(s.label);
+      if (s.type === 'image') l += ' src=img:' + s.src;
       if (s.fill !== SHAPE_DEF.fill) l += ' fill=' + s.fill;
       if (s.stroke !== SHAPE_DEF.stroke) l += ' stroke=' + s.stroke;
       if (s.sw !== SHAPE_DEF.sw) l += ' sw=' + fmt(s.sw);
@@ -288,7 +300,8 @@
     return a;
   }
   function pts(list) { return list.map(function (p) { return fmt(p[0]) + ',' + fmt(p[1]); }).join(' '); }
-  function shapeBody(s, ox, oy) {
+  // imgs：{ 檔案 id: data URL }。匯出成檔案時用——存下來的圖不能回頭跟伺服器要圖片
+  function shapeBody(s, ox, oy, imgs) {
     const x = s.x + ox, y = s.y + oy, w = s.w, h = s.h;
     const st = ' fill="' + s.fill + '"' + strokeAttrs(s) + ' stroke-linejoin="round"';
     const line = ' fill="none"' + strokeAttrs(s) + ' stroke-linecap="round"';
@@ -344,6 +357,15 @@
       }
       case 'text':
         return '';
+      case 'image': {
+        const box = ' x="' + fmt(x) + '" y="' + fmt(y) + '" width="' + fmt(w) + '" height="' + fmt(h) + '"';
+        const inl = imgs && imgs[s.src];
+        // 底色在圖片下面、外框在圖片上面；兩個預設都是沒有
+        return (s.fill !== 'none' ? '<rect' + box + ' fill="' + s.fill + '" stroke="none"/>' : '') +
+          '<image' + box + ' preserveAspectRatio="xMidYMid meet" href="' + (inl ? esc(inl) : '/api/images/' + s.src) + '"' +
+          (inl ? '' : ' data-img-id="' + s.src + '"') + '/>' +
+          (s.stroke !== 'none' ? '<rect' + box + line + '/>' : '');
+      }
       default:
         return '<rect x="' + fmt(x) + '" y="' + fmt(y) + '" width="' + fmt(w) + '" height="' + fmt(h) + '"' + st + '/>';
     }
@@ -354,7 +376,7 @@
   function baseline(centerY, fs) { return centerY + fs * 0.35; }
   function labelLines(s) {
     if (!s.label) return [];
-    const max = s.type === 'actor' ? Math.max(s.w, 90) : Math.max(10, s.w - LABEL_PAD * 2);
+    const max = labelBelow(s) ? Math.max(s.w, 90) : Math.max(10, s.w - LABEL_PAD * 2);
     return wrapText(s.label, max, s.fs, s.bold);
   }
   function labelSVG(s, ox, oy) {
@@ -362,10 +384,10 @@
     if (!lines.length) return '';
     const lh = s.fs * 1.3;
     let tx, anchor;
-    if (s.type === 'actor' || s.align === 'center') { tx = s.x + s.w / 2; anchor = 'middle'; }
+    if (labelBelow(s) || s.align === 'center') { tx = s.x + s.w / 2; anchor = 'middle'; }
     else if (s.align === 'left') { tx = s.x + LABEL_PAD; anchor = 'start'; }
     else { tx = s.x + s.w - LABEL_PAD; anchor = 'end'; }
-    const top = s.type === 'actor' ? s.y + s.h + 3 : s.y + (s.h - lines.length * lh) / 2;
+    const top = labelBelow(s) ? s.y + s.h + 3 : s.y + (s.h - lines.length * lh) / 2;
     let out = '';
     lines.forEach(function (ln, i) {
       out += '<text x="' + fmt(tx + ox) + '" y="' + fmt(baseline(top + oy + i * lh + lh / 2, s.fs)) + '" text-anchor="' + anchor +
@@ -374,10 +396,10 @@
     });
     return out;
   }
-  // 圖形實際佔的範圍（人形的文字在下面，會超出自己的框）
+  // 圖形實際佔的範圍（人形、圖片的文字在下面，會超出自己的框）
   function shapeBounds(s) {
     let h = s.h, x = s.x, w = s.w;
-    if (s.type === 'actor' && s.label) {
+    if (labelBelow(s) && s.label) {
       const lines = labelLines(s);
       h += 3 + lines.length * s.fs * 1.3;
       const lw = Math.max.apply(null, lines.map(function (l) { return textW(l, s.fs, s.bold); }));
@@ -386,12 +408,12 @@
     return { x: x, y: s.y, w: w, h: h };
   }
   // hit：只有編輯器要的「點得到的範圍」。預覽、PDF、匯出的檔案裡不放，那裡沒有人要點
-  function shapeSVG(s, ox, oy, hit) {
+  function shapeSVG(s, ox, oy, hit, imgs) {
     return '<g class="dio-shape" data-id="' + esc(s.id) + '">' +
       // 整個框都點得到：沒有填色的圖形、純文字，中間是空的
       (hit ? '<rect class="dio-hit" x="' + fmt(s.x + ox) + '" y="' + fmt(s.y + oy) + '" width="' + fmt(s.w) + '" height="' + fmt(s.h) +
       '" fill="none" stroke="none"/>' : '') +
-      shapeBody(s, ox, oy) + labelSVG(s, ox, oy) + '</g>';
+      shapeBody(s, ox, oy, imgs) + labelSVG(s, ox, oy) + '</g>';
   }
 
   // ---------------- 連線 ----------------
@@ -532,7 +554,7 @@
     return '<svg class="dio-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H +
       '" font-family="' + FONT + '">' +
       (o.background ? '<rect width="' + W + '" height="' + H + '" fill="#ffffff"/>' : '') +
-      model.shapes.map(function (s) { return shapeSVG(s, ox, oy); }).join('') +
+      model.shapes.map(function (s) { return shapeSVG(s, ox, oy, false, o.images); }).join('') +
       model.edges.map(function (e) { return edgeSVG(e, byId, ox, oy); }).join('') +
       '</svg>';
   }
@@ -619,6 +641,13 @@
       '</div>' +
       '<div class="dio-main">' +
       '<aside class="dio-side">' + paletteHTML() +
+      '<div class="dio-sec dio-icons">' +
+      '<div class="dio-sec-t dio-icons-head"><span>我的圖示</span>' +
+      '<button class="dio-icon-add" type="button" title="上傳圖示：PNG、JPG、GIF、WebP、SVG，每個 2 MB 以內。也可以把圖片檔直接拖進來">' + ic('plus') + '<span>上傳</span></button></div>' +
+      '<div class="dio-sec-grid dio-icon-grid"></div>' +
+      '<div class="dio-icon-empty">上傳自己的圖示（主機、防火牆、Logo…），之後每一張圖都能用。只有你自己看得到這個圖示庫。</div>' +
+      '<input class="dio-icon-file" type="file" multiple hidden accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml">' +
+      '</div>' +
       '<div class="dio-side-hint">點一下放到畫布中央，或直接拖到畫布上。<br>滑到圖形上，從邊上的藍點拉出連線。</div></aside>' +
       '<div class="dio-canvas" tabindex="0">' +
       '<svg class="dio-stage" xmlns="http://www.w3.org/2000/svg" font-family="' + FONT + '">' +
@@ -947,7 +976,8 @@
             id: newId('s'), type: it.type, label: it.label || '', w: it.w, h: it.h,
             x: snap(c.x - it.w / 2), y: snap(c.y - it.h / 2)
           });
-          if (it.type === 'text') { s.fill = 'none'; s.stroke = 'none'; }
+          if (it.type === 'text' || it.type === 'image') { s.fill = 'none'; s.stroke = 'none'; }
+          if (it.type === 'image') s.src = it.src;
           // 連續點同一個圖形不要整疊在一起
           // （比中心點，不是左上角：大小不同的兩個圖形左上角不一樣，照樣是疊在一起）
           while (model.shapes.some(function (o) {
@@ -971,14 +1001,40 @@
       const t = opts.getTitle ? opts.getTitle() : opts.title;
       return (String(t || '').trim() || '圖表').replace(/[\\/:*?"<>|]+/g, '_');
     }
+    // 存成檔案的圖不能回頭跟伺服器要圖片（離開這個網站就沒有登入狀態；當成圖片載入的
+    // SVG 更是什麼外部資源都不准抓），所以用到的圖示先換成 data URL 包進去
+    function imageData() {
+      const ids = [];
+      model.shapes.forEach(function (sh) { if (sh.type === 'image' && ids.indexOf(sh.src) < 0) ids.push(sh.src); });
+      if (!ids.length || !global.Store || !Store.getImageBlob) return Promise.resolve({});
+      const map = {};
+      return Promise.all(ids.map(function (id) {
+        return Store.getImageBlob(id).then(function (blob) {
+          if (!blob) return;
+          return new Promise(function (resolve) {
+            const fr = new FileReader();
+            fr.onload = function () { map[id] = String(fr.result); resolve(); };
+            fr.onerror = function () { resolve(); };
+            fr.readAsDataURL(blob);
+          });
+        });
+      })).then(function () {
+        if (Object.keys(map).length < ids.length) toast('有圖示讀不到，匯出的圖會缺那幾個');
+        return map;
+      });
+    }
     function exportSVG() {
-      const svg = renderSVG(model, { background: true });
-      if (!svg) { toast('圖是空的，沒有東西可以匯出'); return; }
-      download(fileBase() + '.svg', new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + svg], { type: 'image/svg+xml' }));
+      if (!renderSVG(model)) { toast('圖是空的，沒有東西可以匯出'); return; }
+      imageData().then(function (imgs) {
+        const svg = renderSVG(model, { background: true, images: imgs });
+        download(fileBase() + '.svg', new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + svg], { type: 'image/svg+xml' }));
+      });
     }
     function exportPNG() {
-      const svg = renderSVG(model, { background: true });
-      if (!svg) { toast('圖是空的，沒有東西可以匯出'); return; }
+      if (!renderSVG(model)) { toast('圖是空的，沒有東西可以匯出'); return; }
+      imageData().then(function (imgs) { drawPNG(renderSVG(model, { background: true, images: imgs })); });
+    }
+    function drawPNG(svg) {
       const m = /width="(\d+)" height="(\d+)"/.exec(svg);
       const W = parseInt(m[1], 10), H = parseInt(m[2], 10), K = 2;
       const img = new Image();
@@ -1073,13 +1129,13 @@
       if (!sh && !ed && !at) return;
       const r = stage.getBoundingClientRect();
       let box;
-      if (sh) box = { x: sh.x, y: sh.type === 'actor' ? sh.y + sh.h : sh.y, w: Math.max(sh.w, 60), h: sh.type === 'actor' ? 30 : Math.max(sh.h, 24) };
+      if (sh) box = { x: sh.x, y: labelBelow(sh) ? sh.y + sh.h : sh.y, w: Math.max(sh.w, 60), h: labelBelow(sh) ? 30 : Math.max(sh.h, 24) };
       else if (ed) {
         const g = edgeGeom(ed, indexOf(model));
         if (!g) return;
         box = { x: g.mid.x - 70, y: g.mid.y - 14, w: 140, h: 28 };
       } else box = { x: at.x - 70, y: at.y - 15, w: 140, h: 30 };
-      if (sh && sh.type === 'actor') box.x = sh.x + sh.w / 2 - Math.max(sh.w, 90) / 2, box.w = Math.max(sh.w, 90);
+      if (sh && labelBelow(sh)) box.x = sh.x + sh.w / 2 - Math.max(sh.w, 90) / 2, box.w = Math.max(sh.w, 90);
       const ta = document.createElement('textarea');
       ta.className = 'dio-edit';
       ta.value = (sh || ed || {}).label || '';
@@ -1089,7 +1145,7 @@
       ta.style.width = Math.max(60, box.w * zoom) + 'px';
       ta.style.height = Math.max(26, box.h * zoom) + 'px';
       ta.style.fontSize = clamp(fs, 9, 60) + 'px';
-      ta.style.textAlign = sh ? (sh.type === 'actor' ? 'center' : sh.align) : 'center';
+      ta.style.textAlign = sh ? (labelBelow(sh) ? 'center' : sh.align) : 'center';
       host.appendChild(ta);
       editing = { id: id || null, at: at || null, el: ta, done: false };
       ta.focus(); ta.select();
@@ -1330,15 +1386,164 @@
     }, { passive: false });
 
     // 左邊的圖形：點一下放中央，拖過去放在放開的地方
-    host.querySelector('.dio-side').addEventListener('mousedown', function (e) {
-      const b = e.target.closest('[data-pal]');
+    // ---- 我的圖示 ----
+    // 清單每次開編輯器都重新跟伺服器要：只有本人的（伺服器只回自己的），而且不留在模組裡
+    // ——同一個分頁登出換人登入，上一個人的圖示不能還掛在這裡。
+    const sideEl = host.querySelector('.dio-side');
+    const iconGrid = host.querySelector('.dio-icon-grid');
+    const iconEmpty = host.querySelector('.dio-icon-empty');
+    const iconFile = host.querySelector('.dio-icon-file');
+    const iconAdd = host.querySelector('.dio-icon-add');
+    const ICON_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'];
+    const ICON_MAX = 2 * 1024 * 1024;
+    let icons = [], iconBusy = false;
+    function iconTile(it) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'dio-pal dio-icon';
+      b.setAttribute('data-icon', it.id);
+      b.title = it.name || '圖示';
+      const img = document.createElement('img');
+      img.alt = ''; img.draggable = false; img.loading = 'lazy';
+      img.src = '/api/images/' + it.id;
+      const del = document.createElement('span');
+      del.className = 'dio-icon-del';
+      del.setAttribute('data-icon-del', it.id);
+      del.title = '從圖示庫移除';
+      del.textContent = '×';
+      b.appendChild(img); b.appendChild(del);
+      return b;
+    }
+    function renderIcons() {
+      // 已經畫出來的那幾格留著不動，不然每上傳一個，整排縮圖都要重新載入一次
+      const have = {};
+      Array.prototype.forEach.call(iconGrid.children, function (c) { have[c.getAttribute('data-icon')] = c; });
+      icons.forEach(function (it) {
+        iconGrid.appendChild(have[it.id] || iconTile(it));
+        delete have[it.id];
+      });
+      Object.keys(have).forEach(function (id) { have[id].remove(); });
+      iconEmpty.hidden = icons.length > 0;
+    }
+    // 放到畫布上的大小：長邊 60，照原圖的比例；還不知道原圖多大就先給正方形
+    function iconItem(id) {
+      const it = icons.find(function (x) { return x.id === id; });
+      const img = iconGrid.querySelector('[data-icon="' + id + '"] img');
+      const nw = (it && it.nw) || (img && img.naturalWidth) || 0, nh = (it && it.nh) || (img && img.naturalHeight) || 0;
+      let w = 60, h = 60;
+      if (nw && nh) {
+        const k = 60 / Math.max(nw, nh);
+        w = Math.max(20, Math.round(nw * k / GRID) * GRID);
+        h = Math.max(20, Math.round(nh * k / GRID) * GRID);
+      }
+      return { type: 'image', src: id, w: w, h: h, name: it ? it.name : '' };
+    }
+    function measure(file) {
+      return new Promise(function (resolve) {
+        const url = URL.createObjectURL(file), im = new Image();
+        const done = function (w, h) { URL.revokeObjectURL(url); resolve({ w: w, h: h }); };
+        im.onload = function () { done(im.naturalWidth, im.naturalHeight); };
+        im.onerror = function () { done(0, 0); };
+        im.src = url;
+      });
+    }
+    // at：放開滑鼠的位置（把檔案拖到畫布上）——上傳完直接放在那裡
+    function uploadIcons(files, at) {
+      const list = Array.prototype.slice.call(files || []);
+      if (!list.length || iconBusy) return;
+      if (!global.Store || !Store.putIcon) { toast('這裡不能上傳圖示'); return; }
+      const bad = [], added = [];
+      iconBusy = true;
+      sideEl.classList.add('is-uploading');
+      let chain = Promise.resolve();
+      list.forEach(function (f) {
+        chain = chain.then(function () {
+          if (closed) return;
+          if (ICON_TYPES.indexOf(f.type) < 0) { bad.push(f.name + '：只能是 PNG、JPG、GIF、WebP 或 SVG'); return; }
+          if (f.size > ICON_MAX) { bad.push(f.name + '：超過 2 MB'); return; }
+          return measure(f).then(function (dim) {
+            return Store.putIcon(f).then(function (it) {
+              it.nw = dim.w; it.nh = dim.h;
+              icons.push(it); added.push(it);
+              if (!closed) renderIcons();
+            });
+          }).catch(function (e) { bad.push(f.name + '：' + (e && e.message || '上傳失敗')); });
+        });
+      });
+      chain.then(function () {
+        iconBusy = false;
+        if (closed) return;
+        sideEl.classList.remove('is-uploading');
+        if (at && added.length) {
+          added.forEach(function (it, i) { insert(iconItem(it.id), { x: at.x + i * 20, y: at.y + i * 20 }); });
+        } else if (added.length) {
+          const last = iconGrid.querySelector('[data-icon="' + added[added.length - 1].id + '"]');
+          if (last && last.scrollIntoView) last.scrollIntoView({ block: 'nearest' });
+        }
+        if (bad.length) toast(bad.length === 1 ? bad[0] : bad.length + ' 個檔案沒有加進來：' + bad[0] + '…');
+        else if (added.length) toast('已加入 ' + added.length + ' 個圖示');
+      });
+    }
+    function removeIcon(id) {
+      const it = icons.find(function (x) { return x.id === id; });
+      if (!it) return;
+      const ask = global.App && App.confirm
+        ? App.confirm({ title: '從圖示庫移除', message: '要把「' + (it.name || '圖示') + '」從你的圖示庫移除嗎？已經畫在圖裡的不受影響，照樣看得到。', ok: '移除', danger: true })
+        : Promise.resolve(true);
+      ask.then(function (yes) {
+        if (!yes) return;
+        return Store.removeIcon(id).then(function () {
+          icons = icons.filter(function (x) { return x.id !== id; });
+          if (!closed) renderIcons();
+        });
+      }).catch(function (e) { toast('移除失敗：' + (e && e.message || e)); });
+    }
+    if (global.Store && Store.listIcons) {
+      Store.listIcons().then(function (l) { if (!closed) { icons = l.concat(icons); renderIcons(); } },
+        function () { if (!closed) iconEmpty.textContent = '圖示庫讀不到，重新整理再試一次。'; });
+    } else host.querySelector('.dio-icons').hidden = true;
+    iconAdd.addEventListener('click', function () { iconFile.value = ''; iconFile.click(); });
+    iconFile.addEventListener('change', function () { uploadIcons(iconFile.files); });
+    sideEl.addEventListener('click', function (e) {
+      const d = e.target.closest('[data-icon-del]');
+      if (d) { e.preventDefault(); e.stopPropagation(); removeIcon(d.getAttribute('data-icon-del')); }
+    });
+    // 從電腦把圖片檔拖進來：丟在左邊＝加進圖示庫；丟在畫布上＝加進圖示庫，順便放在那裡
+    function dragHasFiles(e) {
+      const t = e.dataTransfer && e.dataTransfer.types;
+      return !!t && Array.prototype.indexOf.call(t, 'Files') >= 0;
+    }
+    function onDragOver(e) {
+      if (!dragHasFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      host.classList.add('is-filedrag');
+    }
+    function onDragLeave(e) { if (!e.relatedTarget || !host.contains(e.relatedTarget)) host.classList.remove('is-filedrag'); }
+    function onDrop(e) {
+      if (!dragHasFiles(e)) return;
+      e.preventDefault(); e.stopPropagation();
+      host.classList.remove('is-filedrag');
+      const onCanvas = !!(e.target.closest && e.target.closest('.dio-canvas'));
+      uploadIcons(e.dataTransfer.files, onCanvas ? toWorld(e) : null);
+    }
+    host.addEventListener('dragover', onDragOver);
+    host.addEventListener('dragleave', onDragLeave);
+    host.addEventListener('drop', onDrop);
+
+    sideEl.addEventListener('mousedown', function (e) {
+      if (e.target.closest('[data-icon-del]')) return;      // 那是「移除」，不是要拖圖示
+      const ib = e.target.closest('[data-icon]');
+      const b = ib || e.target.closest('[data-pal]');
       if (!b || e.button !== 0) return;
-      const p = b.getAttribute('data-pal').split(',');
-      const item = PALETTE[+p[0]].items[+p[1]];
+      let item;
+      if (ib) item = iconItem(ib.getAttribute('data-icon'));
+      else { const p = b.getAttribute('data-pal').split(','); item = PALETTE[+p[0]].items[+p[1]]; }
       const ghost = document.createElement('div');
       ghost.className = 'dio-ghost';
       ghost.hidden = true;
-      ghost.innerHTML = thumb(item);
+      if (ib) { const gi = document.createElement('img'); gi.alt = ''; gi.src = '/api/images/' + item.src; ghost.appendChild(gi); }
+      else ghost.innerHTML = thumb(item);
       ghost.style.left = e.clientX + 'px'; ghost.style.top = e.clientY + 'px';
       host.appendChild(ghost);
       if (editing) commitEdit();
@@ -1543,7 +1748,10 @@
       document.removeEventListener('mousedown', onDocDown, true);
       host.removeEventListener('keydown', onKey);
       host.removeEventListener('keyup', onKeyUp);
-      host.innerHTML = ''; host.classList.remove('dio-page');
+      host.removeEventListener('dragover', onDragOver);
+      host.removeEventListener('dragleave', onDragLeave);
+      host.removeEventListener('drop', onDrop);
+      host.innerHTML = ''; host.classList.remove('dio-page', 'is-filedrag');
     }
     // 圖就是一段文字，存檔不用等誰回覆，所以切走時同步送出去就好
     function close() {

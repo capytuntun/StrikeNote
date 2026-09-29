@@ -578,6 +578,17 @@ async function handleApi(req, res, url) {
     return send(await api.finishUpload(user, m[1]));
   }
 
+  // drawio 的圖示庫：只有本人的（api.js listIcons）。上傳的大小上限比一般檔案小得多，
+  // 在讀 body 的時候就擋，不用把一個 50 MB 的檔案收完才說不行。
+  if (p === '/api/icons' && method === 'GET') return json(res, 200, await api.listIcons(user));
+  if (p === '/api/icons' && method === 'POST') {
+    const mime = uploadMime(req.headers['content-type']);
+    const name = uploadName(req.headers['x-file-name']);
+    const buf = await readBody(req, Math.min(config.maxBodyBytes, api.ICON_MAX_BYTES));
+    return send(await api.createIcon(user, mime, buf, name));
+  }
+  if ((m = p.match(/^\/api\/icons\/([\w.-]+)$/)) && method === 'DELETE') return send(await api.removeIcon(user, m[1]));
+
   // File library (js/imagelib.js): the caller's uploads, metadata only, each with the notes that embed it.
   if (p === '/api/images' && method === 'GET') return json(res, 200, await api.listImages(user));
   if (p === '/api/images' && method === 'POST') {

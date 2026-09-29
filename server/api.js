@@ -678,12 +678,19 @@ async function deleteNote(user, id) {
 const cfg = require('./config');
 const trashKeepMs = () => cfg.trashKeepDays * 86400000;
 
+// 垃圾桶的清單只說「這是哪一種筆記」，好讓每一列用對的圖示——meta 本身不送出去。
+function kindOfMeta(raw) {
+  let m = null;
+  try { m = raw ? JSON.parse(raw) : null; } catch (e) { m = null; }
+  if (!m) return '';
+  return m.relMap ? 'relmap' : m.drawio ? 'drawio' : m.secReport ? 'sec' : m.perfReport ? 'perf' : m.file ? 'file' : m.sticky ? 'sticky' : '';
+}
 async function listTrash(user) {
   const rows = await q.trashOf.all(user.id);
   return {
     keepDays: cfg.trashKeepDays,
     notes: rows.map(r => ({
-      id: r.id, title: r.title, folderId: r.folder_id, chars: r.chars,
+      id: r.id, title: r.title, folderId: r.folder_id, chars: r.chars, kind: kindOfMeta(r.meta),
       updatedAt: r.updated_at, deletedAt: r.deleted_at, expiresAt: r.deleted_at + trashKeepMs()
     }))
   };
@@ -1013,6 +1020,46 @@ async function deleteImage(user, id) {
   return { ok: true };
 }
 
+// ---------------- drawio 的圖示庫（js/drawio.js 左邊的「我的圖示」）----------------
+// 一個圖示就是一個普通的上傳（images 的一列）加上 icon = 1。清單只有本人拿得到：
+// listIcons 只查 owner_id = 自己的，沒有任何「別人的圖示庫」可以問。
+// 圖示用在圖裡是寫成 src=img:<id>，所以「誰看得到這張圖片」照舊由 getImage 決定——讀得到
+// 那張圖表的人看得到上面的圖示（不然分享出去的圖會缺一塊），但他拿不到圖示庫，也不能
+// 把它加進自己的庫。
+// 只收瀏覽器能當圖片畫的幾種，大小有上限：圖示庫每次開編輯器都要整排載入縮圖。
+const ICON_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'];
+const ICON_MAX_BYTES = 2 * 1024 * 1024;
+const ICON_MAX_COUNT = 300;
+function shapeIcon(r) {
+  return { id: r.id, name: r.name || '', mime: r.mime, bytes: Number(r.bytes), createdAt: Number(r.created_at) };
+}
+async function listIcons(user) {
+  return { icons: (await q.iconsOf.all(user.id)).map(shapeIcon) };
+}
+async function createIcon(user, mime, buf, name) {
+  if (ICON_MIMES.indexOf(String(mime)) < 0) return { status: 400, error: '圖示只能是 PNG、JPG、GIF、WebP 或 SVG' };
+  if (!buf || !buf.length) return { status: 400, error: '檔案是空的' };
+  if (buf.length > ICON_MAX_BYTES) return { status: 413, error: '圖示不能超過 2 MB' };
+  if ((await q.countIconsOf.get(user.id)).n >= ICON_MAX_COUNT) {
+    return { status: 400, error: '圖示庫最多 ' + ICON_MAX_COUNT + ' 個，先移除一些用不到的' };
+  }
+  const id = uid('img');
+  await tx(async function () {
+    await q.insertImage.run(id, user.id, String(mime), name || null, buf, null, null, Date.now(), null);
+    await q.setImageIcon.run(1, id, user.id);
+  }, 'createIcon');
+  return { icon: { id: id, name: name || '', mime: String(mime), bytes: buf.length, createdAt: Date.now() } };
+}
+// 從圖示庫移除。已經畫在某張圖裡的圖示，檔案要留著（不然那張圖就缺一塊），只是不再出現
+// 在庫裡；沒有任何筆記用到的才連檔案一起刪。kept 告訴前端是哪一種。
+async function removeIcon(user, id) {
+  const row = await q.imageById.get(id);
+  if (!row || row.owner_id !== user.id || !row.icon) return { status: 404 };
+  await q.setImageIcon.run(0, id, user.id);
+  await dropFileIfUnused({ id: id, ownerId: user.id });
+  return { ok: true, kept: !!(await q.imageOwner.get(id)) };
+}
+
 // ---------------- image library ----------------
 // Everything the caller uploaded, each with the notes that embed it, for the
 // image manager (js/imagelib.js). "Embeds" is read from note text exactly the
@@ -1029,7 +1076,7 @@ const MEDIA_REF = /(?:!?\[([^\]\n]*)\]\()?(?:img|pdf|file):([\w.-]+)/g;
 
 async function listImages(user) {
   const images = (await q.imagesOf.all(user.id)).map(r => ({
-    id: r.id, mime: r.mime, createdAt: Number(r.created_at), folderId: r.folder_id,
+    id: r.id, mime: r.mime, createdAt: Number(r.created_at), folderId: r.folder_id, icon: !!r.icon,
     bytes: Number(r.bytes) + Number(r.original_bytes), annotated: !!r.annotated,
     name: '', fileName: r.name || '', notes: [], hiddenNotes: 0
   }));
@@ -1237,6 +1284,7 @@ module.exports = {
   listFolders, createFolder, updateFolder, deleteFolder,
   listFileFolders, createFileFolder, updateFileFolder, deleteFileFolder,
   createImage, getImage, saveImage, updateFile, deleteImage, listImages, saveOrder,
+  listIcons, createIcon, removeIcon, ICON_MAX_BYTES,
   startUpload, putChunk, finishUpload, sweepPendingUploads,
   listShares, addShare, removeShare,
   normalizeArea   // server/backup.js reuses this so a restored area is validated the same way a live create is
