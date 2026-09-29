@@ -3265,6 +3265,12 @@ select.sec-info-input { cursor: pointer; }
   padding: 2px; background: rgba(255, 255, 255, .9); border: 1px dashed #4c8dff;
 }
 .dio-ghost[hidden] { display: none; }
+/* 網路設備那一區：圖示有自己的顏色，跟「我的圖示」一樣放在白底上、深色主題下不反色——
+   在這裡看到的就是放到白紙上的樣子（上面那些黑線白底的幾何圖形才需要反色）。 */
+.dio-dev, .dio-dev:hover { background: #fff; }
+.dio-dev { border-color: var(--border); }
+.dio-dev:hover { border-color: var(--accent); }
+:root[data-theme="dark"] .dio-dev svg { filter: none; }
 .dio-ghost img { display: block; width: 36px; height: 28px; object-fit: contain; }
 
 /* 我的圖示：自己上傳、每張圖都能重複用的圖片（圖示庫只有本人拿得到）。每一格是白底——

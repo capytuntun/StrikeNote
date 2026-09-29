@@ -17,6 +17,9 @@
  *                                     [end=none|arrow] [stroke=] [sw=] [dash=1] [fs=] [fc=]
  *   opt   grid=0
  *
+ * 種類除了基本的幾何圖形，還有一組網路設備（router、switch、firewall、server…，見 DEVICES）：
+ * 一樣是畫出來的向量圖形，吃同一組 fill／stroke，文字寫在圖形下面。
+ *
  * 種類是 image 的圖形是一張圖片（左邊「我的圖示」裡上傳的）：多一個 src=img:<檔案 id>。
  * 寫成 img:<id> 是故意的——伺服器判斷「誰看得到這個上傳」就是看筆記內容裡有沒有這串字，
  * 所以圖分享出去，對方也看得到上面的圖示，不用另外開權限。
@@ -40,11 +43,12 @@
   const FONT = "Helvetica, Arial, 'Noto Sans TC', 'Microsoft JhengHei', sans-serif";
   const SHAPE_DEF = { fill: '#ffffff', stroke: '#000000', sw: 1, dash: 0, fs: 12, fc: '#000000', bold: 0, align: 'center' };
   const EDGE_DEF = { stroke: '#000000', sw: 1, dash: 0, fs: 11, fc: '#000000', bold: 0, style: 'straight', start: 'none', end: 'arrow' };
-  const TYPES = ['rect', 'round', 'pill', 'ellipse', 'diamond', 'para', 'hex', 'tri', 'cyl', 'cloud', 'doc', 'actor', 'text', 'image'];
+  const BASIC = ['rect', 'round', 'pill', 'ellipse', 'diamond', 'para', 'hex', 'tri', 'cyl', 'cloud', 'doc', 'actor', 'text', 'image'];
+  function isType(t) { return BASIC.indexOf(t) >= 0 || isDevice(t); }
   // 圖片的來源只收 img:<id>，id 只有英數、底線、點、連字號——這個值會寫進 SVG 的 href
   const SRC_RE = /^img:([A-Za-z0-9_][\w.-]{0,63})$/;
   // 文字放在圖形下面的那幾種（本身沒有地方寫字）
-  function labelBelow(s) { return s.type === 'actor' || s.type === 'image'; }
+  function labelBelow(s) { return s.type === 'actor' || s.type === 'image' || isDevice(s.type); }
   const ALIGNS = ['left', 'center', 'right'];
   const STYLES = ['straight', 'elbow', 'curve'];
   const GRID = 10, MIN_SIZE = 10;
@@ -68,6 +72,7 @@
       { type: 'doc', w: 120, h: 80, name: '文件' },
       { type: 'actor', w: 30, h: 60, name: '人' }
     ] },
+    { title: '網路設備', devices: true, items: [] },     // 內容在 DEVICES 定義完之後填進去
     { title: '連線', items: [
       { edge: 'straight', end: 'arrow', name: '箭頭' },
       { edge: 'straight', end: 'none', name: '直線' },
@@ -139,7 +144,7 @@
       const kind = t[0].v;
       if (kind === 'shape' && t[1] && t[2] && !t[1].q && !t[2].q) {
         const id = t[1].v, type = t[2].v;
-        if (!ID_RE.test(id) || seen[id] || TYPES.indexOf(type) < 0) return;
+        if (!ID_RE.test(id) || seen[id] || !isType(type)) return;
         const r = split(t.slice(3)), a = r.attrs;
         const src = type === 'image' ? SRC_RE.exec(a.src || '') : null;
         if (type === 'image' && !src) return;      // 沒有來源的圖片畫不出東西
@@ -300,9 +305,253 @@
     return a;
   }
   function pts(list) { return list.map(function (p) { return fmt(p[0]) + ',' + fmt(p[1]); }).join(' '); }
+  // ---------------- 網路設備 ----------------
+  // 內建的設備圖示是「畫出來的」，不是圖片檔：每一種是一組圖元，座標寫在 0..1 的方框裡，
+  // 畫的時候照圖形的寬高換算成實際座標。不用 transform 放大——那樣線條會跟著變粗、
+  // 拉寬的時候還會變扁。顏色跟其他圖形一樣吃 fill／stroke，所以格式面板的配色照樣能用：
+  //   body   機身：fill + stroke            paper  螢幕、紙張：白底 + stroke
+  //   line   只有線                          ink    實心的小東西（燈號、箭頭）：用線的顏色塗滿
+  function pen(s, ox, oy) {
+    const x0 = s.x + ox, y0 = s.y + oy, w = s.w, h = s.h, m = Math.min(w, h);
+    const sa = strokeAttrs(s);
+    const ST = {
+      body: ' fill="' + s.fill + '"' + sa + ' stroke-linejoin="round"',
+      paper: ' fill="#ffffff"' + sa + ' stroke-linejoin="round"',
+      line: ' fill="none"' + sa + ' stroke-linecap="round" stroke-linejoin="round"',
+      ink: ' fill="' + (s.stroke === 'none' ? '#666666' : s.stroke) + '" stroke="none"'
+    };
+    const X = function (a) { return x0 + a * w; }, Y = function (b) { return y0 + b * h; };
+    const at = function (list) { return pts(list.map(function (q) { return [X(q[0]), Y(q[1])]; })); };
+    let out = '';
+    return {
+      // r：圓角，單位是「寬高裡比較短的那一邊」
+      rect: function (a, b, c, d, r, k) {
+        out += '<rect x="' + fmt(X(a)) + '" y="' + fmt(Y(b)) + '" width="' + fmt(c * w) + '" height="' + fmt(d * h) + '"' +
+          (r ? ' rx="' + fmt(r * m) + '"' : '') + ST[k || 'body'] + '/>';
+      },
+      ell: function (cx, cy, rx, ry, k) {
+        out += '<ellipse cx="' + fmt(X(cx)) + '" cy="' + fmt(Y(cy)) + '" rx="' + fmt(rx * w) + '" ry="' + fmt(ry * h) + '"' + ST[k || 'body'] + '/>';
+      },
+      // 圖形拉寬拉扁它都還是圓的（燈號、按鈕）
+      dot: function (cx, cy, r, k) {
+        out += '<circle cx="' + fmt(X(cx)) + '" cy="' + fmt(Y(cy)) + '" r="' + fmt(Math.max(0.8, r * m)) + '"' + ST[k || 'ink'] + '/>';
+      },
+      poly: function (list, k) { out += '<polygon points="' + at(list) + '"' + ST[k || 'body'] + '/>'; },
+      line: function (list) { out += '<polyline points="' + at(list) + '"' + ST.line + '/>'; },
+      // cmds：['M', x, y, 'C', x1, y1, x2, y2, x, y, 'Z' …]，數字都是一對一對的座標
+      path: function (cmds, k) {
+        let d = '', isX = true;
+        cmds.forEach(function (c) {
+          if (typeof c === 'string') { d += (d ? ' ' : '') + c; isX = true; return; }
+          d += (isX ? ' ' : ',') + fmt(isX ? X(c) : Y(c));
+          isX = !isX;
+        });
+        out += '<path d="' + d + '"' + ST[k || 'body'] + '/>';
+      },
+      // 帶箭頭的線：箭頭的大小照實際像素算，不跟著圖形變形
+      arrow: function (a, b, c, d) {
+        const x1 = X(a), y1 = Y(b), x2 = X(c), y2 = Y(d);
+        const len = Math.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1)) || 1;
+        const ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+        const hs = clamp(m * 0.13, 2.5, 9);
+        const bx = x2 - ux * hs, by = y2 - uy * hs;
+        out += '<polyline points="' + pts([[x1, y1], [bx, by]]) + '"' + ST.line + '/>' +
+          '<polygon points="' + pts([[x2, y2], [bx - uy * hs * 0.5, by + ux * hs * 0.5], [bx + uy * hs * 0.5, by - ux * hs * 0.5]]) + '"' + ST.ink + '/>';
+      },
+      // 圖示上的字（VM）：大小跟著圖形走，單位同樣是比較短的那一邊
+      text: function (cx, cy, str, size) {
+        const fs = Math.max(5, size * m);
+        out += '<text x="' + fmt(X(cx)) + '" y="' + fmt(baseline(Y(cy), fs)) + '" text-anchor="middle" font-size="' + fmt(fs) +
+          '" font-weight="700"' + ST.ink + '>' + esc(str) + '</text>';
+      },
+      html: function () { return out; }
+    };
+  }
+  // 半個橢圓用一段三次曲線畫：控制點拉出去 4/3 個半徑，曲線的頂點剛好落在一個半徑的地方
+  const ARC = 4 / 3;
+  function bust(p) {     // 肩膀（使用者、攻擊者共用）
+    p.path(['M', 0.04, 1, 'C', 0.04, 0.66, 0.24, 0.54, 0.5, 0.54, 'C', 0.76, 0.54, 0.96, 0.66, 0.96, 1, 'Z'], 'body');
+  }
+  const C_BLUE = ['#dae8fc', '#6c8ebf'], C_RED = ['#f8cecc', '#b85450'], C_GREEN = ['#d5e8d4', '#82b366'],
+    C_GREY = ['#f5f5f5', '#666666'], C_YELLOW = ['#fff2cc', '#d6b656'], C_ORANGE = ['#ffe6cc', '#d79b00'];
+  // 順序就是左邊那一區排出來的順序。w／h 是放到畫布上的大小；color 是預設的［填色, 線色］
+  const DEVICES = {
+    // ---- 網路 ----
+    router: { name: '路由器', w: 80, h: 50, color: C_BLUE, draw: function (p) {
+      const r = 0.3;
+      p.path(['M', 0, r, 'L', 0, 1 - r, 'C', 0, 1 - r + r * ARC, 1, 1 - r + r * ARC, 1, 1 - r, 'L', 1, r], 'body');
+      p.ell(0.5, r, 0.5, r, 'body');
+      p.arrow(0.46, r, 0.14, r); p.arrow(0.54, r, 0.86, r);
+      p.arrow(0.5, 0.04, 0.5, 0.24); p.arrow(0.5, 0.56, 0.5, 0.36);
+    } },
+    'switch': { name: '交換器', w: 80, h: 40, color: C_BLUE, draw: function (p) {
+      p.rect(0, 0.06, 1, 0.88, 0.12, 'body');
+      p.arrow(0.16, 0.36, 0.84, 0.36); p.arrow(0.84, 0.64, 0.16, 0.64);
+    } },
+    firewall: { name: '防火牆', w: 70, h: 60, color: C_RED, draw: function (p) {
+      p.rect(0, 0, 1, 1, 0, 'body');
+      [0.25, 0.5, 0.75].forEach(function (y) { p.line([[0, y], [1, y]]); });
+      [[0.5, 0], [0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]].forEach(function (q) {
+        p.line([[q[0], q[1]], [q[0], q[1] + 0.25]]);
+      });
+    } },
+    shield: { name: '入侵偵測／WAF', w: 56, h: 64, color: C_RED, draw: function (p) {
+      p.path(['M', 0.5, 0, 'L', 1, 0.16, 'L', 1, 0.5, 'C', 1, 0.78, 0.78, 0.94, 0.5, 1,
+        'C', 0.22, 0.94, 0, 0.78, 0, 0.5, 'L', 0, 0.16, 'Z'], 'body');
+      p.line([[0.28, 0.5], [0.45, 0.67], [0.74, 0.33]]);
+    } },
+    lb: { name: '負載平衡器', w: 80, h: 50, color: C_BLUE, draw: function (p) {
+      p.rect(0, 0.06, 1, 0.88, 0.1, 'body');
+      p.line([[0.1, 0.5], [0.4, 0.5]]);
+      p.arrow(0.4, 0.5, 0.88, 0.24); p.arrow(0.4, 0.5, 0.88, 0.5); p.arrow(0.4, 0.5, 0.88, 0.76);
+    } },
+    ap: { name: '無線基地台', w: 70, h: 60, color: C_BLUE, draw: function (p) {
+      p.path(['M', 0.64, 0.2, 'Q', 0.76, 0.32, 0.64, 0.44], 'line');
+      p.path(['M', 0.76, 0.08, 'Q', 0.98, 0.32, 0.76, 0.56], 'line');
+      p.path(['M', 0.36, 0.2, 'Q', 0.24, 0.32, 0.36, 0.44], 'line');
+      p.path(['M', 0.24, 0.08, 'Q', 0.02, 0.32, 0.24, 0.56], 'line');
+      p.line([[0.5, 0.68], [0.5, 0.36]]);
+      p.dot(0.5, 0.32, 0.06);
+      p.rect(0.05, 0.68, 0.9, 0.3, 0.08, 'body');
+      p.dot(0.2, 0.83, 0.035); p.dot(0.32, 0.83, 0.035);
+    } },
+    modem: { name: '數據機', w: 80, h: 46, color: C_BLUE, draw: function (p) {
+      p.line([[0.86, 0.34], [0.86, 0.03]]);
+      p.rect(0, 0.34, 1, 0.66, 0.1, 'body');
+      [0.14, 0.26, 0.38, 0.5].forEach(function (x) { p.dot(x, 0.67, 0.06); });
+    } },
+    internet: { name: '網際網路', w: 70, h: 70, color: C_BLUE, draw: function (p) {
+      p.ell(0.5, 0.5, 0.5, 0.5, 'body');
+      p.ell(0.5, 0.5, 0.22, 0.5, 'line');
+      p.line([[0, 0.5], [1, 0.5]]); p.line([[0.5, 0], [0.5, 1]]);
+      p.path(['M', 0.07, 0.25, 'Q', 0.5, 0.37, 0.93, 0.25], 'line');
+      p.path(['M', 0.07, 0.75, 'Q', 0.5, 0.63, 0.93, 0.75], 'line');
+    } },
+    // ---- 伺服器 ----
+    server: { name: '伺服器', w: 50, h: 70, color: C_GREEN, draw: function (p) {
+      p.rect(0, 0, 1, 1, 0.08, 'body');
+      [0.1, 0.25, 0.4].forEach(function (y) { p.rect(0.16, y, 0.68, 0.09, 0, 'paper'); });
+      p.dot(0.28, 0.8, 0.07);
+      p.line([[0.5, 0.8], [0.84, 0.8]]);
+    } },
+    rack: { name: '機架伺服器', w: 70, h: 70, color: C_GREEN, draw: function (p) {
+      [0.02, 0.36, 0.7].forEach(function (y) {
+        p.rect(0, y, 1, 0.28, 0.05, 'body');
+        p.dot(0.13, y + 0.14, 0.045); p.dot(0.27, y + 0.14, 0.045);
+        p.line([[0.45, y + 0.14], [0.88, y + 0.14]]);
+      });
+    } },
+    db: { name: '資料庫', w: 60, h: 70, color: C_GREEN, draw: function (p) {
+      const r = 0.11, k = r * ARC;
+      p.path(['M', 0, r, 'C', 0, r - k, 1, r - k, 1, r, 'L', 1, 1 - r, 'C', 1, 1 - r + k, 0, 1 - r + k, 0, 1 - r, 'Z'], 'body');
+      [r, 0.39, 0.67].forEach(function (y) { p.path(['M', 0, y, 'C', 0, y + k, 1, y + k, 1, y], 'line'); });
+    } },
+    storage: { name: '儲存設備（NAS）', w: 70, h: 60, color: C_GREEN, draw: function (p) {
+      p.rect(0, 0, 1, 1, 0.07, 'body');
+      [0, 1, 2, 3].forEach(function (i) { p.rect(0.08 + i * 0.215, 0.12, 0.18, 0.58, 0, 'paper'); });
+      p.dot(0.14, 0.85, 0.04); p.dot(0.27, 0.85, 0.04);
+      p.line([[0.6, 0.85], [0.9, 0.85]]);
+    } },
+    web: { name: '網站／網頁伺服器', w: 80, h: 56, color: C_GREEN, draw: function (p) {
+      p.rect(0, 0, 1, 1, 0.06, 'body');
+      p.rect(0, 0.24, 1, 0.76, 0, 'paper');
+      [0.08, 0.17, 0.26].forEach(function (x) { p.dot(x, 0.12, 0.045); });
+      p.line([[0.12, 0.45], [0.6, 0.45]]); p.line([[0.12, 0.62], [0.88, 0.62]]); p.line([[0.12, 0.79], [0.74, 0.79]]);
+    } },
+    mail: { name: '郵件伺服器', w: 70, h: 48, color: C_GREEN, draw: function (p) {
+      p.rect(0, 0, 1, 1, 0.05, 'body');
+      p.line([[0.02, 0.06], [0.5, 0.6], [0.98, 0.06]]);
+    } },
+    vm: { name: '虛擬機', w: 70, h: 60, color: C_GREEN, draw: function (p) {
+      p.rect(0.2, 0, 0.8, 0.68, 0.06, 'paper');
+      p.rect(0, 0.3, 0.8, 0.7, 0.06, 'body');
+      p.text(0.4, 0.65, 'VM', 0.3);
+    } },
+    // ---- 端點 ----
+    pc: { name: '桌上型電腦', w: 70, h: 60, color: C_GREY, draw: function (p) {
+      p.rect(0, 0, 1, 0.72, 0.06, 'body');
+      p.rect(0.08, 0.08, 0.84, 0.56, 0, 'paper');
+      p.poly([[0.42, 0.72], [0.58, 0.72], [0.63, 0.9], [0.37, 0.9]], 'body');
+      p.rect(0.22, 0.9, 0.56, 0.1, 0.03, 'body');
+    } },
+    laptop: { name: '筆記型電腦', w: 80, h: 55, color: C_GREY, draw: function (p) {
+      p.rect(0.12, 0, 0.76, 0.72, 0.05, 'body');
+      p.rect(0.19, 0.08, 0.62, 0.56, 0, 'paper');
+      p.poly([[0.12, 0.72], [0.88, 0.72], [1, 1], [0, 1]], 'body');
+      p.line([[0.4, 0.87], [0.6, 0.87]]);
+    } },
+    terminal: { name: '終端機／攻擊機', w: 80, h: 56, color: C_GREY, draw: function (p) {
+      p.rect(0, 0, 1, 1, 0.06, 'body');
+      p.line([[0, 0.22], [1, 0.22]]);
+      [0.08, 0.17, 0.26].forEach(function (x) { p.dot(x, 0.11, 0.04); });
+      p.line([[0.14, 0.42], [0.3, 0.58], [0.14, 0.74]]);
+      p.line([[0.4, 0.76], [0.66, 0.76]]);
+    } },
+    phone: { name: '手機', w: 36, h: 66, color: C_GREY, draw: function (p) {
+      p.rect(0, 0, 1, 1, 0.22, 'body');
+      p.rect(0.1, 0.11, 0.8, 0.72, 0, 'paper');
+      p.dot(0.5, 0.915, 0.1);
+    } },
+    printer: { name: '印表機', w: 70, h: 60, color: C_GREY, draw: function (p) {
+      p.rect(0.22, 0, 0.56, 0.32, 0, 'paper');
+      p.rect(0, 0.28, 1, 0.46, 0.07, 'body');
+      p.rect(0.2, 0.6, 0.6, 0.4, 0, 'paper');
+      p.line([[0.32, 0.76], [0.68, 0.76]]); p.line([[0.32, 0.87], [0.68, 0.87]]);
+      p.dot(0.86, 0.4, 0.04);
+    } },
+    camera: { name: '網路攝影機', w: 70, h: 50, color: C_GREY, draw: function (p) {
+      p.line([[0.37, 0.62], [0.37, 0.9]]); p.line([[0.14, 0.94], [0.6, 0.94]]);
+      p.rect(0.04, 0.06, 0.66, 0.56, 0.1, 'body');
+      p.poly([[0.7, 0.22], [0.97, 0.08], [0.97, 0.6], [0.7, 0.46]], 'body');
+      p.dot(0.2, 0.24, 0.05);
+    } },
+    chip: { name: 'IoT／嵌入式裝置', w: 60, h: 60, color: C_GREY, draw: function (p) {
+      [0.32, 0.5, 0.68].forEach(function (v) {
+        p.line([[v, 0.02], [v, 0.18]]); p.line([[v, 0.82], [v, 0.98]]);
+        p.line([[0.02, v], [0.18, v]]); p.line([[0.82, v], [0.98, v]]);
+      });
+      p.rect(0.18, 0.18, 0.64, 0.64, 0.07, 'body');
+      p.rect(0.36, 0.36, 0.28, 0.28, 0, 'paper');
+    } },
+    // ---- 人與權限 ----
+    user: { name: '使用者', w: 50, h: 60, color: C_YELLOW, draw: function (p) {
+      bust(p);
+      p.ell(0.5, 0.26, 0.24, 0.2, 'body');
+    } },
+    attacker: { name: '攻擊者', w: 50, h: 60, color: C_RED, draw: function (p) {
+      bust(p);
+      p.ell(0.5, 0.32, 0.23, 0.19, 'body');
+      p.rect(0.3, 0.29, 0.4, 0.07, 0.03, 'ink');                                   // 面罩
+      p.poly([[0.27, 0.19], [0.34, 0], [0.66, 0], [0.73, 0.19]], 'ink');           // 帽子
+      p.rect(0.06, 0.16, 0.88, 0.06, 0.04, 'ink');                                 // 帽簷
+    } },
+    lock: { name: '加密／VPN', w: 50, h: 60, color: C_ORANGE, draw: function (p) {
+      p.path(['M', 0.24, 0.46, 'L', 0.24, 0.3, 'C', 0.24, -0.02, 0.76, -0.02, 0.76, 0.3, 'L', 0.76, 0.46], 'line');
+      p.rect(0.06, 0.44, 0.88, 0.56, 0.08, 'body');
+      p.dot(0.5, 0.66, 0.07);
+      p.line([[0.5, 0.68], [0.5, 0.84]]);
+    } },
+    key: { name: '金鑰／帳密', w: 70, h: 36, color: C_ORANGE, draw: function (p) {
+      p.line([[0.4, 0.5], [0.97, 0.5]]);
+      p.line([[0.78, 0.5], [0.78, 0.84]]); p.line([[0.92, 0.5], [0.92, 0.84]]);
+      p.ell(0.2, 0.5, 0.2, 0.4, 'body');
+      p.ell(0.2, 0.5, 0.075, 0.15, 'paper');
+    } }
+  };
+  function isDevice(type) { return Object.prototype.hasOwnProperty.call(DEVICES, type); }
+
+  PALETTE.forEach(function (sec) {
+    if (!sec.devices) return;
+    sec.items = Object.keys(DEVICES).map(function (k) {
+      const d = DEVICES[k];
+      return { type: k, w: d.w, h: d.h, name: d.name, fill: d.color[0], stroke: d.color[1] };
+    });
+  });
+
   // imgs：{ 檔案 id: data URL }。匯出成檔案時用——存下來的圖不能回頭跟伺服器要圖片
   function shapeBody(s, ox, oy, imgs) {
     const x = s.x + ox, y = s.y + oy, w = s.w, h = s.h;
+    if (isDevice(s.type)) { const p = pen(s, ox, oy); DEVICES[s.type].draw(p); return p.html(); }
     const st = ' fill="' + s.fill + '"' + strokeAttrs(s) + ' stroke-linejoin="round"';
     const line = ' fill="none"' + strokeAttrs(s) + ' stroke-linecap="round"';
     switch (s.type) {
@@ -678,7 +927,7 @@
       return PALETTE.map(function (sec, si) {
         return '<div class="dio-sec"><div class="dio-sec-t">' + esc(sec.title) + '</div><div class="dio-sec-grid">' +
           sec.items.map(function (it, ii) {
-            return '<button class="dio-pal" type="button" data-pal="' + si + ',' + ii + '" title="' + esc(it.name) + '">' + thumb(it) + '</button>';
+            return '<button class="dio-pal' + (sec.devices ? ' dio-dev' : '') + '" type="button" data-pal="' + si + ',' + ii + '" title="' + esc(it.name) + '">' + thumb(it) + '</button>';
           }).join('') + '</div></div>';
       }).join('');
     }
@@ -690,7 +939,8 @@
         inner = edgeSVG(e, {}, 0, 0);
       } else {
         const k = Math.min((W - 4) / it.w, (H - 4) / it.h);
-        const s = Object.assign({}, SHAPE_DEF, { id: 't', type: it.type, label: '', x: 0, y: 0, w: it.w * k, h: it.h * k, sw: 1.3 });
+        const s = Object.assign({}, SHAPE_DEF, { id: 't', type: it.type, label: '', x: 0, y: 0, w: it.w * k, h: it.h * k, sw: it.fill ? 1 : 1.3 });
+        if (it.fill) { s.fill = it.fill; s.stroke = it.stroke; }
         s.x = (W - s.w) / 2; s.y = (H - s.h) / 2;
         inner = it.type === 'text'
           ? '<text x="' + W / 2 + '" y="' + fmt(baseline(H / 2, 11)) + '" text-anchor="middle" font-size="11" fill="#000000">Text</text>'
@@ -977,6 +1227,7 @@
             x: snap(c.x - it.w / 2), y: snap(c.y - it.h / 2)
           });
           if (it.type === 'text' || it.type === 'image') { s.fill = 'none'; s.stroke = 'none'; }
+          else if (it.fill) { s.fill = it.fill; s.stroke = it.stroke; }
           if (it.type === 'image') s.src = it.src;
           // 連續點同一個圖形不要整疊在一起
           // （比中心點，不是左上角：大小不同的兩個圖形左上角不一樣，照樣是疊在一起）
