@@ -600,6 +600,9 @@
             (global.Icons ? Icons.svg('network') : '') + ' 全螢幕</button>' + svg + '</div>';
         }
       }
+      // ```drawio 是 draw.io 圖表（js/drawio.js）：圍欄裡那一行是一張帶著原始圖檔的 SVG，
+      // 這裡只把它當圖片顯示。要編輯是打開那篇 meta.drawio 的筆記，不是在這裡。
+      if (info === 'drawio' && global.DrawIO) return DrawIO.blockHTML(code);
       let requested = info, lineNumbers = false, startLine = 1;
       const opt = info.match(/^([^\s=]*)=(\d*)$/);
       if (opt) {
@@ -689,6 +692,17 @@
           '<button class="relmap-embed-btn" type="button" data-relmap-open="' + escapeHtml(rid) + '">全螢幕</button>' +
           '</span>' +
           '<span class="relmap-embed-canvas"></span></span>';
+      }
+      // ![名稱](drawio:<noteId>)：把一張 draw.io 圖表（meta.drawio 的筆記）嵌進來。同樣只存
+      // id；圖由 resolveDrawios 填進去，「編輯」會跳到那張圖的編輯器。
+      if (href && href.indexOf('drawio:') === 0) {
+        const did = href.slice(7);
+        return '<span class="drawio-embed" data-drawio-note="' + escapeHtml(did) + '">' +
+          '<span class="drawio-embed-bar">' +
+          '<span class="drawio-embed-name">' + escapeHtml(text || 'draw.io 圖表') + '</span>' +
+          '<button class="drawio-embed-btn" type="button" data-drawio-open="' + escapeHtml(did) + '">編輯</button>' +
+          '</span>' +
+          '<span class="drawio-embed-canvas"></span></span>';
       }
       if (href && href.indexOf('img:') === 0) {
         // ![說明](img:<id>) 是一般圖片，結尾多一個 #frame 表示這張要加黑框（報告裡的截圖
@@ -790,6 +804,7 @@
         'data-mindmap', 'data-i',    // 心智圖：原始大綱文字，以及節點索引
         'data-relmap',    // 關聯分析：原始 DSL 文字（js/relmap.js）
         'data-relmap-note', 'data-relmap-open', 'data-relmap-zoom',   // 嵌入別篇關聯分析
+        'data-drawio-note', 'data-drawio-open',   // 嵌入 draw.io 圖表（js/drawio.js）
         'data-link-url', 'data-file-id', 'data-file-kind', 'rel'],   // 網址預覽卡片、附件連結
       ADD_TAGS: ['input', 'button', 'iframe'] // checkboxes, annotate button, PDF embed
     });
@@ -843,6 +858,7 @@
     });
     resolveLinkCards(container);
     resolveRelMaps(container);
+    resolveDrawios(container);
   }
 
   // Fill {%preview url %} cards from /api/link-preview. Resolves once every card
@@ -922,6 +938,32 @@
         // 拖曳平移／滾輪縮放只有在真的瀏覽器裡才接：PDF 與電子書拿到的是同一段 SVG，
         // 但那邊是靜態文件，沒有（也不需要）任何事件。
         if (global.RelMap && RelMap.attachPanZoom) RelMap.attachPanZoom(canvas.querySelector('svg'));
+      });
+    }));
+  }
+
+  // ---- 嵌入 draw.io 圖表 ![名稱](drawio:<noteId>) --------------------------------
+  // 跟上面的關聯分析同一套（連筆記快取都共用——快取的是「某篇筆記的內容」，不分種類）：
+  // 存的是那篇圖表筆記的 id，渲染時才去拿現況。圖本身是 <img src="data:image/svg+xml…">，
+  // 由 DrawIO.imgOf() 從那篇筆記的內容裡取出來；在 <img> 裡的 SVG 不會跑 script，
+  // 所以就算圖是別人做的也只是一張圖。
+  function resolveDrawios(container) {
+    const boxes = Array.prototype.slice.call(container.querySelectorAll('.drawio-embed[data-drawio-note]'));
+    if (!boxes.length) return Promise.resolve();
+    return Promise.all(boxes.map(function (box) {
+      if (box.classList.contains('is-loaded') || box.classList.contains('is-failed')) return null;
+      const canvas = box.querySelector('.drawio-embed-canvas');
+      if (!canvas) return null;
+      const nameEl = box.querySelector('.drawio-embed-name');
+      return relNoteText(box.getAttribute('data-drawio-note')).then(function (text) {
+        const img = (text != null && global.DrawIO) ? DrawIO.imgOf(text, nameEl ? nameEl.textContent : '') : '';
+        if (!img) {
+          box.classList.add('is-failed');
+          canvas.textContent = text == null ? '找不到這張圖表（可能已刪除，或你沒有權限）' : '這張圖表還是空白的。';
+          return;
+        }
+        box.classList.add('is-loaded');
+        canvas.innerHTML = img;
       });
     }));
   }
@@ -1014,7 +1056,7 @@
     });
     // 嵌入的關聯分析同理：SVG 是現場向伺服器要那篇筆記才畫得出來的，列印文件與
     // 出版檔都抓不到（電子書的 CSP 連 same-origin 都不准 fetch），所以要在這裡等它畫完。
-    return Promise.all([stored, cards, resolveRelMaps(container)]);
+    return Promise.all([stored, cards, resolveRelMaps(container), resolveDrawios(container)]);
   }
 
   function blobToDataURL(blob) {
@@ -1039,6 +1081,7 @@
     invalidateImage: invalidateImage,
     resolveLinkCards: resolveLinkCards,
     resolveRelMaps: resolveRelMaps,
+    resolveDrawios: resolveDrawios,
     invalidateRelNote: invalidateRelNote,
     switchEmbed: switchEmbed,
     toggleImageFrame: toggleImageFrame,

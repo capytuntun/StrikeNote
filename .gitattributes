@@ -7,3 +7,8 @@ deploy/** text eol=lf
 *.cnf text eol=lf
 *.sql text eol=lf
 *.yml text eol=lf
+
+# vendor/drawio/ is draw.io's release, copied in by server/tools/vendor-drawio.js.
+# Store and check out every file byte-for-byte: no line-ending conversion in
+# either direction, so what is served is exactly what upstream shipped.
+vendor/drawio/** -text

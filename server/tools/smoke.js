@@ -906,13 +906,52 @@ async function main() {
       ['/vendor/fonts/fonts.css', 200], ['/vendor/marked.min.js', 200],
       ['/README.md', 404], ['/CLAUDE.md', 404], ['/docs/interface.png', 404], ['/app.css.orig', 404],
       ['/.git/HEAD', 404], ['/server/db.js', 404], ['/vendor/../server/db.js', 404], ['/package.json', 404],
-      ['/%', 400]
+      ['/%', 400],
+      // vendor/drawio/ 是整套 draw.io，它多開了幾種副檔名（.html／.txt／.xml…）與檔名字元，
+      // 但只限這一個目錄；其餘 vendor/ 維持原本那份比較窄的清單。
+      ['/vendor/drawio/index.html', 200], ['/vendor/drawio/js/app.min.js', 200],
+      ['/vendor/drawio/resources/dia_zh-tw.txt', 200], ['/vendor/drawio/styles/default.xml', 200],
+      ['/vendor/drawio/img/lib/mscae/Azure%20API%20for%20FHIR.svg', 200],
+      ['/vendor/drawio/..%2f..%2fserver/db.js', 404], ['/vendor/drawio/%2e%2e/%2e%2e/package.json', 404],
+      ['/vendor/drawio/.hidden.js', 404], ['/vendor/drawio/js/app.min.js.map', 404],
+      ['/vendor/fonts/fonts.html', 404], ['/vendor/notes.txt', 404], ['/vendor/reactflow/config.xml', 404]
     ];
     for (const [p, want] of expect) {
       const s = await fetch(BASE + p, { redirect: 'manual' });
       await s.arrayBuffer();
       ok(s.status === want, 'static ' + p + ' → ' + want, s.status);
     }
+
+    // draw.io 跑在沙箱 iframe 裡（不透明來源），所以它那一頁的 CSP 要把來源明寫出來、
+    // 靜態檔要開 CORS；但限制不能因此變鬆，app 自己的頁面也不能被波及。
+    const dio = await fetch(BASE + '/vendor/drawio/index.html');
+    await dio.arrayBuffer();
+    const dcsp = dio.headers.get('content-security-policy') || '';
+    const dscript = (/script-src ([^;]*)/.exec(dcsp) || [])[1] || '';
+    ok(/^https?:\/\/\S+ https?:\/\/\S+$/.test(dscript.trim()), 'draw.io page: script-src names this origin explicitly', dscript);
+    ok(dcsp.indexOf("'unsafe-eval'") < 0 && dscript.indexOf("'unsafe-inline'") < 0 && dscript.indexOf('*') < 0,
+      'draw.io page: no unsafe-eval, no inline scripts, no wildcard', dcsp);
+    ok(/connect-src https?:\/\/\S+ https?:\/\/[^;*]+(;|$)/.test(dcsp), 'draw.io page: may only connect back to this origin', dcsp);
+    ok(dio.headers.get('access-control-allow-origin') === '*', 'draw.io static files are CORS-readable (sandboxed frame has a null origin)');
+    const appPage = await fetch(BASE + '/index.html');
+    await appPage.arrayBuffer();
+    ok(/script-src 'self'/.test(appPage.headers.get('content-security-policy') || '') &&
+      !appPage.headers.get('access-control-allow-origin'), 'the app page keeps its own CSP and gets no CORS header');
+    const apiCors = await fetch(BASE + '/api/health');
+    await apiCors.arrayBuffer();
+    ok(!apiCors.headers.get('access-control-allow-origin'), 'the API gets no CORS header');
+    // Host 被動過手腳時不能把它原樣寫進 CSP（分號之後就是別人的指令了）
+    const forged = await new Promise(function (resolve, reject) {
+      const u = new URL(BASE);
+      const rq = require('node:http').request({
+        host: u.hostname, port: u.port || 80, path: '/vendor/drawio/index.html', method: 'GET',
+        headers: { Host: 'evil.example; script-src *' }
+      }, function (rs) { rs.resume(); rs.on('end', function () { resolve(rs.headers['content-security-policy'] || ''); }); });
+      rq.on('error', reject);
+      rq.end();
+    }).catch(function () { return 'ERR'; });
+    ok(forged.indexOf('evil.example') < 0 && forged.indexOf('script-src *') < 0,
+      'a forged Host header never reaches the CSP', forged.slice(0, 120));
   }
 
   // 匯入外面的 Markdown：掃引用、改寫成站上的寫法。瀏覽器的「匯入 .md」跟命令列的

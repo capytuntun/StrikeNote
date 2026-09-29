@@ -1023,6 +1023,7 @@ mark.search-hit {
 .dash-row-ic .ic-svg { width: 14px; height: 14px; }
 .dash-row-ic.kind-sec { background: var(--accent-weak); color: var(--accent); }
 .dash-row-ic.kind-perf { background: var(--success-weak); color: var(--success); }
+.dash-row-ic.kind-drawio { background: rgba(240, 135, 5, .14); color: #d07005; }
 .dash-row-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 類型與時間收在右側一組固定寬度的欄位裡，不會被拉到畫面最邊緣 */
 .dash-row-meta { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex: 0 0 auto; }
@@ -1032,6 +1033,7 @@ mark.search-hit {
 }
 .dash-row-kind.kind-sec { background: var(--accent-weak); color: var(--accent); }
 .dash-row-kind.kind-perf { background: var(--success-weak); color: var(--success); }
+.dash-row-kind.kind-drawio { background: rgba(240, 135, 5, .14); color: #d07005; }
 .dash-row-time {
   font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums;
   min-width: 76px; text-align: right; white-space: nowrap;
@@ -3174,6 +3176,73 @@ select.sec-info-input { cursor: pointer; }
 .rm-menu-item .ic-svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--text-dim); }
 .rm-menu-hint { margin-top: 6px; padding: 8px 10px 4px; border-top: 1px solid var(--border); font-size: var(--fs-xs); line-height: 1.6; color: var(--text-faint); }
 .rm-menu-hint code { font-family: var(--mono); color: var(--text-dim); }
+
+/* ---------- draw.io（js/drawio.js）----------
+   編輯器本身是 vendor/drawio/ 裡的 draw.io 本尊，跑在沙箱 iframe 裡，長相完全是它自己的；
+   這裡只有外面那一圈：上方一條細細的列（圖示、標題、存檔狀態、返回）跟把 iframe 撐滿
+   剩下空間的容器。那一條列跟關聯分析的 .rm-bar 是同一個樣子。 */
+.drawio-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.dio-page .dio-bar {
+  display: flex; align-items: center; gap: 8px; flex: 0 0 auto;
+  padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-2);
+}
+.dio-bar-t { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: var(--fs-md); white-space: nowrap; }
+.dio-bar-t .ic-svg { width: 18px; height: 18px; color: #f08705; }
+.dio-title {
+  flex: 0 1 320px; min-width: 120px; padding: 6px 10px; border: 1px solid transparent;
+  background: transparent; color: var(--text); font: inherit; font-size: var(--fs-md); font-weight: 600; outline: none;
+}
+.dio-title:hover { border-color: var(--border); }
+.dio-title:focus { border-color: var(--accent); background: var(--bg); }
+.dio-title[readonly] { cursor: default; }
+.dio-title[readonly]:hover, .dio-title[readonly]:focus { border-color: transparent; background: transparent; }
+.dio-status { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; }
+.dio-status.is-ok { color: var(--success); }
+.dio-status.is-err { color: var(--danger); font-weight: 600; }
+.dio-bar-sp { flex: 1 1 auto; }
+.dio-bar .btn { flex: 0 0 auto; }
+.dio-readonly { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--text-dim); }
+.dio-readonly .ic-svg { width: 13px; height: 13px; }
+/* iframe 的底色先給白的：draw.io 載入前那一瞬間不要閃出深色主題的底 */
+.dio-body { flex: 1 1 auto; position: relative; min-height: 0; background: #fff; }
+.dio-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+.dio-loading {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: #6b7280; font-size: var(--fs-sm);
+}
+.dio-body.dio-view { overflow: auto; padding: 24px; background: var(--bg-2); }
+/* 版本紀錄裡的 draw.io 圖表：兩張圖並排（js/versions.js），不是文字差異 */
+.ver-pics { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+.ver-pic { min-width: 0; }
+.ver-pic .drawio-block { margin: 0; }
+.dio-body.dio-view .drawio-block { max-width: 1100px; margin: 0 auto; }
+
+/* 唯讀渲染（預覽／PDF／電子書）：圖是一張 <img>（data: 的 SVG）。底一律是白的——draw.io
+   匯出的圖背景是透明的、線是深色的，放在深色主題的底上會整張看不見；而且報告印出來
+   本來就是白紙。 */
+.drawio-block { margin: 0 0 14px; padding: 12px; border: 1px solid var(--border); background: #fff; text-align: center; overflow-x: auto; }
+.drawio-img { display: block; max-width: 100%; height: auto; margin: 0 auto; background: #fff; }
+.drawio-block.is-empty {
+  display: flex; align-items: center; justify-content: center; gap: 8px; padding: 28px 12px;
+  background: var(--bg-2); color: var(--text-faint); font-size: var(--fs-sm);
+}
+.drawio-block.is-empty .ic-svg { width: 18px; height: 18px; }
+/* 嵌入別篇圖表 ![名稱](drawio:<id>)：上面一列（名稱＋編輯），下面是圖 */
+.drawio-embed { display: block; margin: 0 0 14px; border: 1px solid var(--border); background: #fff; }
+.drawio-embed-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--bg-2);
+}
+.drawio-embed-name {
+  flex: 1 1 auto; min-width: 0; font-size: var(--fs-xs); font-weight: 600; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.drawio-embed-btn {
+  flex: 0 0 auto; padding: 3px 10px; font: inherit; font-size: var(--fs-xs); font-weight: 600;
+  border: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer;
+}
+.drawio-embed-btn:hover { color: var(--text); border-color: var(--border-strong); }
+.drawio-embed-canvas { display: block; padding: 12px; text-align: center; overflow-x: auto; color: #6b7280; font-size: var(--fs-sm); }
 
 /* ---------- 關聯圖（反向連結＋標籤，Obsidian 風格的力導向圖） ----------
    整頁，不是浮在畫面上的對話框：跟垃圾桶／區域頁／關聯分析同一套「接管 #main」的

@@ -359,6 +359,8 @@
           const bar = n.querySelector('.relmap-embed-bar');
           if (bar) bar.remove();
         });
+        // 嵌入的 draw.io 圖表：出版檔裡沒有編輯器，「編輯」那一列拿掉，只留圖
+        work.querySelectorAll('.drawio-embed-bar').forEach(function (n) { n.remove(); });
         // 出版檔沒有編輯器可以回寫，勾選框只是一份紀錄——留著勾選狀態，但不讓讀者
         // 以為自己改得動它。
         work.querySelectorAll('.task-check').forEach(function (n) { n.disabled = true; });

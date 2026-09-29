@@ -70,6 +70,7 @@
     if (note.perm && note.perm !== 'owner') return note.perm === 'edit' ? 'pen-line' : 'lock';
     if (isFileNote(note)) return (window.AreaBrowser && AreaBrowser.fileKind) ? AreaBrowser.fileKind(note.meta.file).icon : 'paperclip';
     if (note.meta && note.meta.relMap) return 'network';
+    if (note.meta && note.meta.drawio) return 'shapes';
     if (note.area === 'quick') return 'pin';
     if (note.meta && note.meta.perfReport) return 'chart';
     if (note.meta && note.meta.secReport) return 'shield';
@@ -995,7 +996,25 @@
     closeBookView();
     closeTrashView();
     closeRelMapView();
+    closeDrawioView();
     closeGraphView();
+  }
+
+  // ---- draw.io 頁（#drawio-wrap）：整頁的圖表編輯器，見 js/drawio.js ----
+  // 跟下面的關聯分析同一套：DrawIO.open() 回傳把手，離開這一頁時 close()。close() 是
+  // 同步的——來不及向 draw.io 要新畫面的改動，會先以「原始檔是新的、畫面慢一拍」存起來，
+  // 下次打開補畫（見 drawio.js 的 payloadFor）。
+  const drawioWrapEl = $('#drawio-wrap');
+  let drawioView = null;
+  function closeDrawioView() {
+    if (drawioView) { const v = drawioView; drawioView = null; v.close(); }
+    if (drawioWrapEl) drawioWrapEl.hidden = true;
+  }
+  function showDrawioPage() {
+    leaveOtherViews();
+    closeAreaViews();
+    drawioWrapEl.hidden = false;
+    setSidebarOpen(false);   // 編輯器要整個寬度
   }
 
   // ---- 關聯分析頁（#relmap-wrap）：整頁的畫布編輯器，見 js/relmap.js ----
@@ -1550,6 +1569,7 @@
     closeTrashView();
     closeAreaViews();
     closeRelMapView();
+    closeDrawioView();
     closeGraphView();
     setTreeArea(null);    // 首頁＝所有筆記，側邊欄的樹也回到一般區域
     if (window.Dashboard) {
@@ -1604,6 +1624,7 @@
     closeBookView();
     closeAreaViews();
     closeRelMapView();
+    closeDrawioView();
     closeGraphView();
     trashWrapEl.hidden = false;
     trashWrapEl.scrollTop = 0;
@@ -1630,6 +1651,7 @@
     closeTrashView();
     closeAreaViews();
     closeRelMapView();
+    closeDrawioView();
     closeGraphView();
     setTreeArea(null);
     bookWrapEl.hidden = false;
@@ -1728,6 +1750,8 @@
       // 它——不動 state.currentId、不收起首頁，取消或存檔都只是把疊層收掉，見
       // openRelMapNote 開頭的說明。一定要在任何畫面狀態被改掉之前判斷。
       if (window.RelMap && RelMap.isRelNote(note)) { anchorBackToFolder(fromArea, note); openRelMapNote(note); return; }
+      // draw.io 圖表（meta.drawio）同理：它有自己的整頁編輯器，markdown 編輯器不接手
+      if (window.DrawIO && DrawIO.isNote(note)) { anchorBackToFolder(fromArea, note); openDrawioNote(note); return; }
       // 不在 state.notes 裡的檔案筆記（理論上不會發生）：同樣只疊檢視器，背景沒東西就回首頁
       if (isFileNote(note)) { if (!state.currentId) showEmpty(); openFileViewer(note); return; }
       state.currentId = id;
@@ -1744,6 +1768,7 @@
       closeTrashView();
       closeAreaViews();
       closeRelMapView();
+      closeDrawioView();
       closeGraphView();
       // 區域裡的筆記：側邊欄留在那個區域的樹（別人分享來的不屬於我的任何區域）
       setTreeArea(isMine(note) ? (note.area || null) : null);
@@ -2255,6 +2280,93 @@
       }
     });
     relmapView = view;
+  }
+
+  // 一篇 meta.drawio 的筆記：整頁的 draw.io 編輯器（js/drawio.js）。存檔規則跟上面的
+  // openRelMapNote 一模一樣，而且理由也一樣——標題欄與自動存檔是兩個入口，只能有一條
+  // 寫入路徑、同一時間只有一個請求在路上、每次都從 state.notes 取現在那一篇。那個
+  // 「改名把內容洗回舊版」的 bug 不要在這裡再發生一次；圖檔比關聯分析的 DSL 大得多
+  // （幾十到幾百 KB），慢網路下兩個請求撞在一起的機會只會更高。
+  function openDrawioNote(note) {
+    if (!drawioWrapEl || !window.DrawIO) return;
+    showDrawioPage();
+    setTreeArea(isMine(note) ? (note.area || null) : null);
+    LS.set('lastNote', note.id);
+    setHash('note/' + note.id);
+    function syncState(n) {
+      const idx = state.notes.findIndex(function (x) { return x.id === n.id; });
+      if (idx >= 0) { state.notes[idx].rev = n.rev; state.notes[idx].updatedAt = n.updatedAt; }
+      note.rev = n.rev; note.updatedAt = n.updatedAt;
+    }
+    function live() {
+      return state.notes.find(function (x) { return x.id === note.id; }) || note;
+    }
+    let saving = null, again = false;
+    function flushSave() {
+      if (saving) { again = true; return saving; }
+      const run = function () {
+        const n = live();
+        return Store.updateNote({ id: n.id, title: n.title, content: n.content, folderId: n.folderId, meta: n.meta })
+          .then(function (r) {
+            syncState(r);
+            // 別篇筆記嵌了這張圖的話，下次渲染要拿新的
+            if (MD.invalidateRelNote) MD.invalidateRelNote(note.id);
+          })
+          .then(function () { if (again) { again = false; return run(); } });
+      };
+      saving = run().then(function () { saving = null; }, function (e) {
+        saving = null; again = false;
+        toast('儲存失敗：' + (e && e.message || e));
+        throw e;
+      });
+      return saving;
+    }
+    function setLocal(patch) {
+      const n = live();
+      Object.assign(n, patch);
+      if (n !== note) Object.assign(note, patch);
+      return flushSave();
+    }
+    function onClose() {
+      const mine = drawioView === view;
+      drawioView = null;
+      drawioWrapEl.hidden = true;
+      if (!mine) return;
+      LS.set('lastNote', '');
+      // 返回：區域裡的圖表回到它那個區域的資料夾，不是首頁
+      if (isMine(note) && note.area && AREA_INFO[note.area] && AREA_INFO[note.area].wrap && window.AreaBrowser) {
+        openArea(note.area, { folderId: note.folderId || null });
+      } else showEmpty();
+    }
+    const title = note.title === '未命名筆記' ? '' : (note.title || '');
+    // 只有讀取權限（別人分享給我看的）：不開編輯器，只顯示那張圖
+    const view = note.perm === 'read'
+      ? DrawIO.view(note.content || '', { container: drawioWrapEl, title: title, onClose: onClose })
+      : DrawIO.open(note.content || '', {
+        container: drawioWrapEl,
+        title: title,
+        onTitle: function (t) {
+          setLocal({ title: t || '未命名圖表' }).catch(function () {});
+          renderTree();
+        },
+        onChange: function (content) { return setLocal({ content: content }); },
+        onHistory: function () {
+          if (!window.Versions) return;
+          Versions.openNote(live(), {
+            onRestored: function (fresh) {
+              const i = state.notes.findIndex(function (n) { return n.id === fresh.id; });
+              if (i >= 0) state.notes[i] = Object.assign(state.notes[i], fresh);
+              if (MD.invalidateRelNote) MD.invalidateRelNote(fresh.id);
+              renderTree();
+              // 開著的編輯器裡還是還原前的圖：不存檔直接拆掉，再用還原後的內容重開
+              if (drawioView) { const v = drawioView; drawioView = null; v.discard(); }
+              openNote(fresh.id);
+            }
+          });
+        },
+        onClose: onClose
+      });
+    drawioView = view;
   }
 
   // ---- Table of contents: beside the preview -----------------------------
@@ -3109,25 +3221,22 @@
     });
     inp.click();
   }
-  // 嵌入一張畫過的關聯分析：選一篇 meta.relMap 的筆記，插入 ![標題](relmap:<id>)。
-  // 存的是 id 不是圖的副本，所以原圖之後改了，引用它的筆記下次渲染就是新的。
-  function pickRelMapEmbed() {
-    const maps = state.notes.filter(function (n) {
-      return window.RelMap && RelMap.isRelNote(n) && !n.trashed;
-    }).sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
-    if (!maps.length) {
-      toast('還沒有任何關聯分析——側邊欄「新增 → 關聯分析」先畫一張');
-      return;
-    }
+  // 嵌入一張畫過的圖：選一篇筆記，插入 ![標題](<scheme>:<id>)。存的是 id 不是圖的副本，
+  // 所以原圖之後改了，引用它的筆記下次渲染就是新的。關聯分析（relmap:）與 draw.io
+  // （drawio:）共用這一支。
+  function pickEmbed(o) {
+    const maps = state.notes.filter(function (n) { return o.match(n) && !n.trashed; })
+      .sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+    if (!maps.length) { toast(o.none); return; }
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.innerHTML =
-      '<div class="modal-title">嵌入關聯分析</div>' +
+      '<div class="modal-title">' + MD.escapeHtml(o.title) + '</div>' +
       '<div class="modal-body"><select class="folder-picker">' +
       maps.map(function (n) {
-        return '<option value="' + MD.escapeHtml(n.id) + '">' + MD.escapeHtml(n.title || '未命名關聯分析') + '</option>';
+        return '<option value="' + MD.escapeHtml(n.id) + '">' + MD.escapeHtml(n.title || o.untitled) + '</option>';
       }).join('') +
       '</select></div>' +
       '<div class="modal-actions">' +
@@ -3147,14 +3256,28 @@
       const hit = maps.find(function (n) { return n.id === id; });
       close();
       if (!hit) return;
-      const name = cleanName(hit.title, '關聯分析');
-      insertAtCursor('\n![' + name + '](relmap:' + id + ')\n',
+      const name = cleanName(hit.title, o.name);
+      insertAtCursor('\n![' + name + '](' + o.scheme + ':' + id + ')\n',
         { s: editorEl.selectionStart, e: editorEl.selectionEnd, noteId: state.currentId });
       if (editorEl._hlRefresh) editorEl._hlRefresh();
       scheduleSave();
       renderPreviewNow();
     });
     setTimeout(function () { sel.focus(); }, 30);
+  }
+  function pickRelMapEmbed() {
+    pickEmbed({
+      scheme: 'relmap', title: '嵌入關聯分析', name: '關聯分析', untitled: '未命名關聯分析',
+      none: '還沒有任何關聯分析——側邊欄「新增 → 關聯分析」先畫一張',
+      match: function (n) { return window.RelMap && RelMap.isRelNote(n); }
+    });
+  }
+  function pickDrawioEmbed() {
+    pickEmbed({
+      scheme: 'drawio', title: '嵌入 draw.io 圖表', name: 'draw.io 圖表', untitled: '未命名圖表',
+      none: '還沒有任何 draw.io 圖表——側邊欄「新增 → draw.io」先畫一張',
+      match: function (n) { return window.DrawIO && DrawIO.isNote(n); }
+    });
   }
 
   // ---- Copy to clipboard (works on file://) ------------------------------
@@ -4491,7 +4614,8 @@
     if (window.Editor && Editor.setActionSnippets) Editor.setActionSnippets([
       { cmd: 'file', hint: '上傳檔案（圖片、PDF、任何附件）', action: pickFiles },
       { cmd: 'upload', hint: '上傳檔案（圖片、PDF、任何附件）', action: pickFiles },
-      { cmd: 'relmap', hint: '嵌入一張你畫過的關聯分析（可拖曳縮放）', action: pickRelMapEmbed }
+      { cmd: 'relmap', hint: '嵌入一張你畫過的關聯分析（可拖曳縮放）', action: pickRelMapEmbed },
+      { cmd: 'drawio', hint: '嵌入一張你用 draw.io 畫的圖表', action: pickDrawioEmbed }
     ]);
     // 排序方式：側邊欄搜尋框旁的鈕；換了就重畫側邊欄與首頁
     const sortBtn = $('#sort-btn');
@@ -4591,6 +4715,18 @@
         }, function (e) { toast('新增失敗：' + (e && e.message || e)); });
     });
 
+    const dioBtn = $('#new-drawio');
+    if (dioBtn && window.DrawIO) dioBtn.addEventListener('click', function () {
+      createOnce('drawio', function () {
+        return Store.createNote('未命名圖表', currentFolderId(), withArea(currentFolderId(), { meta: { drawio: true }, content: DrawIO.generate() }))
+          .then(function (n) {
+            state.notes.push(n);
+            refreshViews();
+            openNote(n.id);
+          });
+      });
+    });
+
     document.querySelectorAll('.mode-btn').forEach(function (b) {
       b.addEventListener('click', function () { setMode(b.dataset.mode); });
     });
@@ -4665,7 +4801,11 @@
       // 本來就在儀表板、只是停在某個資料夾裡，就回到「所有筆記」。
       const inArea = (courseWrapEl && !courseWrapEl.hidden) || (knowledgeWrapEl && !knowledgeWrapEl.hidden) ||
         (quickWrapEl && !quickWrapEl.hidden) || (novelWrapEl && !novelWrapEl.hidden);
-      if (state.currentId || (bookWrapEl && !bookWrapEl.hidden) || (trashWrapEl && !trashWrapEl.hidden) || inArea) goHome();
+      // 關聯分析／draw.io／關聯圖是整頁的工具，開著的時候 state.currentId 是空的——少了這三個
+      // 判斷，在那幾頁按瀏覽器的「上一頁」網址會變回首頁、畫面卻還卡在編輯器裡。
+      const inTool = (relmapWrapEl && !relmapWrapEl.hidden) || (drawioWrapEl && !drawioWrapEl.hidden) ||
+        (graphWrapEl && !graphWrapEl.hidden);
+      if (state.currentId || (bookWrapEl && !bookWrapEl.hidden) || (trashWrapEl && !trashWrapEl.hidden) || inArea || inTool) goHome();
       else if (window.Dashboard && Dashboard.currentFolder()) Dashboard.openFolder(null);
     });
     // 新增 → 電子書：挑一個資料夾做成電子書；開過就會出現在首頁的「電子書」區
@@ -4827,6 +4967,8 @@
       }
       const rmOpen = e.target.closest('[data-relmap-open]');
       if (rmOpen) { e.preventDefault(); saveNow(); openNote(rmOpen.getAttribute('data-relmap-open')); return; }
+      const dioOpen = e.target.closest('[data-drawio-open]');
+      if (dioOpen) { e.preventDefault(); saveNow(); openNote(dioOpen.getAttribute('data-drawio-open')); return; }
       const link = e.target.closest('.note-link');
       if (link) { e.preventDefault(); handleNoteLink(link); return; }
       const tag = e.target.closest('.hashtag');

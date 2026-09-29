@@ -189,7 +189,7 @@
     heading: 'h1, h2, h3, h4, h5, h6',
     hr: 'hr',
     table: 'table',
-    code: '.code-block, .mindmap-block',
+    code: '.code-block, .mindmap-block, .drawio-block',
     quote: 'blockquote, .callout, .finding, .link-card',
     list: 'ul, ol',
     para: 'p, a.page-card',

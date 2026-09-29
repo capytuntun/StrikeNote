@@ -258,6 +258,19 @@
           pane.appendChild(el('div', 'ver-titlediff',
             '標題：「' + res.version.title + '」 → 目前「' + res.current.title + '」'));
         }
+        // draw.io 圖表的內容是一整行 SVG，逐行比對只會得到「整行都不一樣」；對人有意義的
+        // 是兩張圖長什麼樣，所以並排放圖。
+        if (global.DrawIO && DrawIO.isNote(note)) {
+          pane.appendChild(el('div', 'ver-diffhead', '左邊是這個版本的圖，右邊是目前的圖'));
+          const pics = el('div', 'ver-pics');
+          [res.version.content, res.current.content].forEach(function (c) {
+            const box = el('div', 'ver-pic');
+            box.innerHTML = DrawIO.blockHTML(DrawIO.payloadOf(c) || '');
+            pics.appendChild(box);
+          });
+          pane.appendChild(pics);
+          return;
+        }
         pane.appendChild(el('div', 'ver-diffhead', '左欄是這個版本，右欄是目前內容'));
         pane.appendChild(renderDiff(res.version.content, res.current.content));
       }).catch(function (e) {
