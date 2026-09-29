@@ -258,8 +258,8 @@
           pane.appendChild(el('div', 'ver-titlediff',
             '標題：「' + res.version.title + '」 → 目前「' + res.current.title + '」'));
         }
-        // draw.io 圖表的內容是一整行 SVG，逐行比對只會得到「整行都不一樣」；對人有意義的
-        // 是兩張圖長什麼樣，所以並排放圖。
+        // drawio 圖表的內容是圖的 DSL（一行一個圖形或連線，滿滿的座標），逐行比對看不出
+        // 圖哪裡變了；對人有意義的是兩張圖長什麼樣，所以並排放圖。
         if (global.DrawIO && DrawIO.isNote(note)) {
           pane.appendChild(el('div', 'ver-diffhead', '左邊是這個版本的圖，右邊是目前的圖'));
           const pics = el('div', 'ver-pics');

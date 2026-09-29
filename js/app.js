@@ -1000,10 +1000,9 @@
     closeGraphView();
   }
 
-  // ---- draw.io 頁（#drawio-wrap）：整頁的圖表編輯器，見 js/drawio.js ----
-  // 跟下面的關聯分析同一套：DrawIO.open() 回傳把手，離開這一頁時 close()。close() 是
-  // 同步的——來不及向 draw.io 要新畫面的改動，會先以「原始檔是新的、畫面慢一拍」存起來，
-  // 下次打開補畫（見 drawio.js 的 payloadFor）。
+  // ---- drawio 頁（#drawio-wrap）：整頁的繪圖工具，見 js/drawio.js ----
+  // 跟下面的關聯分析同一套：DrawIO.open() 回傳把手，離開這一頁時 close()，它會把還沒
+  // 送出的改動存掉再拆 DOM。
   const drawioWrapEl = $('#drawio-wrap');
   let drawioView = null;
   function closeDrawioView() {
@@ -1750,7 +1749,7 @@
       // 它——不動 state.currentId、不收起首頁，取消或存檔都只是把疊層收掉，見
       // openRelMapNote 開頭的說明。一定要在任何畫面狀態被改掉之前判斷。
       if (window.RelMap && RelMap.isRelNote(note)) { anchorBackToFolder(fromArea, note); openRelMapNote(note); return; }
-      // draw.io 圖表（meta.drawio）同理：它有自己的整頁編輯器，markdown 編輯器不接手
+      // drawio 圖表（meta.drawio）同理：它有自己的整頁編輯器，markdown 編輯器不接手
       if (window.DrawIO && DrawIO.isNote(note)) { anchorBackToFolder(fromArea, note); openDrawioNote(note); return; }
       // 不在 state.notes 裡的檔案筆記（理論上不會發生）：同樣只疊檢視器，背景沒東西就回首頁
       if (isFileNote(note)) { if (!state.currentId) showEmpty(); openFileViewer(note); return; }
@@ -2282,11 +2281,10 @@
     relmapView = view;
   }
 
-  // 一篇 meta.drawio 的筆記：整頁的 draw.io 編輯器（js/drawio.js）。存檔規則跟上面的
+  // 一篇 meta.drawio 的筆記：整頁的繪圖工具（js/drawio.js）。存檔規則跟上面的
   // openRelMapNote 一模一樣，而且理由也一樣——標題欄與自動存檔是兩個入口，只能有一條
   // 寫入路徑、同一時間只有一個請求在路上、每次都從 state.notes 取現在那一篇。那個
-  // 「改名把內容洗回舊版」的 bug 不要在這裡再發生一次；圖檔比關聯分析的 DSL 大得多
-  // （幾十到幾百 KB），慢網路下兩個請求撞在一起的機會只會更高。
+  // 「改名把內容洗回舊版」的 bug 不要在這裡再發生一次。
   function openDrawioNote(note) {
     if (!drawioWrapEl || !window.DrawIO) return;
     showDrawioPage();
@@ -3222,7 +3220,7 @@
     inp.click();
   }
   // 嵌入一張畫過的圖：選一篇筆記，插入 ![標題](<scheme>:<id>)。存的是 id 不是圖的副本，
-  // 所以原圖之後改了，引用它的筆記下次渲染就是新的。關聯分析（relmap:）與 draw.io
+  // 所以原圖之後改了，引用它的筆記下次渲染就是新的。關聯分析（relmap:）與 drawio
   // （drawio:）共用這一支。
   function pickEmbed(o) {
     const maps = state.notes.filter(function (n) { return o.match(n) && !n.trashed; })
@@ -3274,8 +3272,8 @@
   }
   function pickDrawioEmbed() {
     pickEmbed({
-      scheme: 'drawio', title: '嵌入 draw.io 圖表', name: 'draw.io 圖表', untitled: '未命名圖表',
-      none: '還沒有任何 draw.io 圖表——側邊欄「新增 → draw.io」先畫一張',
+      scheme: 'drawio', title: '嵌入 drawio 圖表', name: '圖表', untitled: '未命名圖表',
+      none: '還沒有任何 drawio 圖表——側邊欄「新增 → drawio」先畫一張',
       match: function (n) { return window.DrawIO && DrawIO.isNote(n); }
     });
   }
@@ -4615,7 +4613,7 @@
       { cmd: 'file', hint: '上傳檔案（圖片、PDF、任何附件）', action: pickFiles },
       { cmd: 'upload', hint: '上傳檔案（圖片、PDF、任何附件）', action: pickFiles },
       { cmd: 'relmap', hint: '嵌入一張你畫過的關聯分析（可拖曳縮放）', action: pickRelMapEmbed },
-      { cmd: 'drawio', hint: '嵌入一張你用 draw.io 畫的圖表', action: pickDrawioEmbed }
+      { cmd: 'drawio', hint: '嵌入一張你畫過的 drawio 圖表', action: pickDrawioEmbed }
     ]);
     // 排序方式：側邊欄搜尋框旁的鈕；換了就重畫側邊欄與首頁
     const sortBtn = $('#sort-btn');
@@ -4801,7 +4799,7 @@
       // 本來就在儀表板、只是停在某個資料夾裡，就回到「所有筆記」。
       const inArea = (courseWrapEl && !courseWrapEl.hidden) || (knowledgeWrapEl && !knowledgeWrapEl.hidden) ||
         (quickWrapEl && !quickWrapEl.hidden) || (novelWrapEl && !novelWrapEl.hidden);
-      // 關聯分析／draw.io／關聯圖是整頁的工具，開著的時候 state.currentId 是空的——少了這三個
+      // 關聯分析／drawio／關聯圖是整頁的工具，開著的時候 state.currentId 是空的——少了這三個
       // 判斷，在那幾頁按瀏覽器的「上一頁」網址會變回首頁、畫面卻還卡在編輯器裡。
       const inTool = (relmapWrapEl && !relmapWrapEl.hidden) || (drawioWrapEl && !drawioWrapEl.hidden) ||
         (graphWrapEl && !graphWrapEl.hidden);

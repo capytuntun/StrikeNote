@@ -600,8 +600,8 @@
             (global.Icons ? Icons.svg('network') : '') + ' 全螢幕</button>' + svg + '</div>';
         }
       }
-      // ```drawio 是 draw.io 圖表（js/drawio.js）：圍欄裡那一行是一張帶著原始圖檔的 SVG，
-      // 這裡只把它當圖片顯示。要編輯是打開那篇 meta.drawio 的筆記，不是在這裡。
+      // ```drawio 是自己做的繪圖工具（js/drawio.js）：圍欄裡是圖的 DSL（一行一個圖形或連線），
+      // SVG 每次都重新畫，跟關聯分析、心智圖同一個做法。要編輯是打開那篇 meta.drawio 的筆記。
       if (info === 'drawio' && global.DrawIO) return DrawIO.blockHTML(code);
       let requested = info, lineNumbers = false, startLine = 1;
       const opt = info.match(/^([^\s=]*)=(\d*)$/);
@@ -693,13 +693,13 @@
           '</span>' +
           '<span class="relmap-embed-canvas"></span></span>';
       }
-      // ![名稱](drawio:<noteId>)：把一張 draw.io 圖表（meta.drawio 的筆記）嵌進來。同樣只存
+      // ![名稱](drawio:<noteId>)：把一張 drawio 圖表（meta.drawio 的筆記）嵌進來。同樣只存
       // id；圖由 resolveDrawios 填進去，「編輯」會跳到那張圖的編輯器。
       if (href && href.indexOf('drawio:') === 0) {
         const did = href.slice(7);
         return '<span class="drawio-embed" data-drawio-note="' + escapeHtml(did) + '">' +
           '<span class="drawio-embed-bar">' +
-          '<span class="drawio-embed-name">' + escapeHtml(text || 'draw.io 圖表') + '</span>' +
+          '<span class="drawio-embed-name">' + escapeHtml(text || '圖表') + '</span>' +
           '<button class="drawio-embed-btn" type="button" data-drawio-open="' + escapeHtml(did) + '">編輯</button>' +
           '</span>' +
           '<span class="drawio-embed-canvas"></span></span>';
@@ -804,7 +804,7 @@
         'data-mindmap', 'data-i',    // 心智圖：原始大綱文字，以及節點索引
         'data-relmap',    // 關聯分析：原始 DSL 文字（js/relmap.js）
         'data-relmap-note', 'data-relmap-open', 'data-relmap-zoom',   // 嵌入別篇關聯分析
-        'data-drawio-note', 'data-drawio-open',   // 嵌入 draw.io 圖表（js/drawio.js）
+        'data-drawio-note', 'data-drawio-open',   // 嵌入 drawio 圖表（js/drawio.js）
         'data-link-url', 'data-file-id', 'data-file-kind', 'rel'],   // 網址預覽卡片、附件連結
       ADD_TAGS: ['input', 'button', 'iframe'] // checkboxes, annotate button, PDF embed
     });
@@ -942,11 +942,11 @@
     }));
   }
 
-  // ---- 嵌入 draw.io 圖表 ![名稱](drawio:<noteId>) --------------------------------
+  // ---- 嵌入 drawio 圖表 ![名稱](drawio:<noteId>) --------------------------------
   // 跟上面的關聯分析同一套（連筆記快取都共用——快取的是「某篇筆記的內容」，不分種類）：
-  // 存的是那篇圖表筆記的 id，渲染時才去拿現況。圖本身是 <img src="data:image/svg+xml…">，
-  // 由 DrawIO.imgOf() 從那篇筆記的內容裡取出來；在 <img> 裡的 SVG 不會跑 script，
-  // 所以就算圖是別人做的也只是一張圖。
+  // 存的是那篇圖表筆記的 id，渲染時才去拿現況，再由 DrawIO.htmlOf() 把它的 DSL 畫成 SVG。
+  // 那段 SVG 是我們自己從 DSL 一個欄位一個欄位組出來的（數字是數字、顏色只收 #rrggbb、
+  // 文字都跳脫過），不是把別人給的標記原樣塞進來。
   function resolveDrawios(container) {
     const boxes = Array.prototype.slice.call(container.querySelectorAll('.drawio-embed[data-drawio-note]'));
     if (!boxes.length) return Promise.resolve();
@@ -956,7 +956,7 @@
       if (!canvas) return null;
       const nameEl = box.querySelector('.drawio-embed-name');
       return relNoteText(box.getAttribute('data-drawio-note')).then(function (text) {
-        const img = (text != null && global.DrawIO) ? DrawIO.imgOf(text, nameEl ? nameEl.textContent : '') : '';
+        const img = (text != null && global.DrawIO) ? DrawIO.htmlOf(text, nameEl ? nameEl.textContent : '') : '';
         if (!img) {
           box.classList.add('is-failed');
           canvas.textContent = text == null ? '找不到這張圖表（可能已刪除，或你沒有權限）' : '這張圖表還是空白的。';

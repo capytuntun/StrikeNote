@@ -39,9 +39,7 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp',
-  '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf',
-  // vendor/drawio/ 要用的：語系檔是 .txt，樣式表／範本／圖庫定義是 .xml
-  '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml; charset=utf-8'
+  '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf'
 };
 
 // The front-end never loads anything off-site, so the policy can be tight.
@@ -243,56 +241,13 @@ const STATIC_ALLOW = new RegExp(
   '^/(?:index\\.html|app\\.css|logo\\.png|favicon\\.(?:ico|png)' +
   '|js/[\\w-][\\w.-]*\\.js' +
   '|vendor/(?:[\\w-][\\w.-]*/)*[\\w-][\\w.-]*\\.(?:js|css|woff2|woff|ttf|png|svg))$');
-// vendor/drawio/ 是整套 draw.io 編輯器（server/tools/vendor-drawio.js 從釋出版精簡來的），
-// 它自己有一頁 index.html，還要讀語系檔（.txt）、樣式表與範本（.xml）、各種圖。這些副檔名
-// 只對這一個目錄開放，其餘 vendor/ 維持原本那份比較窄的清單。檔名也放寬到圖庫實際會用的
-// 字元（空白、逗號、括號）；每一段仍然不能以 "." 開頭，所以 dotfile 跟 ".." 一樣進不來。
-const DRAWIO_ALLOW = new RegExp(
-  '^/vendor/drawio/(?:[\\w-][\\w .,()+-]*/)*[\\w-][\\w .,()+-]*' +
-  '\\.(?:html|js|css|txt|xml|json|png|gif|jpg|jpeg|svg|ico|webp|woff2|woff|ttf)$');
-
-// draw.io 跑在**沙箱 iframe** 裡（js/drawio.js：sandbox 不給 allow-same-origin）。圖檔是
-// 使用者的內容，而且筆記可以分享——別人做的圖會在我的瀏覽器裡被 draw.io 解析。放在沙箱裡，
-// 就算 draw.io 哪天被一張惡意圖檔打穿，那段程式也是「不透明來源」：拿不到這個站的 cookie
-// （SameSite=Strict 對它來說是跨站）、讀不到父頁面，只剩 postMessage 這一條路。
-// 沙箱有兩個後果要在這裡補：
-//   1. CSP 的 'self' 在不透明來源的文件裡對不上任何東西（連自己的 js/ 都載不了），所以
-//      draw.io 那一頁的 CSP 要把來源明寫出來。來源取自這個請求的 Host；Host 的字元先
-//      驗過，亂七八糟的就維持預設 CSP（那一頁會起不來，但不會被塞進奇怪的指令）。
-//   2. 它用 XHR 讀自己的語系檔／樣式表時，Origin 是 null，算跨來源，要 CORS。這個目錄
-//      全是公開的開源靜態檔，開 * 沒有東西可洩漏。
-// 限制一樣緊：只准連回本站，沒有 'unsafe-eval'、沒有 inline script——draw.io 31 在這個
-// 條件下跑得起來（實測零違規）。
-function drawioHeaders(req, headers, ext) {
-  headers['Access-Control-Allow-Origin'] = '*';
-  if (ext !== '.html') return;
-  const host = String(req.headers.host || '');
-  if (!/^[A-Za-z0-9.-]+(?::\d{1,5})?$/.test(host) && !/^\[[0-9A-Fa-f:]+\](?::\d{1,5})?$/.test(host)) return;
-  // http 與 https 兩種都列：這一頁是哪一種，取決於前面的代理有沒有把 X-Forwarded-Proto 帶
-  // 過來、TRUST_PROXY 有沒有開；猜錯的話 draw.io 連自己的 js 都載不了，整頁空白。兩個都是
-  // 本站自己，多列一個不會放進任何外人（https 的頁面本來就載不了 http 的東西）。
-  const o = 'http://' + host + ' https://' + host;
-  headers['Content-Security-Policy'] = [
-    'default-src ' + o,
-    'img-src ' + o + ' data: blob:',
-    'style-src ' + o + " 'unsafe-inline'",
-    'script-src ' + o,
-    'connect-src ' + o,
-    'font-src ' + o + ' data:',
-    "object-src 'none'",
-    'frame-src ' + o,
-    "base-uri 'none'",
-    "form-action 'none'",
-    "frame-ancestors 'self'"
-  ].join('; ');
-}
 
 function serveStatic(req, res, urlPath) {
   let rel;
   try { rel = decodeURIComponent(urlPath); }
   catch (e) { return json(res, 400, { error: 'bad request' }); }
   if (rel === '/') rel = '/index.html';
-  if (!STATIC_ALLOW.test(rel) && !DRAWIO_ALLOW.test(rel)) return json(res, 404, { error: 'not found' });
+  if (!STATIC_ALLOW.test(rel)) return json(res, 404, { error: 'not found' });
 
   const full = path.resolve(config.staticDir, '.' + rel);
   // Belt and braces: the allow-list already excludes traversal, but confirm the
@@ -310,15 +265,13 @@ function serveStatic(req, res, urlPath) {
     // cached for a day — by the browser and by a CDN edge in front of us.
     const isVendor = rel.startsWith('/vendor/');
     const own = !isVendor && (ext === '.html' || ext === '.css' || ext === '.js');
-    const headers = {
+    res.writeHead(200, {
       'Content-Type': MIME[ext] || 'application/octet-stream',
       'Content-Length': st.size,
       'Cache-Control': own ? 'no-store, no-cache, must-revalidate'
         : (isVendor ? 'public, max-age=86400' : 'no-cache'),
       'Last-Modified': st.mtime.toUTCString()
-    };
-    if (rel.startsWith('/vendor/drawio/')) drawioHeaders(req, headers, ext);
-    res.writeHead(200, headers);
+    });
     if (req.method === 'HEAD') return res.end();
     fs.createReadStream(full).pipe(res);
   });

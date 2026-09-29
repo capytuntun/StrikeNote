@@ -446,13 +446,13 @@
       '.pdf-content .rm-edge-lbg { fill: #ffffff; stroke: #d0d7de; }',
       '.pdf-content .rm-edge-lbl { fill: #57606a; }',
       '.pdf-content .rm-arrowhead { fill: context-stroke; }',
-      /* draw.io 圖表：一張 <img>。高度壓在一頁以內，外框才敢用 break-inside: avoid——
+      /* drawio 圖表：一張 SVG。高度壓在一頁以內，外框才敢用 break-inside: avoid——
          paged.js 碰到比一頁還高的 avoid 區塊不會切，是直接不印（見上面 pre 那段說明）。 */
       '.pdf-content .drawio-block, .pdf-content .drawio-embed { border: 1px solid #d0d7de; background: #ffffff;',
       '  margin: 0 0 12pt; padding: 8pt; text-align: center; break-inside: avoid; overflow: hidden; }',
       '.pdf-content .drawio-embed-bar { display: none; }',
       '.pdf-content .drawio-embed-canvas { display: block; padding: 0; }',
-      '.pdf-content .drawio-img { display: block; margin: 0 auto; max-width: 100%; max-height: 225mm; width: auto; height: auto; }',
+      '.pdf-content .dio-svg, .pdf-content .drawio-img { display: block; margin: 0 auto; max-width: 100%; max-height: 225mm; width: auto; height: auto; }',
       /* 便條紙：紙本上還是一張紙，但用比較淡的暖黃（列印出來不會糊成一塊），
          色帶壓深一點才印得出來。 */
       '.pdf-content .rm-note .rm-note-paper { fill: #fbf3cf; stroke: #c9b678; stroke-width: 1; }',

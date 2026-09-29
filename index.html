@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=170">
+  <link rel="stylesheet" href="app.css?v=171">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -143,7 +143,7 @@
             <button id="sec-report" class="user-menu-item" role="menuitem" type="button" title="資安院報告模式" data-icon="shield">資安院報告</button>
             <button id="perf-report" class="user-menu-item" role="menuitem" type="button" title="成效報告模式" data-icon="chart">成效報告</button>
             <button id="rel-map" class="user-menu-item" role="menuitem" type="button" title="自由畫布的節點／連線圖，像簡化版的 React Flow" data-icon="network">關聯分析</button>
-            <button id="new-drawio" class="user-menu-item" role="menuitem" type="button" title="用 draw.io 畫流程圖、網路架構圖、UML…（編輯器就是 draw.io 本尊，架在站內）" data-icon="shapes">draw.io</button>
+            <button id="new-drawio" class="user-menu-item" role="menuitem" type="button" title="畫流程圖、網路架構圖：拖圖形、拉連線、改文字與顏色（版面像 draw.io 的基本繪圖工具）" data-icon="shapes">drawio</button>
             <div class="user-menu-sep" role="separator"></div>
             <button id="new-book" class="user-menu-item" role="menuitem" type="button" title="挑一個資料夾做成電子書；做過的電子書會列在首頁的「電子書」區" data-icon="book-open">電子書</button>
           </div>
@@ -333,8 +333,8 @@
       <!-- 關聯分析（js/relmap.js）：整頁的畫布編輯器，不是浮在上面的視窗。一篇 meta.relMap
            的筆記直接開在這裡；一般筆記裡的 ```relmap 區塊按「全螢幕」也是開到這裡，完成後回筆記。 -->
       <div id="relmap-wrap" class="relmap-wrap" hidden></div>
-      <!-- draw.io（js/drawio.js）：整頁的圖表編輯器，裡面是架在站內的 draw.io 本尊（vendor/drawio/，
-           沙箱 iframe）。一篇 meta.drawio 的筆記直接開在這裡。 -->
+      <!-- drawio（js/drawio.js）：整頁的繪圖工具，版面照 draw.io 的樣子、功能只做基本的。
+           一篇 meta.drawio 的筆記直接開在這裡。 -->
       <div id="drawio-wrap" class="drawio-wrap" hidden></div>
       <!-- 關聯圖（js/graph.js）：整頁的力導向圖，跟垃圾桶／區域頁一樣接管 #main -->
       <div id="graph-wrap" class="graph-wrap" hidden></div>
@@ -359,7 +359,7 @@
   <script src="js/mdimport.js?v=1"></script>
   <script src="js/mindmap.js?v=3"></script>
   <script src="js/relmap.js?v=8"></script>
-  <script src="js/drawio.js?v=1"></script>
+  <script src="js/drawio.js?v=2"></script>
   <script src="js/graph.js?v=11"></script>
   <script src="js/store.js?v=59"></script>
   <script src="js/auth.js?v=48"></script>
@@ -367,7 +367,7 @@
   <script src="js/admin.js?v=49"></script>
   <script src="js/backup.js?v=1"></script>
   <script src="js/search.js?v=41"></script>
-  <script src="js/markdown.js?v=62"></script>
+  <script src="js/markdown.js?v=63"></script>
   <script src="js/editor.js?v=54"></script>
   <script src="js/multicursor.js?v=3"></script>
   <script src="js/templates.js?v=1"></script>
@@ -378,17 +378,17 @@
   <script src="js/seceditor.js?v=43"></script>
   <script src="js/perfreport.js?v=43"></script>
   <script src="js/sorting.js?v=1"></script>
-  <script src="js/dashboard.js?v=65"></script>
-  <script src="js/areabrowser.js?v=12"></script>
+  <script src="js/dashboard.js?v=66"></script>
+  <script src="js/areabrowser.js?v=13"></script>
   <script src="js/quicknotes.js?v=9"></script>
   <script src="js/annotate.js?v=42"></script>
-  <script src="js/pdf.js?v=55"></script>
-  <script src="js/book.js?v=9"></script>
-  <script src="js/versions.js?v=3"></script>
+  <script src="js/pdf.js?v=56"></script>
+  <script src="js/book.js?v=10"></script>
+  <script src="js/versions.js?v=4"></script>
   <script src="js/trash.js?v=2"></script>
   <script src="js/imagelib.js?v=4"></script>
   <script src="js/linesync.js?v=8"></script>
   <script src="js/embedswitch.js?v=2"></script>
-  <script src="js/app.js?v=126"></script>
+  <script src="js/app.js?v=127"></script>
 </body>
 </html>

@@ -1,38 +1,28 @@
-/* draw.io（js/drawio.js）
+/* drawio（js/drawio.js）—— 基本的繪圖工具
  *
- * 編輯器是 draw.io 本尊——vendor/drawio/ 是它的釋出版（server/tools/vendor-drawio.js 從
- * draw.war 精簡來的），用它自己的 embed 模式放進一個 iframe，兩邊只靠 postMessage 講話
- * （https://www.drawio.com/doc/faq/embed-mode）。這個檔案只做外面那一圈：頁面的殼、
- * 訊息協定、以及「圖要怎麼存進筆記」。
+ * 版面照 draw.io 的樣子：上面選單列＋工具列，左邊圖形，中間畫布，右邊格式面板。功能只做
+ * 基本的那一些：放圖形、搬動、縮放、拉連線、改文字、改顏色線條、復原重做、複製貼上、
+ * 縮放平移、匯出 PNG／SVG。是自己寫的，不是把 draw.io 放進來——沒有圖層、分頁、旋轉、
+ * 群組、容器、圖庫這些。
  *
- * iframe 是沙箱（不給 allow-same-origin）：筆記可以分享，別人做的圖會在我的瀏覽器裡被
- * draw.io 解析；放在沙箱裡，它就算被一張惡意圖檔打穿，也是不透明來源，拿不到這個站的
- * cookie、讀不到父頁面。伺服器那邊為此替 vendor/drawio/ 準備了專用的標頭，見 server.js
- * 的 drawioHeaders。
+ * 跟關聯分析（relmap.js）同一套想法：
+ *   - 圖的原始資料是一段文字（DSL），一行一個圖形或一條連線，存在筆記的 ```drawio 圍欄裡。
+ *     搜尋得到、版本紀錄的差異看得懂、備份還原不用另外處理。
+ *   - renderSVG() 是 DSL 的純函式：文字寬度用字元類別估，不量 DOM，所以預覽、PDF、
+ *     電子書、編輯器畫布出來是同一張圖。
  *
- * 存檔格式：一張圖＝一篇筆記（meta.drawio），內容是一個 ```drawio 圍欄，裡面**只有一行**：
+ *   shape <id> <種類> x= y= w= h= ["文字"] [fill=#hex|none] [stroke=#hex|none] [sw=] [dash=1]
+ *                                          [fs=] [fc=#hex] [bold=1] [align=left|center|right]
+ *   edge  <id> <起點> <終點> ["文字"] [style=straight|elbow|curve] [start=none|arrow]
+ *                                     [end=none|arrow] [stroke=] [sw=] [dash=1] [fs=] [fc=]
+ *   opt   grid=0
  *
- *   ```drawio
- *   <svg … content="&lt;mxfile …&gt;">…</svg>
- *   ```
- *
- * 那一行是 draw.io 的 xmlsvg——一張可以直接顯示的 SVG，根節點的 content 屬性裡帶著可以
- * 再編輯的原始圖檔（存成 .drawio.svg 就能用桌面版 draw.io 打開）。所以一份資料同時是
- * 「畫面」與「原始檔」，而且住在筆記內容裡：版本紀錄、備份還原、垃圾桶、分享都不用
- * 另外處理。三種形式（decode 都認得）：
- *   - <svg …>      一般情況
- *   - base64:…     SVG 裡有換行、而且換成字元參照之後對不回來時的後備（極少見）
- *   - <mxfile …>   只有原始檔、還沒有畫面（來不及匯出就被切走；下次打開會補畫）
- *
- * 圍欄裡不能有換行（不然某一行剛好以 ``` 開頭就會把圍欄截斷），所以換行一律寫成 &#10;。
+ * 起點／終點是圖形的 id（連線會跟著圖形走），或 @x,y（畫布上的一個點）。圖形在清單裡的
+ * 順序就是疊放順序；連線一律畫在圖形上面。顏色是使用者自己挑的，所以直接寫在 SVG 的屬性
+ * 上（不像關聯分析走 CSS class）；畫布永遠是白紙，印出來也是白紙，不跟主題變色。
  */
 (function (global) {
   'use strict';
-
-  const EDITOR = 'vendor/drawio/index.html';
-  const B64 = 'base64:';
-  const EXPORT_DELAY = 800;      // 停手多久才向 draw.io 要一份新的 SVG
-  const CLOSE_WAIT = 4000;       // 返回時最多等匯出多久
 
   function ic(name) { return global.Icons ? Icons.svg(name) : ''; }
   function esc(s) {
@@ -40,125 +30,535 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function fmt(n) { return String(Math.round(n * 10) / 10); }
 
-  // ---- UTF-8 <-> base64（btoa/atob 只吃 Latin-1）----
-  function b64encode(str) {
-    const bytes = new TextEncoder().encode(String(str));
-    let bin = '';
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-    }
-    return btoa(bin);
+  const FONT = "Helvetica, Arial, 'Noto Sans TC', 'Microsoft JhengHei', sans-serif";
+  const SHAPE_DEF = { fill: '#ffffff', stroke: '#000000', sw: 1, dash: 0, fs: 12, fc: '#000000', bold: 0, align: 'center' };
+  const EDGE_DEF = { stroke: '#000000', sw: 1, dash: 0, fs: 11, fc: '#000000', bold: 0, style: 'straight', start: 'none', end: 'arrow' };
+  const TYPES = ['rect', 'round', 'pill', 'ellipse', 'diamond', 'para', 'hex', 'tri', 'cyl', 'cloud', 'doc', 'actor', 'text'];
+  const ALIGNS = ['left', 'center', 'right'];
+  const STYLES = ['straight', 'elbow', 'curve'];
+  const GRID = 10, MIN_SIZE = 10;
+
+  // 左邊那排圖形。大小照 draw.io 的預設值。
+  const PALETTE = [
+    { title: '一般', items: [
+      { type: 'rect', w: 120, h: 60, name: '矩形' },
+      { type: 'round', w: 120, h: 60, name: '圓角矩形' },
+      { type: 'text', w: 60, h: 30, name: '文字', label: '文字' },
+      { type: 'ellipse', w: 120, h: 80, name: '橢圓' },
+      { type: 'rect', w: 80, h: 80, name: '正方形' },
+      { type: 'ellipse', w: 80, h: 80, name: '圓形' },
+      { type: 'pill', w: 120, h: 40, name: '起訖（膠囊）' },
+      { type: 'diamond', w: 80, h: 80, name: '菱形' },
+      { type: 'para', w: 120, h: 60, name: '平行四邊形' },
+      { type: 'hex', w: 120, h: 80, name: '六邊形' },
+      { type: 'tri', w: 60, h: 80, name: '三角形' },
+      { type: 'cyl', w: 60, h: 80, name: '圓柱（資料庫）' },
+      { type: 'cloud', w: 120, h: 80, name: '雲' },
+      { type: 'doc', w: 120, h: 80, name: '文件' },
+      { type: 'actor', w: 30, h: 60, name: '人' }
+    ] },
+    { title: '連線', items: [
+      { edge: 'straight', end: 'arrow', name: '箭頭' },
+      { edge: 'straight', end: 'none', name: '直線' },
+      { edge: 'straight', end: 'arrow', start: 'arrow', name: '雙向箭頭' },
+      { edge: 'straight', end: 'arrow', dash: 1, name: '虛線箭頭' },
+      { edge: 'elbow', end: 'arrow', name: '折線' },
+      { edge: 'curve', end: 'arrow', name: '曲線' }
+    ] }
+  ];
+  // 格式面板的配色（draw.io 預設的那八組：填色＋線色）
+  const PRESETS = [
+    ['#ffffff', '#000000'], ['#f5f5f5', '#666666'], ['#dae8fc', '#6c8ebf'], ['#d5e8d4', '#82b366'],
+    ['#ffe6cc', '#d79b00'], ['#fff2cc', '#d6b656'], ['#f8cecc', '#b85450'], ['#e1d5e7', '#9673a6']
+  ];
+
+  // ---------------- DSL ----------------
+  function unescapeStr(s) {
+    return String(s).replace(/\\(["\\n])/g, function (m, c) { return c === 'n' ? '\n' : c; });
   }
-  function b64decode(b64) {
-    const bin = atob(String(b64).replace(/\s+/g, ''));
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return new TextDecoder().decode(bytes);
+  function quote(s) {
+    return '"' + String(s || '').replace(/\r\n?/g, '\n').replace(/([\\"])/g, '\\$1').replace(/\n/g, '\\n') + '"';
   }
-  function dataUrl(svg) { return 'data:image/svg+xml;base64,' + b64encode(svg); }
-  // draw.io 匯出回來的是 data URI；base64 或 utf8 兩種寫法都可能
-  function textOfDataUri(uri) {
-    const s = String(uri || '');
-    const i = s.indexOf(',');
-    if (s.slice(0, 5) !== 'data:' || i < 0) return '';
-    const head = s.slice(0, i), body = s.slice(i + 1);
-    try { return /;base64/i.test(head) ? b64decode(body) : decodeURIComponent(body); }
-    catch (e) { return ''; }
+  // 引號裡的算文字、其餘算屬性：文字剛好長得像 x=1 也不會被當成屬性
+  function tokenize(line) {
+    const out = [];
+    const re = /"((?:[^"\\]|\\.)*)"|(\S+)/g;
+    let m;
+    while ((m = re.exec(line))) out.push(m[1] !== undefined ? { q: true, v: unescapeStr(m[1]) } : { q: false, v: m[2] });
+    return out;
+  }
+  function num(v, d, lo, hi) {
+    const n = parseFloat(v);
+    if (!isFinite(n)) return d;
+    return lo === undefined ? n : clamp(n, lo, hi);
+  }
+  // 顏色只收 #rrggbb 或 none——這個值會原樣寫進 SVG 的屬性
+  function color(v, d, allowNone) {
+    const s = String(v || '').toLowerCase();
+    if (allowNone && s === 'none') return 'none';
+    if (/^#[0-9a-f]{6}$/.test(s)) return s;
+    if (/^#[0-9a-f]{3}$/.test(s)) return '#' + s[1] + s[1] + s[2] + s[2] + s[3] + s[3];
+    return d;
+  }
+  const ID_RE = /^[A-Za-z][\w-]{0,31}$/;
+  function endpointOf(tok) {
+    const m = /^@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/.exec(tok);
+    if (m) return { x: parseFloat(m[1]), y: parseFloat(m[2]) };
+    return ID_RE.test(tok) ? { id: tok } : null;
+  }
+  function split(tokens) {
+    const o = { label: '', attrs: {} };
+    let gotLabel = false;
+    tokens.forEach(function (t) {
+      if (t.q) { if (!gotLabel) { o.label = t.v; gotLabel = true; } return; }
+      const i = t.v.indexOf('=');
+      if (i > 0) o.attrs[t.v.slice(0, i)] = t.v.slice(i + 1);
+    });
+    return o;
   }
 
-  // ---- SVG 裡的原始圖檔 ----
-  function parseSvg(svg) {
-    try {
-      const doc = new DOMParser().parseFromString(String(svg), 'image/svg+xml');
-      if (!doc || !doc.documentElement || doc.getElementsByTagName('parsererror').length) return null;
-      if (doc.documentElement.nodeName.toLowerCase() !== 'svg') return null;
-      return doc;
-    } catch (e) { return null; }
+  function parse(text) {
+    const model = { shapes: [], edges: [], grid: true };
+    const seen = {};
+    String(text || '').split(/\r?\n/).forEach(function (raw) {
+      const line = raw.trim();
+      if (!line || line[0] === '#' || line.slice(0, 3) === '```') return;
+      const t = tokenize(line);
+      if (!t.length || t[0].q) return;
+      const kind = t[0].v;
+      if (kind === 'shape' && t[1] && t[2] && !t[1].q && !t[2].q) {
+        const id = t[1].v, type = t[2].v;
+        if (!ID_RE.test(id) || seen[id] || TYPES.indexOf(type) < 0) return;
+        const r = split(t.slice(3)), a = r.attrs;
+        seen[id] = true;
+        model.shapes.push({
+          id: id, type: type, label: r.label,
+          x: num(a.x, 0), y: num(a.y, 0),
+          w: num(a.w, 120, MIN_SIZE, 4000), h: num(a.h, 60, MIN_SIZE, 4000),
+          fill: color(a.fill, SHAPE_DEF.fill, true), stroke: color(a.stroke, SHAPE_DEF.stroke, true),
+          sw: num(a.sw, SHAPE_DEF.sw, 0.5, 20), dash: a.dash === '1' ? 1 : 0,
+          fs: num(a.fs, SHAPE_DEF.fs, 6, 96), fc: color(a.fc, SHAPE_DEF.fc, false),
+          bold: a.bold === '1' ? 1 : 0, align: ALIGNS.indexOf(a.align) >= 0 ? a.align : SHAPE_DEF.align
+        });
+      } else if (kind === 'edge' && t[1] && t[2] && t[3] && !t[1].q && !t[2].q && !t[3].q) {
+        const id = t[1].v;
+        const from = endpointOf(t[2].v), to = endpointOf(t[3].v);
+        if (!ID_RE.test(id) || seen[id] || !from || !to) return;
+        const r = split(t.slice(4)), a = r.attrs;
+        seen[id] = true;
+        model.edges.push({
+          id: id, from: from, to: to, label: r.label,
+          style: STYLES.indexOf(a.style) >= 0 ? a.style : EDGE_DEF.style,
+          start: a.start === 'arrow' ? 'arrow' : 'none',
+          end: a.end === 'none' ? 'none' : 'arrow',
+          stroke: color(a.stroke, EDGE_DEF.stroke, false), sw: num(a.sw, EDGE_DEF.sw, 0.5, 20),
+          dash: a.dash === '1' ? 1 : 0,
+          fs: num(a.fs, EDGE_DEF.fs, 6, 96), fc: color(a.fc, EDGE_DEF.fc, false), bold: a.bold === '1' ? 1 : 0
+        });
+      } else if (kind === 'opt') {
+        const a = split(t.slice(1)).attrs;
+        if (a.grid === '0') model.grid = false;
+      }
+    });
+    return model;
   }
-  function xmlInSvg(svg) {
-    const doc = parseSvg(svg);
-    return doc ? (doc.documentElement.getAttribute('content') || '') : '';
+  function endpointText(p) { return p.id ? p.id : '@' + fmt(p.x) + ',' + fmt(p.y); }
+  function serialize(model) {
+    const lines = [];
+    if (model.grid === false) lines.push('opt grid=0');
+    model.shapes.forEach(function (s) {
+      let l = 'shape ' + s.id + ' ' + s.type + ' x=' + fmt(s.x) + ' y=' + fmt(s.y) + ' w=' + fmt(s.w) + ' h=' + fmt(s.h);
+      if (s.label) l += ' ' + quote(s.label);
+      if (s.fill !== SHAPE_DEF.fill) l += ' fill=' + s.fill;
+      if (s.stroke !== SHAPE_DEF.stroke) l += ' stroke=' + s.stroke;
+      if (s.sw !== SHAPE_DEF.sw) l += ' sw=' + fmt(s.sw);
+      if (s.dash) l += ' dash=1';
+      if (s.fs !== SHAPE_DEF.fs) l += ' fs=' + fmt(s.fs);
+      if (s.fc !== SHAPE_DEF.fc) l += ' fc=' + s.fc;
+      if (s.bold) l += ' bold=1';
+      if (s.align !== SHAPE_DEF.align) l += ' align=' + s.align;
+      lines.push(l);
+    });
+    model.edges.forEach(function (e) {
+      let l = 'edge ' + e.id + ' ' + endpointText(e.from) + ' ' + endpointText(e.to);
+      if (e.label) l += ' ' + quote(e.label);
+      if (e.style !== EDGE_DEF.style) l += ' style=' + e.style;
+      if (e.start !== EDGE_DEF.start) l += ' start=' + e.start;
+      if (e.end !== EDGE_DEF.end) l += ' end=' + e.end;
+      if (e.stroke !== EDGE_DEF.stroke) l += ' stroke=' + e.stroke;
+      if (e.sw !== EDGE_DEF.sw) l += ' sw=' + fmt(e.sw);
+      if (e.dash) l += ' dash=1';
+      if (e.fs !== EDGE_DEF.fs) l += ' fs=' + fmt(e.fs);
+      if (e.fc !== EDGE_DEF.fc) l += ' fc=' + e.fc;
+      if (e.bold) l += ' bold=1';
+      lines.push(l);
+    });
+    return lines.join('\n');
   }
-  function isStale(svg) {
-    const doc = parseSvg(svg);
-    return !!doc && doc.documentElement.getAttribute('data-stale') === '1';
+  function indexOf(model) {
+    const m = {};
+    model.shapes.forEach(function (s) { m[s.id] = s; });
+    return m;
   }
 
-  // ---- 筆記內容 <-> payload ----
+  // ---------------- 筆記內容 <-> DSL ----------------
   function payloadOf(content) {
-    const m = /^```drawio[ \t]*\r?\n([^\n]*?)\r?\n```/m.exec(String(content || ''));
-    return m ? m[1].trim() : null;
+    const m = /^```drawio[ \t]*\r?\n([\s\S]*?)\r?\n?```[ \t]*$/m.exec(String(content || ''));
+    return m ? m[1] : null;
   }
-  function wrap(payload) { return '```drawio\n' + (payload || '') + '\n```\n'; }
+  function wrap(dsl) { return '```drawio\n' + (dsl ? dsl + '\n' : '') + '```\n'; }
   function generate() { return wrap(''); }
   function isNote(note) { return !!(note && note.meta && note.meta.drawio); }
-
-  function decode(payload) {
+  // 這個功能的第一版是把 draw.io 本尊放進來，存的是一整行 SVG（裡面帶著它自己的圖檔）。
+  // 那種格式這個編輯器打不開，但圖不能就這樣不見：照樣顯示，只是不能編輯。
+  function isLegacy(payload) {
+    const p = String(payload || '').trim();
+    return /^(?:base64:|<svg[\s>]|<\?xml|<mxfile[\s>])/.test(p);
+  }
+  function legacySvg(payload) {
     let p = String(payload || '').trim();
-    if (!p) return { svg: '', xml: '' };
-    if (p.slice(0, B64.length) === B64) {
-      try { p = b64decode(p.slice(B64.length)).trim(); } catch (e) { return { svg: '', xml: '' }; }
-    }
-    if (/^<(?:mxfile|mxGraphModel)[\s>]/.test(p)) return { svg: '', xml: p };
-    if (/^<(?:\?xml|!DOCTYPE|svg[\s>])/.test(p)) return { svg: p, xml: xmlInSvg(p) };
-    return { svg: '', xml: '' };
+    try {
+      if (p.slice(0, 7) === 'base64:') {
+        const bin = atob(p.slice(7).replace(/\s+/g, ''));
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        p = new TextDecoder().decode(bytes).trim();
+      }
+    } catch (e) { return ''; }
+    return /^<(?:\?xml|svg[\s>])/.test(p) ? p : '';
   }
-  // 一行裝得下就直接放，裝不下（或換行換掉之後對不回來）才退到 base64
-  function oneLine(text, check) {
-    const s = String(text || '');
-    if (!/[\r\n]/.test(s)) return s;
-    const flat = s.replace(/\r\n?|\n/g, '&#10;');
-    return check(flat) ? flat : B64 + b64encode(s);
-  }
-  function encode(svg) {
-    const want = xmlInSvg(svg);
-    return oneLine(svg, function (flat) {
-      const doc = parseSvg(flat);
-      return !!doc && (doc.documentElement.getAttribute('content') || '') === want;
-    });
-  }
-  function encodeXml(xml) {
-    // 原始圖檔沒有畫面可以對照，有換行就直接 base64，不去猜換行在哪一種節點裡
-    return oneLine(xml, function () { return false; });
-  }
-  // 把原始圖檔放進 SVG 的 content 屬性。draw.io 匯出的 xmlsvg 本來就帶著一份，但那一份
-  // 一律是壓縮過的（deflate＋base64，不管 compressXml 怎麼設），存進筆記就是一串亂碼；
-  // autosave 事件給的則是沒壓縮的 XML，所以存檔時一律換成那一份——圖裡的文字搜尋得到、
-  // 版本紀錄的差異看得懂，而且 draw.io 兩種都讀得回去。
-  // stale＝畫面比原始檔舊（來不及重新匯出）：標上 data-stale，下次打開會補畫。
-  function payloadFor(svg, xml, stale) {
-    const doc = svg ? parseSvg(svg) : null;
-    if (!doc) return xml ? encodeXml(xml) : '';
-    if (xml) doc.documentElement.setAttribute('content', xml);
-    if (stale) doc.documentElement.setAttribute('data-stale', '1');
-    else doc.documentElement.removeAttribute('data-stale');
-    return encode(new XMLSerializer().serializeToString(doc));
+  function b64(str) {
+    const bytes = new TextEncoder().encode(String(str));
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
   }
 
-  // ---- 唯讀渲染（預覽／PDF／電子書）----
-  // 圖是 <img src="data:image/svg+xml…">：在 <img> 裡的 SVG 不會跑 script、也載不了外部
-  // 資源，所以就算圖檔是別人精心做過的，這裡也只是一張圖。
-  function imgHTML(payload, alt) {
-    const d = decode(payload);
-    if (!d.svg) return '';
-    return '<img class="drawio-img" alt="' + esc(alt || 'draw.io 圖表') + '" src="' + dataUrl(d.svg) + '">';
+  // ---------------- 文字寬度（估的，不量 DOM）----------------
+  function charW(ch, fs, bold) {
+    const c = ch.codePointAt(0);
+    let w;
+    if (c >= 0x1100 && (c <= 0x115F || (c >= 0x2E80 && c <= 0xA4CF) || (c >= 0xAC00 && c <= 0xD7A3) ||
+      (c >= 0xF900 && c <= 0xFAFF) || (c >= 0xFF00 && c <= 0xFF60) || (c >= 0x3000 && c <= 0x303F))) w = 1;
+    else if (ch === ' ') w = 0.28;
+    else if ('ilI.,:;|!\'`jt'.indexOf(ch) >= 0) w = 0.3;
+    else if ('mwMW@'.indexOf(ch) >= 0) w = 0.86;
+    else if (c >= 65 && c <= 90) w = 0.68;
+    else w = 0.56;
+    return w * fs * (bold ? 1.06 : 1);
+  }
+  function textW(s, fs, bold) {
+    let w = 0;
+    for (const ch of String(s || '')) w += charW(ch, fs, bold);
+    return w;
+  }
+  // 折行：英文以字為單位、中文一個字一個字；一個字自己就超寬才硬切
+  function wrapText(text, max, fs, bold) {
+    const out = [];
+    String(text || '').split('\n').forEach(function (para) {
+      const toks = para.match(/[A-Za-z0-9_\-./:@#%&+=~]+|\s+|[\s\S]/g) || [];
+      let line = '', lw = 0;
+      toks.forEach(function (tk) {
+        const tw = textW(tk, fs, bold);
+        if (lw + tw > max && line) {
+          out.push(line.replace(/\s+$/, ''));
+          line = ''; lw = 0;
+          if (/^\s+$/.test(tk)) return;
+        }
+        if (tw > max) {
+          for (const ch of tk) {
+            const cw = charW(ch, fs, bold);
+            if (lw + cw > max && line) { out.push(line); line = ''; lw = 0; }
+            line += ch; lw += cw;
+          }
+        } else { line += tk; lw += tw; }
+      });
+      out.push(line.replace(/\s+$/, ''));
+    });
+    return out.length ? out : [''];
+  }
+
+  // ---------------- 圖形 ----------------
+  function strokeAttrs(o) {
+    let a = ' stroke="' + o.stroke + '" stroke-width="' + fmt(o.sw) + '"';
+    if (o.dash) a += ' stroke-dasharray="' + fmt(o.sw * 5 + 1) + ' ' + fmt(o.sw * 3 + 1) + '"';
+    return a;
+  }
+  function pts(list) { return list.map(function (p) { return fmt(p[0]) + ',' + fmt(p[1]); }).join(' '); }
+  function shapeBody(s, ox, oy) {
+    const x = s.x + ox, y = s.y + oy, w = s.w, h = s.h;
+    const st = ' fill="' + s.fill + '"' + strokeAttrs(s) + ' stroke-linejoin="round"';
+    const line = ' fill="none"' + strokeAttrs(s) + ' stroke-linecap="round"';
+    switch (s.type) {
+      case 'round': {
+        const r = Math.min(12, Math.min(w, h) * 0.2);
+        return '<rect x="' + fmt(x) + '" y="' + fmt(y) + '" width="' + fmt(w) + '" height="' + fmt(h) + '" rx="' + fmt(r) + '"' + st + '/>';
+      }
+      case 'pill':
+        return '<rect x="' + fmt(x) + '" y="' + fmt(y) + '" width="' + fmt(w) + '" height="' + fmt(h) + '" rx="' + fmt(Math.min(w, h) / 2) + '"' + st + '/>';
+      case 'ellipse':
+        return '<ellipse cx="' + fmt(x + w / 2) + '" cy="' + fmt(y + h / 2) + '" rx="' + fmt(w / 2) + '" ry="' + fmt(h / 2) + '"' + st + '/>';
+      case 'diamond':
+        return '<polygon points="' + pts([[x + w / 2, y], [x + w, y + h / 2], [x + w / 2, y + h], [x, y + h / 2]]) + '"' + st + '/>';
+      case 'para': {
+        const d = Math.min(20, w / 2);
+        return '<polygon points="' + pts([[x + d, y], [x + w, y], [x + w - d, y + h], [x, y + h]]) + '"' + st + '/>';
+      }
+      case 'hex': {
+        const d = Math.min(20, w / 2);
+        return '<polygon points="' + pts([[x + d, y], [x + w - d, y], [x + w, y + h / 2], [x + w - d, y + h], [x + d, y + h], [x, y + h / 2]]) + '"' + st + '/>';
+      }
+      case 'tri':
+        return '<polygon points="' + pts([[x, y], [x + w, y + h / 2], [x, y + h]]) + '"' + st + '/>';
+      case 'cyl': {
+        const ry = Math.min(15, h * 0.15), rx = w / 2;
+        return '<path d="M' + fmt(x) + ',' + fmt(y + ry) + ' A' + fmt(rx) + ',' + fmt(ry) + ' 0 0 1 ' + fmt(x + w) + ',' + fmt(y + ry) +
+          ' V' + fmt(y + h - ry) + ' A' + fmt(rx) + ',' + fmt(ry) + ' 0 0 1 ' + fmt(x) + ',' + fmt(y + h - ry) + ' Z"' + st + '/>' +
+          '<path d="M' + fmt(x) + ',' + fmt(y + ry) + ' A' + fmt(rx) + ',' + fmt(ry) + ' 0 0 0 ' + fmt(x + w) + ',' + fmt(y + ry) + '"' + line + '/>';
+      }
+      case 'cloud': {
+        const P = function (a, b) { return fmt(x + a * w) + ',' + fmt(y + b * h); };
+        return '<path d="M' + P(0.25, 0.25) + ' C' + P(0.05, 0.25) + ' ' + P(0, 0.5) + ' ' + P(0.16, 0.55) +
+          ' C' + P(0, 0.66) + ' ' + P(0.18, 0.9) + ' ' + P(0.31, 0.8) +
+          ' C' + P(0.4, 1) + ' ' + P(0.7, 1) + ' ' + P(0.8, 0.8) +
+          ' C' + P(1, 0.8) + ' ' + P(1, 0.6) + ' ' + P(0.875, 0.5) +
+          ' C' + P(1, 0.3) + ' ' + P(0.8, 0.1) + ' ' + P(0.625, 0.2) +
+          ' C' + P(0.5, 0.05) + ' ' + P(0.3, 0.05) + ' ' + P(0.25, 0.25) + ' Z"' + st + '/>';
+      }
+      case 'doc': {
+        const d = h * 0.12;
+        return '<path d="M' + fmt(x) + ',' + fmt(y) + ' H' + fmt(x + w) + ' V' + fmt(y + h - d) +
+          ' Q' + fmt(x + w * 0.75) + ',' + fmt(y + h - 3 * d) + ' ' + fmt(x + w * 0.5) + ',' + fmt(y + h - d) +
+          ' Q' + fmt(x + w * 0.25) + ',' + fmt(y + h + d) + ' ' + fmt(x) + ',' + fmt(y + h - d) + ' Z"' + st + '/>';
+      }
+      case 'actor': {
+        const cx = x + w / 2;
+        return '<ellipse cx="' + fmt(cx) + '" cy="' + fmt(y + h * 0.125) + '" rx="' + fmt(w * 0.25) + '" ry="' + fmt(h * 0.125) + '"' + st + '/>' +
+          '<path d="M' + fmt(cx) + ',' + fmt(y + h * 0.25) + ' V' + fmt(y + h * 0.667) +
+          ' M' + fmt(x) + ',' + fmt(y + h * 0.35) + ' H' + fmt(x + w) +
+          ' M' + fmt(cx) + ',' + fmt(y + h * 0.667) + ' L' + fmt(x) + ',' + fmt(y + h) +
+          ' M' + fmt(cx) + ',' + fmt(y + h * 0.667) + ' L' + fmt(x + w) + ',' + fmt(y + h) + '"' + line + '/>';
+      }
+      case 'text':
+        return '';
+      default:
+        return '<rect x="' + fmt(x) + '" y="' + fmt(y) + '" width="' + fmt(w) + '" height="' + fmt(h) + '"' + st + '/>';
+    }
+  }
+  const LABEL_PAD = 6;
+  // 文字垂直置中：不用 dominant-baseline（DOMPurify 會把那個屬性濾掉，預覽裡的字就往上偏），
+  // 自己把「行的中線」換成基線的位置。0.35 是一般字型大寫高度的一半左右。
+  function baseline(centerY, fs) { return centerY + fs * 0.35; }
+  function labelLines(s) {
+    if (!s.label) return [];
+    const max = s.type === 'actor' ? Math.max(s.w, 90) : Math.max(10, s.w - LABEL_PAD * 2);
+    return wrapText(s.label, max, s.fs, s.bold);
+  }
+  function labelSVG(s, ox, oy) {
+    const lines = labelLines(s);
+    if (!lines.length) return '';
+    const lh = s.fs * 1.3;
+    let tx, anchor;
+    if (s.type === 'actor' || s.align === 'center') { tx = s.x + s.w / 2; anchor = 'middle'; }
+    else if (s.align === 'left') { tx = s.x + LABEL_PAD; anchor = 'start'; }
+    else { tx = s.x + s.w - LABEL_PAD; anchor = 'end'; }
+    const top = s.type === 'actor' ? s.y + s.h + 3 : s.y + (s.h - lines.length * lh) / 2;
+    let out = '';
+    lines.forEach(function (ln, i) {
+      out += '<text x="' + fmt(tx + ox) + '" y="' + fmt(baseline(top + oy + i * lh + lh / 2, s.fs)) + '" text-anchor="' + anchor +
+        '" font-size="' + fmt(s.fs) + '" fill="' + s.fc + '"' +
+        (s.bold ? ' font-weight="700"' : '') + '>' + esc(ln) + '</text>';
+    });
+    return out;
+  }
+  // 圖形實際佔的範圍（人形的文字在下面，會超出自己的框）
+  function shapeBounds(s) {
+    let h = s.h, x = s.x, w = s.w;
+    if (s.type === 'actor' && s.label) {
+      const lines = labelLines(s);
+      h += 3 + lines.length * s.fs * 1.3;
+      const lw = Math.max.apply(null, lines.map(function (l) { return textW(l, s.fs, s.bold); }));
+      if (lw > w) { x -= (lw - w) / 2; w = lw; }
+    }
+    return { x: x, y: s.y, w: w, h: h };
+  }
+  // hit：只有編輯器要的「點得到的範圍」。預覽、PDF、匯出的檔案裡不放，那裡沒有人要點
+  function shapeSVG(s, ox, oy, hit) {
+    return '<g class="dio-shape" data-id="' + esc(s.id) + '">' +
+      // 整個框都點得到：沒有填色的圖形、純文字，中間是空的
+      (hit ? '<rect class="dio-hit" x="' + fmt(s.x + ox) + '" y="' + fmt(s.y + oy) + '" width="' + fmt(s.w) + '" height="' + fmt(s.h) +
+      '" fill="none" stroke="none"/>' : '') +
+      shapeBody(s, ox, oy) + labelSVG(s, ox, oy) + '</g>';
+  }
+
+  // ---------------- 連線 ----------------
+  function centerOf(s) { return { x: s.x + s.w / 2, y: s.y + s.h / 2 }; }
+  // 從圖形中心朝 toward 走，碰到邊界的那一點
+  function perimeter(s, toward) {
+    const c = centerOf(s);
+    const dx = toward.x - c.x, dy = toward.y - c.y;
+    if (!dx && !dy) return c;
+    const a = s.w / 2, b = s.h / 2;
+    let t;
+    if (s.type === 'ellipse') t = 1 / Math.sqrt((dx * dx) / (a * a) + (dy * dy) / (b * b));
+    else if (s.type === 'diamond') t = 1 / (Math.abs(dx) / a + Math.abs(dy) / b);
+    else t = Math.min(dx ? a / Math.abs(dx) : Infinity, dy ? b / Math.abs(dy) : Infinity);
+    return { x: c.x + dx * t, y: c.y + dy * t };
+  }
+  function anchorOf(p, byId) {
+    if (p.id) { const s = byId[p.id]; return s ? { shape: s, c: centerOf(s) } : null; }
+    return { shape: null, c: { x: p.x, y: p.y } };
+  }
+  function side(a, dir) {
+    if (!a.shape) return a.c;
+    const s = a.shape;
+    if (dir === 'r') return { x: s.x + s.w, y: a.c.y };
+    if (dir === 'l') return { x: s.x, y: a.c.y };
+    if (dir === 'b') return { x: a.c.x, y: s.y + s.h };
+    return { x: a.c.x, y: s.y };
+  }
+  function unit(a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y, l = Math.sqrt(dx * dx + dy * dy) || 1;
+    return { x: dx / l, y: dy / l };
+  }
+  // 回傳 { d, p1, p2, mid, u1, u2, box }：u1／u2 是「指向端點」的單位向量，箭頭照它畫
+  function edgeGeom(e, byId) {
+    const A = anchorOf(e.from, byId), B = anchorOf(e.to, byId);
+    if (!A || !B) return null;
+    if (e.style === 'straight') {
+      const p1 = A.shape ? perimeter(A.shape, B.c) : A.c;
+      const p2 = B.shape ? perimeter(B.shape, A.c) : B.c;
+      return {
+        d: 'M' + fmt(p1.x) + ',' + fmt(p1.y) + ' L' + fmt(p2.x) + ',' + fmt(p2.y),
+        p1: p1, p2: p2, mid: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 },
+        u1: unit(p2, p1), u2: unit(p1, p2), pts: [p1, p2]
+      };
+    }
+    const dx = B.c.x - A.c.x, dy = B.c.y - A.c.y;
+    const horiz = Math.abs(dx) >= Math.abs(dy);
+    let p1, p2, c1, c2;
+    if (horiz) {
+      p1 = side(A, dx >= 0 ? 'r' : 'l'); p2 = side(B, dx >= 0 ? 'l' : 'r');
+      const mx = (p1.x + p2.x) / 2;
+      c1 = { x: mx, y: p1.y }; c2 = { x: mx, y: p2.y };
+    } else {
+      p1 = side(A, dy >= 0 ? 'b' : 't'); p2 = side(B, dy >= 0 ? 't' : 'b');
+      const my = (p1.y + p2.y) / 2;
+      c1 = { x: p1.x, y: my }; c2 = { x: p2.x, y: my };
+    }
+    const same = function (a, b) { return Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01; };
+    const u1 = unit(same(c1, p1) ? p2 : c1, p1), u2 = unit(same(c2, p2) ? p1 : c2, p2);
+    if (e.style === 'curve') {
+      return {
+        d: 'M' + fmt(p1.x) + ',' + fmt(p1.y) + ' C' + fmt(c1.x) + ',' + fmt(c1.y) + ' ' + fmt(c2.x) + ',' + fmt(c2.y) + ' ' + fmt(p2.x) + ',' + fmt(p2.y),
+        p1: p1, p2: p2, mid: { x: (p1.x + 3 * c1.x + 3 * c2.x + p2.x) / 8, y: (p1.y + 3 * c1.y + 3 * c2.y + p2.y) / 8 },
+        u1: u1, u2: u2, pts: [p1, c1, c2, p2]
+      };
+    }
+    return {
+      d: 'M' + fmt(p1.x) + ',' + fmt(p1.y) + ' L' + fmt(c1.x) + ',' + fmt(c1.y) + ' L' + fmt(c2.x) + ',' + fmt(c2.y) + ' L' + fmt(p2.x) + ',' + fmt(p2.y),
+      p1: p1, p2: p2, mid: { x: (c1.x + c2.x) / 2, y: (c1.y + c2.y) / 2 },
+      u1: u1, u2: u2, pts: [p1, c1, c2, p2]
+    };
+  }
+  // 箭頭自己畫成三角形，不用 <marker>：不必管 id 撞名，印出來、轉成圖片都一樣
+  function arrowHead(p, u, e, ox, oy) {
+    const L = 7 + e.sw * 2, W = 3 + e.sw;
+    const bx = p.x - u.x * L, by = p.y - u.y * L;
+    return '<polygon points="' + pts([[p.x + ox, p.y + oy], [bx - u.y * W + ox, by + u.x * W + oy], [bx + u.y * W + ox, by - u.x * W + oy]]) +
+      '" fill="' + e.stroke + '" stroke="' + e.stroke + '" stroke-width="' + fmt(Math.min(e.sw, 1)) + '" stroke-linejoin="round"/>';
+  }
+  function edgeLabelBox(e, g) {
+    const lines = e.label ? wrapText(e.label, 220, e.fs, e.bold) : [];
+    if (!lines.length) return null;
+    const lh = e.fs * 1.3;
+    const w = Math.max.apply(null, lines.map(function (l) { return textW(l, e.fs, e.bold); })) + 8;
+    const h = lines.length * lh + 2;
+    return { lines: lines, lh: lh, x: g.mid.x - w / 2, y: g.mid.y - h / 2, w: w, h: h };
+  }
+  function edgeSVG(e, byId, ox, oy, hit) {
+    const g = edgeGeom(e, byId);
+    if (!g) return '';
+    const tr = ox || oy ? ' transform="translate(' + fmt(ox) + ',' + fmt(oy) + ')"' : '';
+    let s = '<g class="dio-edge" data-id="' + esc(e.id) + '">' +
+      // 線只有一兩個像素寬，點得到的範圍另外給一條 12px 的透明線
+      (hit ? '<path class="dio-hit" d="' + g.d + '"' + tr + ' fill="none" stroke="#000000" stroke-opacity="0" stroke-width="12"/>' : '') +
+      '<path d="' + g.d + '"' + tr + ' fill="none"' + strokeAttrs(e) + ' stroke-linejoin="round" stroke-linecap="round"/>';
+    if (e.start === 'arrow') s += arrowHead(g.p1, g.u1, e, ox, oy);
+    if (e.end === 'arrow') s += arrowHead(g.p2, g.u2, e, ox, oy);
+    const lb = edgeLabelBox(e, g);
+    if (lb) {
+      s += '<rect x="' + fmt(lb.x + ox) + '" y="' + fmt(lb.y + oy) + '" width="' + fmt(lb.w) + '" height="' + fmt(lb.h) + '" fill="#ffffff" stroke="none"/>';
+      lb.lines.forEach(function (ln, i) {
+        s += '<text x="' + fmt(g.mid.x + ox) + '" y="' + fmt(baseline(lb.y + oy + 1 + i * lb.lh + lb.lh / 2, e.fs)) + '" text-anchor="middle" font-size="' +
+          fmt(e.fs) + '" fill="' + e.fc + '"' + (e.bold ? ' font-weight="700"' : '') + '>' + esc(ln) + '</text>';
+      });
+    }
+    return s + '</g>';
+  }
+
+  // ---------------- 唯讀渲染 ----------------
+  function boundsOf(model, byId) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const add = function (x, y) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); };
+    model.shapes.forEach(function (s) {
+      const b = shapeBounds(s), m = s.sw / 2;
+      add(b.x - m, b.y - m); add(b.x + b.w + m, b.y + b.h + m);
+    });
+    model.edges.forEach(function (e) {
+      const g = edgeGeom(e, byId);
+      if (!g) return;
+      const m = 8 + e.sw * 3;
+      g.pts.forEach(function (p) { add(p.x - m, p.y - m); add(p.x + m, p.y + m); });
+      const lb = edgeLabelBox(e, g);
+      if (lb) { add(lb.x, lb.y); add(lb.x + lb.w, lb.y + lb.h); }
+    });
+    if (x0 === Infinity) return null;
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  function renderSVG(text, o) {
+    o = o || {};
+    const model = typeof text === 'string' ? parse(text) : text;
+    if (!model.shapes.length && !model.edges.length) return '';
+    const byId = indexOf(model);
+    const b = boundsOf(model, byId);
+    if (!b) return '';
+    const PAD = o.pad === undefined ? 10 : o.pad;
+    const ox = PAD - b.x, oy = PAD - b.y;
+    const W = Math.ceil(b.w + PAD * 2), H = Math.ceil(b.h + PAD * 2);
+    return '<svg class="dio-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H +
+      '" font-family="' + FONT + '">' +
+      (o.background ? '<rect width="' + W + '" height="' + H + '" fill="#ffffff"/>' : '') +
+      model.shapes.map(function (s) { return shapeSVG(s, ox, oy); }).join('') +
+      model.edges.map(function (e) { return edgeSVG(e, byId, ox, oy); }).join('') +
+      '</svg>';
   }
   function blockHTML(payload, alt) {
-    const img = imgHTML(payload, alt);
-    if (img) return '<div class="drawio-block">' + img + '</div>';
-    const d = decode(payload);
-    return '<div class="drawio-block is-empty">' + ic('shapes') + '<span>' +
-      (d.xml ? '這張圖還沒有產生預覽，打開編輯一次就會有' : '空白的 draw.io 圖表') + '</span></div>';
+    if (isLegacy(payload)) {
+      const svg = legacySvg(payload);
+      return svg
+        ? '<div class="drawio-block"><img class="drawio-img" alt="' + esc(alt || '圖表') + '" src="data:image/svg+xml;base64,' + b64(svg) + '"></div>'
+        : '<div class="drawio-block is-empty">' + ic('shapes') + '<span>這張圖的格式讀不出來</span></div>';
+    }
+    const svg = renderSVG(payload || '');
+    if (svg) return '<div class="drawio-block">' + svg + '</div>';
+    return '<div class="drawio-block is-empty">' + ic('shapes') + '<span>空白的圖表</span></div>';
   }
-  function imgOf(content, alt) { return imgHTML(payloadOf(content) || '', alt); }
+  // 嵌入用：一篇圖表筆記的內容 → 圖（沒有東西可畫就回空字串）
+  function htmlOf(content, alt) {
+    const p = payloadOf(content);
+    if (p === null) return '';
+    const html = blockHTML(p, alt);
+    return html.indexOf('is-empty') >= 0 ? '' : html.replace(/^<div class="drawio-block">/, '').replace(/<\/div>$/, '');
+  }
 
-  // ---- 頁面的殼 ----
-  function shell(host, opts, readOnly) {
-    host.classList.add('dio-page');
-    host.innerHTML =
-      '<header class="dio-bar">' +
-      '<span class="dio-bar-t">' + ic('shapes') + '<span>draw.io</span></span>' +
+  // ---------------- 頁面的殼（編輯與唯讀共用上面那一條）----------------
+  function topbar(opts, readOnly) {
+    return '<header class="dio-bar">' +
+      '<span class="dio-bar-t">' + ic('shapes') + '<span>drawio</span></span>' +
       (opts.title !== undefined
         ? '<input class="dio-title" type="text" placeholder="未命名圖表"' + (readOnly ? ' readonly' : '') + '>'
         : '') +
@@ -169,213 +569,1057 @@
         ? '<button class="btn btn-ghost dio-history" type="button" title="這張圖的版本紀錄（可以還原）">' + ic('history') + ' 版本</button>'
         : '') +
       '<button class="btn dio-back" type="button">' + ic('arrow-left') + ' 返回</button>' +
-      '</header>' +
-      '<div class="dio-body"></div>';
-    const titleEl = host.querySelector('.dio-title');
-    if (titleEl) {
-      titleEl.value = opts.title || '';
-      if (!readOnly) {
-        titleEl.addEventListener('change', function () { if (opts.onTitle) opts.onTitle(titleEl.value.trim()); });
-        titleEl.addEventListener('keydown', function (e) {
-          if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); }
-          e.stopPropagation();
-        });
-      }
-    }
-    return {
-      body: host.querySelector('.dio-body'), status: host.querySelector('.dio-status'),
-      back: host.querySelector('.dio-back'), history: host.querySelector('.dio-history')
-    };
+      '</header>';
   }
-  function unshell(host) { host.innerHTML = ''; host.classList.remove('dio-page'); }
+  function wireTitle(host, opts, readOnly) {
+    const titleEl = host.querySelector('.dio-title');
+    if (!titleEl) return;
+    titleEl.value = opts.title || '';
+    if (readOnly) return;
+    titleEl.addEventListener('change', function () { if (opts.onTitle) opts.onTitle(titleEl.value.trim()); });
+    titleEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); }
+      e.stopPropagation();
+    });
+  }
 
-  // ---- 唯讀檢視（只有讀取權限的分享筆記）----
-  function view(content, opts) {
+  function view(content, opts, notice) {
     opts = opts || {};
     const host = opts.container;
-    if (!host) return { close: function () {} };
-    const ui = shell(host, opts, true);
-    ui.body.classList.add('dio-view');
-    ui.body.innerHTML = blockHTML(payloadOf(content) || '', opts.title);
+    if (!host) return { close: function () {}, discard: function () {} };
+    host.classList.add('dio-page');
+    host.innerHTML = topbar(opts, true) +
+      '<div class="dio-view">' + (notice ? '<div class="dio-notice">' + esc(notice) + '</div>' : '') +
+      blockHTML(payloadOf(content) || '', opts.title) + '</div>';
+    wireTitle(host, opts, true);
     let closed = false;
-    function close() {
-      if (closed) return;
-      closed = true;
+    function teardown() {
       document.removeEventListener('keydown', onKey);
-      unshell(host);
-      if (opts.onClose) opts.onClose();
+      host.innerHTML = ''; host.classList.remove('dio-page');
     }
+    function close() { if (closed) return; closed = true; teardown(); if (opts.onClose) opts.onClose(); }
+    function discard() { if (closed) return; closed = true; teardown(); }
     function onKey(e) { if (e.key === 'Escape') close(); }
     document.addEventListener('keydown', onKey);
-    ui.back.addEventListener('click', close);
-    return { close: close };
+    host.querySelector('.dio-back').addEventListener('click', close);
+    return { close: close, requestClose: close, discard: discard };
   }
 
-  // ---- 編輯器 ----
+  // ---------------- 編輯器 ----------------
+  let clipboard = null;      // 複製的東西留在模組裡：換一張圖也貼得上
+  let seq = 0;
+
   function open(content, opts) {
     opts = opts || {};
     const host = opts.container;
-    if (!host) return { close: function () {} };
+    if (!host) return { close: function () {}, discard: function () {} };
+    const payload = payloadOf(content);
+    if (isLegacy(payload)) {
+      return view(content, opts, '這張圖是用先前內嵌的 draw.io 畫的，現在的編輯器打不開那種格式。圖還在，只是不能在這裡編輯。');
+    }
 
-    const first = decode(payloadOf(content) || '');
-    let lastSvg = first.svg, lastXml = first.xml;
-    // 畫面是舊的（上次來不及匯出）或根本沒有畫面：載入之後主動補畫一次
-    const needRedraw = !!first.xml && (!first.svg || isStale(first.svg));
-    let ready = false, closed = false;
-    let changeSeq = 0, exportedSeq = 0, askedSeq = -1;
-    let exportTimer = null, closeTimer = null, afterExport = null;
+    let model = parse(payload || '');
+    let sel = [];
+    let zoom = 1, panX = 0, panY = 0;
+    const undo = [], redo = [];
+    let gesture = null, hoverId = null, editing = null, closed = false, spaceDown = false;
+    let saveTimer = null, dirty = false, snapOn = true, tab = 'style', menuEl = null, pasteN = 0;
+    const lastColor = {};
+    const gridId = 'dio-grid-' + (++seq);
 
-    const ui = shell(host, opts, false);
-    ui.body.innerHTML = '<div class="dio-loading">載入 draw.io…</div>';
-    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const frame = document.createElement('iframe');
-    frame.className = 'dio-frame';
-    frame.title = 'draw.io';
-    frame.setAttribute('sandbox', 'allow-scripts allow-popups allow-forms allow-modals allow-downloads');
-    frame.setAttribute('allow', 'clipboard-read; clipboard-write');
-    frame.src = EDITOR + '?' + [
-      'embed=1', 'proto=json', 'spin=1',
-      'configure=1',          // 起來之前先問我們要設定（見 onMessage 的 configure）
-      'lang=zh-tw',
-      'libraries=1',          // 圖庫（更多圖形…）在 embed 模式預設是關的
-      'noSaveBtn=1', 'noExitBtn=1', 'saveAndExit=0',   // 存檔是自動的、離開用上面那顆返回
-      'stealth=1',            // 不碰任何外部服務；本站的 CSP 本來也不准
-      'dark=' + (dark ? '1' : '0')
-    ].join('&');
-    ui.body.appendChild(frame);
+    host.classList.add('dio-page');
+    host.innerHTML = topbar(opts, false) +
+      '<div class="dio-menubar">' +
+      ['file:檔案', 'edit:編輯', 'view:檢視', 'arrange:調整'].map(function (m) {
+        const p = m.split(':');
+        return '<button class="dio-menu-btn" type="button" data-menu="' + p[0] + '">' + p[1] + '</button>';
+      }).join('') +
+      '</div>' +
+      '<div class="dio-toolbar">' +
+      tb('zoomout', 'minus', '縮小') +
+      '<button class="dio-zoom" type="button" data-act="zoom100" title="回到 100%">100%</button>' +
+      tb('zoomin', 'plus', '放大') + tb('fit', 'maximize', '符合視窗') + '<span class="dio-tb-sep"></span>' +
+      tb('undo', 'undo', '復原 (Ctrl+Z)') + tb('redo', 'redo', '重做 (Ctrl+Y)') + '<span class="dio-tb-sep"></span>' +
+      tb('delete', 'trash', '刪除 (Delete)') + tb('dup', 'copy', '再製 (Ctrl+D)') + '<span class="dio-tb-sep"></span>' +
+      tb('front', 'arrow-up-to-line', '移到最前') + tb('back', 'arrow-down-to-line', '移到最後') + '<span class="dio-tb-sep"></span>' +
+      '<button class="dio-tb-text" type="button" data-act="export-png" title="把整張圖存成 PNG">' + ic('download') + ' PNG</button>' +
+      '<button class="dio-tb-text" type="button" data-act="export-svg" title="把整張圖存成 SVG">' + ic('download') + ' SVG</button>' +
+      '</div>' +
+      '<div class="dio-main">' +
+      '<aside class="dio-side">' + paletteHTML() +
+      '<div class="dio-side-hint">點一下放到畫布中央，或直接拖到畫布上。<br>滑到圖形上，從邊上的藍點拉出連線。</div></aside>' +
+      '<div class="dio-canvas" tabindex="0">' +
+      '<svg class="dio-stage" xmlns="http://www.w3.org/2000/svg" font-family="' + FONT + '">' +
+      '<defs><pattern id="' + gridId + '" width="40" height="40" patternUnits="userSpaceOnUse">' +
+      '<path d="M10 0V40M20 0V40M30 0V40M0 10H40M0 20H40M0 30H40" fill="none" stroke="#eceef1" stroke-width="0.6"/>' +
+      '<path d="M0 0H40M0 0V40" fill="none" stroke="#d8dce2" stroke-width="0.9"/></pattern></defs>' +
+      '<rect class="dio-paper" width="100%" height="100%" fill="#ffffff"/>' +
+      '<g class="dio-world"><rect class="dio-grid" fill="url(#' + gridId + ')"/>' +
+      '<g class="dio-content"></g><g class="dio-overlay"></g></g>' +
+      '</svg></div>' +
+      '<aside class="dio-format"></aside>' +
+      '</div>';
+    function tb(act, icon, title) {
+      return '<button class="dio-tb" type="button" data-act="' + act + '" title="' + title + '">' + ic(icon) + '</button>';
+    }
+    wireTitle(host, opts, false);
 
+    const canvas = host.querySelector('.dio-canvas');
+    const stage = host.querySelector('.dio-stage');
+    const world = host.querySelector('.dio-world');
+    const gridRect = host.querySelector('.dio-grid');
+    const contentEl = host.querySelector('.dio-content');
+    const overlayEl = host.querySelector('.dio-overlay');
+    const formatEl = host.querySelector('.dio-format');
+    const statusEl = host.querySelector('.dio-status');
+    const zoomEl = host.querySelector('.dio-zoom');
+
+    function paletteHTML() {
+      return PALETTE.map(function (sec, si) {
+        return '<div class="dio-sec"><div class="dio-sec-t">' + esc(sec.title) + '</div><div class="dio-sec-grid">' +
+          sec.items.map(function (it, ii) {
+            return '<button class="dio-pal" type="button" data-pal="' + si + ',' + ii + '" title="' + esc(it.name) + '">' + thumb(it) + '</button>';
+          }).join('') + '</div></div>';
+      }).join('');
+    }
+    function thumb(it) {
+      const W = 36, H = 28;
+      let inner;
+      if (it.edge) {
+        const e = Object.assign({}, EDGE_DEF, { id: 't', from: { x: 4, y: H - 5 }, to: { x: W - 4, y: 5 }, label: '', style: it.edge, start: it.start || 'none', end: it.end, dash: it.dash || 0, sw: 1.3 });
+        inner = edgeSVG(e, {}, 0, 0);
+      } else {
+        const k = Math.min((W - 4) / it.w, (H - 4) / it.h);
+        const s = Object.assign({}, SHAPE_DEF, { id: 't', type: it.type, label: '', x: 0, y: 0, w: it.w * k, h: it.h * k, sw: 1.3 });
+        s.x = (W - s.w) / 2; s.y = (H - s.h) / 2;
+        inner = it.type === 'text'
+          ? '<text x="' + W / 2 + '" y="' + fmt(baseline(H / 2, 11)) + '" text-anchor="middle" font-size="11" fill="#000000">Text</text>'
+          : shapeBody(s, 0, 0);
+      }
+      return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">' + inner + '</svg>';
+    }
+
+    // ---- 存檔／復原 ----
     function setStatus(text, cls) {
-      if (!ui.status) return;
-      ui.status.textContent = text || '';
-      ui.status.className = 'dio-status' + (cls ? ' ' + cls : '');
+      statusEl.textContent = text || '';
+      statusEl.className = 'dio-status' + (cls ? ' ' + cls : '');
     }
-    function post(msg) {
-      // 沙箱裡的文件是不透明來源，targetOrigin 指名不了，只能寫 '*'；收件端靠 e.source 認人
-      if (frame.contentWindow) frame.contentWindow.postMessage(JSON.stringify(msg), '*');
-    }
-    // 回傳的 promise 在這一份真的存進伺服器之後才解開（失敗也解開——等它的人要的是「存檔
-    // 這件事結束了」，不是成功與否；失敗會顯示在狀態上）
-    function emit(payload) {
-      if (!opts.onChange) return Promise.resolve();
+    function emit() {
+      clearTimeout(saveTimer);
+      if (!dirty || !opts.onChange) return;
+      dirty = false;
       setStatus('儲存中…');
-      return Promise.resolve(opts.onChange(wrap(payload))).then(function () {
-        if (!closed && exportedSeq === changeSeq) setStatus('已儲存', 'is-ok');
-      }, function () {
-        if (!closed) setStatus('儲存失敗', 'is-err');
-      });
+      Promise.resolve(opts.onChange(wrap(serialize(model)))).then(function () {
+        if (!closed && !dirty) setStatus('已儲存', 'is-ok');
+      }, function () { if (!closed) setStatus('儲存失敗', 'is-err'); });
     }
-    function askExport() {
-      clearTimeout(exportTimer);
-      if (!ready || closed) return;
-      askedSeq = changeSeq;
-      // theme: 'light'——編輯器開深色模式時 draw.io 預設匯出「會跟著環境變色」的 SVG
-      // （light-dark()），那張圖放到白底上線條會變成白的、整張看不見；報告印出來也是白紙，
-      // 所以存下來的畫面一律是淺色版，跟編輯器當下的主題無關。
-      post({ action: 'export', format: 'xmlsvg', theme: 'light', spinKey: 'saving' });
+    function changed() {
+      dirty = true;
+      setStatus('尚未儲存');
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(emit, 600);
     }
-    function scheduleExport() {
-      clearTimeout(exportTimer);
-      exportTimer = setTimeout(askExport, EXPORT_DELAY);
+    function begin() { return serialize(model); }
+    function commit(before) {
+      if (serialize(model) === before) return false;
+      undo.push(before);
+      if (undo.length > 100) undo.shift();
+      redo.length = 0;
+      changed();
+      return true;
     }
-    function dirty() { return changeSeq !== exportedSeq; }
+    function mutate(fn) {
+      const before = begin();
+      fn();
+      commit(before);
+      render(); renderFormat(); refreshToolbar();
+    }
+    function restore(dsl) {
+      model = parse(dsl);
+      const ids = {};
+      model.shapes.forEach(function (s) { ids[s.id] = 1; });
+      model.edges.forEach(function (e) { ids[e.id] = 1; });
+      sel = sel.filter(function (id) { return ids[id]; });
+    }
+    function doUndo() {
+      if (!undo.length) return;
+      redo.push(serialize(model));
+      restore(undo.pop());
+      changed(); render(); renderFormat(); refreshToolbar();
+    }
+    function doRedo() {
+      if (!redo.length) return;
+      undo.push(serialize(model));
+      restore(redo.pop());
+      changed(); render(); renderFormat(); refreshToolbar();
+    }
 
-    function onMessage(e) {
-      if (closed || e.source !== frame.contentWindow) return;
-      let msg = null;
-      try { msg = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch (x) { return; }
-      if (!msg || !msg.event) return;
-      if (msg.event === 'configure') {
-        // 原始圖檔不要壓縮：draw.io 預設把 <diagram> 的內容 deflate＋base64，存進筆記就是一串
-        // 亂碼；不壓縮的話圖裡的文字搜尋得到、版本紀錄的差異也看得懂，多出來的幾 KB 不算什麼。
-        post({ action: 'configure', config: { compressXml: false } });
-      } else if (msg.event === 'init') {
-        ready = true;
-        const l = ui.body.querySelector('.dio-loading');
-        if (l) l.remove();
-        // title 不傳：draw.io 會把它印在選單列右邊，而且之後在上面那條列改名它不會跟著變，
-        // 畫面上就會有兩個對不起來的標題。
-        post({ action: 'load', xml: lastXml || '', autosave: 1, noSaveBtn: '1', noExitBtn: '1', saveAndExit: '0' });
-      } else if (msg.event === 'load') {
-        if (needRedraw) { changeSeq++; askExport(); }
-        else setStatus(lastXml ? '已儲存' : '', 'is-ok');
-      } else if (msg.event === 'autosave' || msg.event === 'save') {
-        if (typeof msg.xml === 'string') lastXml = msg.xml;
-        changeSeq++;
-        setStatus('尚未儲存');
-        if (msg.event === 'save') askExport(); else scheduleExport();
-        if (msg.exit) requestClose();
-      } else if (msg.event === 'export') {
-        const svg = textOfDataUri(msg.data);
-        if (svg && parseSvg(svg)) {
-          lastSvg = svg;
-          // 匯出的這一份對應的是「發出要求那一刻」的圖；之後又改過的話還是髒的
-          if (askedSeq >= 0) exportedSeq = askedSeq;
-          // 還沒收過 autosave（例如一打開就補畫）時手上沒有未壓縮的原始檔，就用匯出帶的那份
-          if (!lastXml) lastXml = (typeof msg.xml === 'string' && msg.xml) || xmlInSvg(svg);
-          const saved = emit(payloadFor(svg, lastXml, dirty()));
-          if (dirty()) scheduleExport();
-          if (afterExport) { const f = afterExport; afterExport = null; saved.then(f); }
+    // ---- 查詢 ----
+    function shapeById(id) { return model.shapes.find(function (s) { return s.id === id; }); }
+    function edgeById(id) { return model.edges.find(function (e) { return e.id === id; }); }
+    function selShapes() { return sel.map(shapeById).filter(Boolean); }
+    function selEdges() { return sel.map(edgeById).filter(Boolean); }
+    function newId(prefix) {
+      let n = 0;
+      model.shapes.concat(model.edges).forEach(function (o) {
+        const m = new RegExp('^' + prefix + '(\\d+)$').exec(o.id);
+        if (m) n = Math.max(n, parseInt(m[1], 10));
+      });
+      return prefix + (n + 1);
+    }
+    function snap(v) { return snapOn ? Math.round(v / GRID) * GRID : Math.round(v); }
+    function toWorld(e) {
+      const r = stage.getBoundingClientRect();
+      return { x: (e.clientX - r.left - panX) / zoom, y: (e.clientY - r.top - panY) / zoom };
+    }
+    function viewCenter() {
+      const r = stage.getBoundingClientRect();
+      return { x: (r.width / 2 - panX) / zoom, y: (r.height / 2 - panY) / zoom };
+    }
+
+    // ---- 畫 ----
+    function render() {
+      world.setAttribute('transform', 'translate(' + fmt(panX) + ',' + fmt(panY) + ') scale(' + zoom + ')');
+      const r = stage.getBoundingClientRect();
+      const vx = -panX / zoom, vy = -panY / zoom;
+      gridRect.setAttribute('x', Math.floor(vx / 40) * 40 - 40);
+      gridRect.setAttribute('y', Math.floor(vy / 40) * 40 - 40);
+      gridRect.setAttribute('width', Math.ceil(r.width / zoom) + 120);
+      gridRect.setAttribute('height', Math.ceil(r.height / zoom) + 120);
+      gridRect.style.display = model.grid ? '' : 'none';
+      const byId = indexOf(model);
+      contentEl.innerHTML = model.shapes.map(function (s) { return shapeSVG(s, 0, 0, true); }).join('') +
+        model.edges.map(function (e) { return edgeSVG(e, byId, 0, 0, true); }).join('');
+      renderOverlay(byId);
+      zoomEl.textContent = Math.round(zoom * 100) + '%';
+    }
+    function renderOverlay(byId) {
+      byId = byId || indexOf(model);
+      const k = 1 / zoom;
+      let s = '';
+      sel.forEach(function (id) {
+        const sh = byId[id];
+        if (sh) {
+          s += '<rect class="dio-selbox" x="' + fmt(sh.x) + '" y="' + fmt(sh.y) + '" width="' + fmt(sh.w) + '" height="' + fmt(sh.h) +
+            '" stroke-width="' + k + '" stroke-dasharray="' + 4 * k + ' ' + 3 * k + '"/>';
           return;
         }
-        if (afterExport) { const f = afterExport; afterExport = null; f(); }
-      } else if (msg.event === 'exit') {
-        requestClose();
+        const e = edgeById(id), g = e && edgeGeom(e, byId);
+        if (g) s += '<path class="dio-seledge" d="' + g.d + '" stroke-width="' + 3 * k + '"/>';
+      });
+      // 連接點：滑到圖形上才出現，壓在邊的中點上（不在外面——從圖形裡移過去的路上不會離開圖形）
+      if (hoverId && !gesture && byId[hoverId]) {
+        const h = byId[hoverId];
+        [[h.x + h.w / 2, h.y], [h.x + h.w, h.y + h.h / 2], [h.x + h.w / 2, h.y + h.h], [h.x, h.y + h.h / 2]].forEach(function (p) {
+          s += '<circle class="dio-conn" data-conn="' + esc(h.id) + '" cx="' + fmt(p[0]) + '" cy="' + fmt(p[1]) + '" r="' + 5 * k + '" stroke-width="' + 1.5 * k + '"/>';
+        });
+      }
+      // 控制點：只有單選才給，畫在連接點上面（四個角，跟連接點不重疊）
+      if (sel.length === 1) {
+        const sh = byId[sel[0]];
+        if (sh) {
+          [['nw', sh.x, sh.y], ['ne', sh.x + sh.w, sh.y], ['se', sh.x + sh.w, sh.y + sh.h], ['sw', sh.x, sh.y + sh.h]].forEach(function (c) {
+            s += '<rect class="dio-handle" data-handle="' + c[0] + '" x="' + fmt(c[1] - 4 * k) + '" y="' + fmt(c[2] - 4 * k) +
+              '" width="' + 8 * k + '" height="' + 8 * k + '" stroke-width="' + k + '"/>';
+          });
+        } else {
+          const e = edgeById(sel[0]), g = e && edgeGeom(e, byId);
+          if (g) {
+            s += '<circle class="dio-end" data-end="from" cx="' + fmt(g.p1.x) + '" cy="' + fmt(g.p1.y) + '" r="' + 5 * k + '" stroke-width="' + 1.5 * k + '"/>' +
+              '<circle class="dio-end" data-end="to" cx="' + fmt(g.p2.x) + '" cy="' + fmt(g.p2.y) + '" r="' + 5 * k + '" stroke-width="' + 1.5 * k + '"/>';
+          }
+        }
+      }
+      if (gesture && gesture.type === 'band' && gesture.moved) {
+        const b = gesture.box;
+        s += '<rect class="dio-band" x="' + fmt(b.x) + '" y="' + fmt(b.y) + '" width="' + fmt(b.w) + '" height="' + fmt(b.h) + '" stroke-width="' + k + '"/>';
+      }
+      if (gesture && (gesture.type === 'connect' || gesture.type === 'endpoint') && gesture.preview) {
+        const g = edgeGeom(gesture.preview, byId);
+        if (g) s += '<path class="dio-preview" d="' + g.d + '" stroke-width="' + 1.5 * k + '" stroke-dasharray="' + 5 * k + ' ' + 4 * k + '"/>';
+        if (gesture.target && byId[gesture.target]) {
+          const t = byId[gesture.target];
+          s += '<rect class="dio-target" x="' + fmt(t.x - 3 * k) + '" y="' + fmt(t.y - 3 * k) + '" width="' + fmt(t.w + 6 * k) + '" height="' + fmt(t.h + 6 * k) + '" stroke-width="' + 2 * k + '"/>';
+        }
+      }
+      overlayEl.innerHTML = s;
+    }
+    function refreshToolbar() {
+      const has = sel.length > 0;
+      const set = function (act, off) {
+        const b = host.querySelector('.dio-toolbar [data-act="' + act + '"]');
+        if (b) b.disabled = !!off;
+      };
+      set('undo', !undo.length); set('redo', !redo.length);
+      set('delete', !has); set('dup', !has);
+      set('front', !selShapes().length); set('back', !selShapes().length);
+    }
+
+    // ---- 縮放／平移 ----
+    function zoomAt(cx, cy, z) {
+      const r = stage.getBoundingClientRect();
+      const sx = cx - r.left, sy = cy - r.top;
+      const wx = (sx - panX) / zoom, wy = (sy - panY) / zoom;
+      zoom = clamp(z, 0.1, 4);
+      panX = sx - wx * zoom; panY = sy - wy * zoom;
+      render();
+    }
+    function zoomCenter(z) {
+      const r = stage.getBoundingClientRect();
+      zoomAt(r.left + r.width / 2, r.top + r.height / 2, z);
+    }
+    function fit() {
+      const b = boundsOf(model, indexOf(model));
+      const r = stage.getBoundingClientRect();
+      if (!b || !r.width) { zoom = 1; panX = 40; panY = 40; render(); return; }
+      zoom = clamp(Math.min((r.width - 80) / b.w, (r.height - 80) / b.h), 0.1, 1);
+      panX = (r.width - b.w * zoom) / 2 - b.x * zoom;
+      panY = (r.height - b.h * zoom) / 2 - b.y * zoom;
+      render();
+    }
+
+    // ---- 動作 ----
+    function select(ids) { sel = ids.slice(); hoverId = null; render(); renderFormat(); refreshToolbar(); }
+    function removeSelected() {
+      if (!sel.length) return;
+      mutate(function () {
+        const gone = {};
+        sel.forEach(function (id) { gone[id] = 1; });
+        model.shapes = model.shapes.filter(function (s) { return !gone[s.id]; });
+        // 圖形刪掉了，接在它身上的連線也一起走（留著只會是一條接不到東西的線）
+        model.edges = model.edges.filter(function (e) {
+          return !gone[e.id] && !(e.from.id && gone[e.from.id]) && !(e.to.id && gone[e.to.id]);
+        });
+        sel = [];
+      });
+    }
+    function copySelected() {
+      const ss = selShapes(), ids = {};
+      ss.forEach(function (s) { ids[s.id] = 1; });
+      // 連線只有兩頭都跟著被複製（或本來就是接在點上）才帶走
+      const es = selEdges().concat(model.edges.filter(function (e) {
+        return sel.indexOf(e.id) < 0 && e.from.id && e.to.id && ids[e.from.id] && ids[e.to.id];
+      })).filter(function (e) {
+        return (!e.from.id || ids[e.from.id]) && (!e.to.id || ids[e.to.id]);
+      });
+      if (!ss.length && !es.length) return false;
+      clipboard = JSON.stringify({ shapes: ss, edges: es });
+      pasteN = 0;
+      return true;
+    }
+    function paste(offset) {
+      if (!clipboard) return;
+      const data = JSON.parse(clipboard);
+      pasteN++;
+      const d = offset === undefined ? 20 * pasteN : offset;
+      mutate(function () {
+        const map = {}, added = [];
+        data.shapes.forEach(function (s) {
+          const c = Object.assign({}, s, { id: newId('s'), x: s.x + d, y: s.y + d });
+          map[s.id] = c.id;
+          model.shapes.push(c); added.push(c.id);
+        });
+        data.edges.forEach(function (e) {
+          const c = Object.assign({}, e, { id: newId('e') });
+          c.from = e.from.id ? { id: map[e.from.id] } : { x: e.from.x + d, y: e.from.y + d };
+          c.to = e.to.id ? { id: map[e.to.id] } : { x: e.to.x + d, y: e.to.y + d };
+          model.edges.push(c); added.push(c.id);
+        });
+        sel = added;
+      });
+    }
+    function duplicate() {
+      const keep = clipboard, n = pasteN;
+      if (copySelected()) paste(20);
+      clipboard = keep; pasteN = n;
+    }
+    function reorder(toFront) {
+      const ids = {};
+      selShapes().forEach(function (s) { ids[s.id] = 1; });
+      if (!Object.keys(ids).length) return;
+      mutate(function () {
+        const pick = model.shapes.filter(function (s) { return ids[s.id]; });
+        const rest = model.shapes.filter(function (s) { return !ids[s.id]; });
+        model.shapes = toFront ? rest.concat(pick) : pick.concat(rest);
+      });
+    }
+    function align(how) {
+      const ss = selShapes();
+      if (ss.length < 2) return;
+      const x0 = Math.min.apply(null, ss.map(function (s) { return s.x; }));
+      const x1 = Math.max.apply(null, ss.map(function (s) { return s.x + s.w; }));
+      const y0 = Math.min.apply(null, ss.map(function (s) { return s.y; }));
+      const y1 = Math.max.apply(null, ss.map(function (s) { return s.y + s.h; }));
+      mutate(function () {
+        ss.forEach(function (s) {
+          if (how === 'left') s.x = x0;
+          else if (how === 'right') s.x = x1 - s.w;
+          else if (how === 'center') s.x = (x0 + x1) / 2 - s.w / 2;
+          else if (how === 'top') s.y = y0;
+          else if (how === 'bottom') s.y = y1 - s.h;
+          else if (how === 'middle') s.y = (y0 + y1) / 2 - s.h / 2;
+        });
+      });
+    }
+    function insert(it, at) {
+      const c = at || viewCenter();
+      mutate(function () {
+        if (it.edge) {
+          const e = Object.assign({}, EDGE_DEF, {
+            id: newId('e'), label: '', style: it.edge, start: it.start || 'none', end: it.end, dash: it.dash || 0,
+            from: { x: snap(c.x - 60), y: snap(c.y + 30) }, to: { x: snap(c.x + 60), y: snap(c.y - 30) }
+          });
+          model.edges.push(e);
+          sel = [e.id];
+        } else {
+          const s = Object.assign({}, SHAPE_DEF, {
+            id: newId('s'), type: it.type, label: it.label || '', w: it.w, h: it.h,
+            x: snap(c.x - it.w / 2), y: snap(c.y - it.h / 2)
+          });
+          if (it.type === 'text') { s.fill = 'none'; s.stroke = 'none'; }
+          // 連續點同一個圖形不要整疊在一起
+          // （比中心點，不是左上角：大小不同的兩個圖形左上角不一樣，照樣是疊在一起）
+          while (model.shapes.some(function (o) {
+            return Math.abs(o.x + o.w / 2 - s.x - s.w / 2) < GRID && Math.abs(o.y + o.h / 2 - s.y - s.h / 2) < GRID;
+          })) { s.x += 20; s.y += 20; }
+          model.shapes.push(s);
+          sel = [s.id];
+        }
+      });
+    }
+    function download(name, blob) {
+      const a = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      a.href = url; a.download = name;
+      a.style.cssText = 'position:fixed;left:-9999px;top:0';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { a.remove(); URL.revokeObjectURL(url); }, 1000);
+    }
+    function fileBase() {
+      const t = host.querySelector('.dio-title');
+      return ((t && t.value.trim()) || opts.title || '圖表').replace(/[\\/:*?"<>|]+/g, '_');
+    }
+    function exportSVG() {
+      const svg = renderSVG(model, { background: true });
+      if (!svg) { toast('圖是空的，沒有東西可以匯出'); return; }
+      download(fileBase() + '.svg', new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + svg], { type: 'image/svg+xml' }));
+    }
+    function exportPNG() {
+      const svg = renderSVG(model, { background: true });
+      if (!svg) { toast('圖是空的，沒有東西可以匯出'); return; }
+      const m = /width="(\d+)" height="(\d+)"/.exec(svg);
+      const W = parseInt(m[1], 10), H = parseInt(m[2], 10), K = 2;
+      const img = new Image();
+      img.onload = function () {
+        const c = document.createElement('canvas');
+        c.width = W * K; c.height = H * K;
+        const g = c.getContext('2d');
+        g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(function (blob) {
+          if (blob) download(fileBase() + '.png', blob); else toast('匯出 PNG 失敗');
+        }, 'image/png');
+      };
+      img.onerror = function () { toast('匯出 PNG 失敗'); };
+      img.src = 'data:image/svg+xml;base64,' + b64(svg);
+    }
+    function toast(msg) {
+      if (global.App && App.toast) { App.toast(msg); return; }
+      setStatus(msg, 'is-err');
+    }
+    function act(name) {
+      closeMenu();
+      switch (name) {
+        case 'undo': doUndo(); break;
+        case 'redo': doRedo(); break;
+        case 'delete': removeSelected(); break;
+        case 'dup': duplicate(); break;
+        case 'copy': copySelected(); break;
+        case 'cut': if (copySelected()) removeSelected(); break;
+        case 'paste': paste(); break;
+        case 'selectall': select(model.shapes.map(function (s) { return s.id; }).concat(model.edges.map(function (e) { return e.id; }))); break;
+        case 'front': reorder(true); break;
+        case 'back': reorder(false); break;
+        case 'zoomin': zoomCenter(zoom * 1.25); break;
+        case 'zoomout': zoomCenter(zoom / 1.25); break;
+        case 'zoom100': zoomCenter(1); break;
+        case 'fit': fit(); break;
+        case 'grid': mutate(function () { model.grid = !model.grid; }); break;
+        case 'snap': snapOn = !snapOn; renderFormat(); break;
+        case 'export-png': exportPNG(); break;
+        case 'export-svg': exportSVG(); break;
+        default:
+          if (name.indexOf('align-') === 0) align(name.slice(6));
+      }
+      canvas.focus();
+    }
+
+    // ---- 選單 ----
+    const MENUS = {
+      file: [['export-png', '匯出為 PNG'], ['export-svg', '匯出為 SVG']],
+      edit: [['undo', '復原', 'Ctrl+Z'], ['redo', '重做', 'Ctrl+Y'], null, ['cut', '剪下', 'Ctrl+X'], ['copy', '複製', 'Ctrl+C'],
+        ['paste', '貼上', 'Ctrl+V'], ['dup', '再製', 'Ctrl+D'], ['delete', '刪除', 'Delete'], null, ['selectall', '全選', 'Ctrl+A']],
+      view: [['grid', '格線'], ['snap', '對齊格線'], null, ['zoomin', '放大'], ['zoomout', '縮小'], ['zoom100', '100%'], ['fit', '符合視窗']],
+      arrange: [['front', '移到最前'], ['back', '移到最後'], null, ['align-left', '靠左對齊'], ['align-center', '水平置中'],
+        ['align-right', '靠右對齊'], ['align-top', '靠上對齊'], ['align-middle', '垂直置中'], ['align-bottom', '靠下對齊']]
+    };
+    function closeMenu() {
+      if (!menuEl) return;
+      menuEl.remove(); menuEl = null;
+      host.querySelectorAll('.dio-menu-btn.on').forEach(function (b) { b.classList.remove('on'); });
+    }
+    function openMenu(btn) {
+      const name = btn.getAttribute('data-menu');
+      const was = menuEl && menuEl.getAttribute('data-for') === name;
+      closeMenu();
+      if (was) return;
+      const r = btn.getBoundingClientRect();
+      menuEl = document.createElement('div');
+      menuEl.className = 'dio-menu';
+      menuEl.setAttribute('data-for', name);
+      menuEl.style.left = r.left + 'px';
+      menuEl.style.top = r.bottom + 'px';
+      menuEl.innerHTML = MENUS[name].map(function (it) {
+        if (!it) return '<div class="dio-menu-sep"></div>';
+        const on = (it[0] === 'grid' && model.grid) || (it[0] === 'snap' && snapOn);
+        return '<button class="dio-menu-item' + (on ? ' on' : '') + '" type="button" data-act="' + it[0] + '"><span>' + esc(it[1]) +
+          '</span><kbd>' + (it[2] || '') + '</kbd></button>';
+      }).join('');
+      host.appendChild(menuEl);
+      btn.classList.add('on');
+      menuEl.addEventListener('click', function (e) {
+        const b = e.target.closest('[data-act]');
+        if (b) act(b.getAttribute('data-act'));
+      });
+    }
+
+    // ---- 就地改文字 ----
+    // at：在空白處開一段新的文字。圖形要等真的打了字才建立，取消或沒打字就什麼都不留
+    function startEdit(id, at) {
+      commitEdit();
+      const sh = id ? shapeById(id) : null, ed = id ? edgeById(id) : null;
+      if (!sh && !ed && !at) return;
+      const r = stage.getBoundingClientRect();
+      let box;
+      if (sh) box = { x: sh.x, y: sh.type === 'actor' ? sh.y + sh.h : sh.y, w: Math.max(sh.w, 60), h: sh.type === 'actor' ? 30 : Math.max(sh.h, 24) };
+      else if (ed) {
+        const g = edgeGeom(ed, indexOf(model));
+        if (!g) return;
+        box = { x: g.mid.x - 70, y: g.mid.y - 14, w: 140, h: 28 };
+      } else box = { x: at.x - 70, y: at.y - 15, w: 140, h: 30 };
+      if (sh && sh.type === 'actor') box.x = sh.x + sh.w / 2 - Math.max(sh.w, 90) / 2, box.w = Math.max(sh.w, 90);
+      const ta = document.createElement('textarea');
+      ta.className = 'dio-edit';
+      ta.value = (sh || ed || {}).label || '';
+      const fs = (sh || ed || SHAPE_DEF).fs * zoom;
+      ta.style.left = r.left + panX + box.x * zoom + 'px';
+      ta.style.top = r.top + panY + box.y * zoom + 'px';
+      ta.style.width = Math.max(60, box.w * zoom) + 'px';
+      ta.style.height = Math.max(26, box.h * zoom) + 'px';
+      ta.style.fontSize = clamp(fs, 9, 60) + 'px';
+      ta.style.textAlign = sh ? (sh.type === 'actor' ? 'center' : sh.align) : 'center';
+      host.appendChild(ta);
+      editing = { id: id || null, at: at || null, el: ta, done: false };
+      ta.focus(); ta.select();
+      ta.addEventListener('keydown', function (e) {
+        e.stopPropagation();
+        if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+        // 收起來之後焦點要回到畫布，不然接著按 Delete、Ctrl+Z 都沒人接
+        else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commitEdit(); canvas.focus(); }
+      });
+      ta.addEventListener('blur', function () { commitEdit(); });
+    }
+    function endEdit() {
+      const ed = editing;
+      editing = null;
+      if (ed && ed.el.parentNode) ed.el.remove();
+      return ed;
+    }
+    function cancelEdit() { if (editing) { editing.done = true; endEdit(); canvas.focus(); } }
+    function commitEdit() {
+      if (!editing || editing.done) return;
+      editing.done = true;
+      const ed = endEdit();
+      const v = ed.el.value.replace(/\s+$/, '');
+      if (ed.at) {
+        if (!v) return;
+        const lines = v.split('\n');
+        const widest = Math.max.apply(null, lines.map(function (l) { return textW(l, SHAPE_DEF.fs, false); }));
+        insert({ type: 'text', label: v, w: Math.max(40, Math.ceil((widest + 16) / GRID) * GRID),
+          h: Math.max(30, Math.ceil((lines.length * SHAPE_DEF.fs * 1.4 + 10) / GRID) * GRID) }, ed.at);
+        return;
+      }
+      const o = shapeById(ed.id) || edgeById(ed.id);
+      if (!o || (o.label || '') === v) return;
+      mutate(function () { o.label = v; });
+    }
+
+    // ---- 滑鼠 ----
+    function targetShapeAt(e, exceptId) {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const g = el && el.closest ? el.closest('.dio-shape[data-id]') : null;
+      const c = el && el.closest ? el.closest('[data-conn]') : null;
+      const id = g ? g.getAttribute('data-id') : (c ? c.getAttribute('data-conn') : null);
+      return id && id !== exceptId && shapeById(id) ? id : null;
+    }
+    function onDown(e) {
+      closeMenu();
+      if (editing) commitEdit();
+      canvas.focus();
+      if (e.button === 1 || e.button === 2 || (e.button === 0 && spaceDown)) {
+        gesture = { type: 'pan', sx: e.clientX, sy: e.clientY, px: panX, py: panY };
+        canvas.classList.add('is-panning');
+        e.preventDefault();
+        return;
+      }
+      if (e.button !== 0) return;
+      const t = e.target;
+      const w = toWorld(e);
+      const handle = t.closest('[data-handle]'), endH = t.closest('[data-end]'), dot = t.closest('[data-conn]');
+      const el = t.closest('[data-id]');
+      // 雙擊在這裡自己認（第二下的 mousedown）：按下時整張圖會重畫，被按的那個元素就不在了，
+      // 瀏覽器找不到按下與放開的共同祖先，click 跟 dblclick 都不會發
+      if (e.detail === 2 && !handle && !endH && !dot) {
+        e.preventDefault();
+        onDbl(el ? el.getAttribute('data-id') : null, w);
+        return;
+      }
+      if (handle && sel.length === 1 && shapeById(sel[0])) {
+        const s = shapeById(sel[0]);
+        gesture = { type: 'resize', dir: handle.getAttribute('data-handle'), before: begin(), id: s.id, o: { x: s.x, y: s.y, w: s.w, h: s.h } };
+      } else if (endH && sel.length === 1 && edgeById(sel[0])) {
+        const ed = edgeById(sel[0]), which = endH.getAttribute('data-end');
+        gesture = { type: 'endpoint', before: begin(), id: ed.id, which: which, orig: ed[which], target: null, preview: null };
+      } else if (dot) {
+        const from = dot.getAttribute('data-conn');
+        gesture = { type: 'connect', before: begin(), from: from, target: null,
+          preview: Object.assign({}, EDGE_DEF, { id: '_p', label: '', from: { id: from }, to: { x: w.x, y: w.y } }) };
+      } else if (el) {
+        const id = el.getAttribute('data-id');
+        if (e.shiftKey) sel = sel.indexOf(id) >= 0 ? sel.filter(function (x) { return x !== id; }) : sel.concat([id]);
+        else if (sel.indexOf(id) < 0) sel = [id];
+        const moving = {};
+        selShapes().forEach(function (s) { moving[s.id] = { x: s.x, y: s.y }; });
+        const ends = [];
+        selEdges().forEach(function (ed) {
+          ['from', 'to'].forEach(function (k) { if (!ed[k].id) ends.push({ e: ed, k: k, x: ed[k].x, y: ed[k].y }); });
+        });
+        gesture = { type: 'move', before: begin(), sx: e.clientX, sy: e.clientY, w0: w, shapes: moving, ends: ends, moved: false };
+        render(); renderFormat(); refreshToolbar();
+      } else {
+        gesture = { type: 'band', w0: w, sx: e.clientX, sy: e.clientY, moved: false, box: { x: w.x, y: w.y, w: 0, h: 0 }, add: e.shiftKey ? sel.slice() : [] };
+      }
+      e.preventDefault();
+    }
+    function onMove(e) {
+      if (!gesture) return;
+      const w = toWorld(e);
+      const g = gesture;
+      if (g.type === 'pan') {
+        panX = g.px + (e.clientX - g.sx); panY = g.py + (e.clientY - g.sy);
+        render();
+        return;
+      }
+      if (g.type === 'palette') {
+        g.ghost.style.left = e.clientX + 'px'; g.ghost.style.top = e.clientY + 'px';
+        if (Math.abs(e.clientX - g.sx) + Math.abs(e.clientY - g.sy) > 4) { g.moved = true; g.ghost.hidden = false; }
+        return;
+      }
+      if (g.type === 'move') {
+        if (!g.moved && Math.abs(e.clientX - g.sx) + Math.abs(e.clientY - g.sy) < 3) return;
+        g.moved = true;
+        const dx = w.x - g.w0.x, dy = w.y - g.w0.y;
+        // 整組一起對齊格線：以第一個圖形為準算出位移，其他人照同樣的量走，相對位置才不會跑掉
+        const first = Object.keys(g.shapes)[0];
+        let ax = dx, ay = dy;
+        if (first) { ax = snap(g.shapes[first].x + dx) - g.shapes[first].x; ay = snap(g.shapes[first].y + dy) - g.shapes[first].y; }
+        else if (g.ends.length) { ax = snap(g.ends[0].x + dx) - g.ends[0].x; ay = snap(g.ends[0].y + dy) - g.ends[0].y; }
+        Object.keys(g.shapes).forEach(function (id) {
+          const s = shapeById(id);
+          if (s) { s.x = g.shapes[id].x + ax; s.y = g.shapes[id].y + ay; }
+        });
+        g.ends.forEach(function (n) { n.e[n.k] = { x: n.x + ax, y: n.y + ay }; });
+        render();
+        return;
+      }
+      if (g.type === 'resize') {
+        const s = shapeById(g.id), o = g.o;
+        if (!s) return;
+        let x0 = o.x, y0 = o.y, x1 = o.x + o.w, y1 = o.y + o.h;
+        if (g.dir.indexOf('w') >= 0) x0 = Math.min(snap(w.x), x1 - MIN_SIZE);
+        if (g.dir.indexOf('e') >= 0) x1 = Math.max(snap(w.x), x0 + MIN_SIZE);
+        if (g.dir.indexOf('n') >= 0) y0 = Math.min(snap(w.y), y1 - MIN_SIZE);
+        if (g.dir.indexOf('s') >= 0) y1 = Math.max(snap(w.y), y0 + MIN_SIZE);
+        s.x = x0; s.y = y0; s.w = x1 - x0; s.h = y1 - y0;
+        render();
+        return;
+      }
+      if (g.type === 'connect') {
+        g.target = targetShapeAt(e, g.from);
+        g.preview.to = g.target ? { id: g.target } : { x: w.x, y: w.y };
+        renderOverlay();
+        return;
+      }
+      if (g.type === 'endpoint') {
+        const ed = edgeById(g.id);
+        if (!ed) return;
+        const other = g.which === 'from' ? ed.to : ed.from;
+        g.target = targetShapeAt(e, other.id || null);
+        g.preview = Object.assign({}, ed, { id: '_p', label: '' });
+        g.preview[g.which] = g.target ? { id: g.target } : { x: w.x, y: w.y };
+        renderOverlay();
+        return;
+      }
+      if (g.type === 'band') {
+        if (!g.moved && Math.abs(e.clientX - g.sx) + Math.abs(e.clientY - g.sy) < 3) return;
+        g.moved = true;
+        g.box = { x: Math.min(g.w0.x, w.x), y: Math.min(g.w0.y, w.y), w: Math.abs(w.x - g.w0.x), h: Math.abs(w.y - g.w0.y) };
+        renderOverlay();
       }
     }
-    window.addEventListener('message', onMessage);
+    function onUp(e) {
+      if (!gesture) return;
+      const g = gesture;
+      gesture = null;
+      canvas.classList.remove('is-panning');
+      const w = toWorld(e);
+      if (g.type === 'palette') {
+        g.ghost.remove();
+        const r = canvas.getBoundingClientRect();
+        const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+        if (!g.moved) insert(g.item);
+        else if (inside) insert(g.item, w);
+        canvas.focus();
+        return;
+      }
+      if (g.type === 'move' || g.type === 'resize') {
+        commit(g.before);
+      } else if (g.type === 'connect') {
+        const far = Math.abs(w.x - centerOf(shapeById(g.from)).x) + Math.abs(w.y - centerOf(shapeById(g.from)).y) > 12;
+        if (g.target || far) {
+          const ed = Object.assign({}, EDGE_DEF, {
+            id: newId('e'), label: '', from: { id: g.from },
+            to: g.target ? { id: g.target } : { x: snap(w.x), y: snap(w.y) }
+          });
+          model.edges.push(ed);
+          sel = [ed.id];
+          commit(g.before);
+        }
+      } else if (g.type === 'endpoint') {
+        const ed = edgeById(g.id);
+        if (ed && g.preview) {
+          ed[g.which] = g.target ? { id: g.target } : { x: snap(w.x), y: snap(w.y) };
+          commit(g.before);
+        }
+      } else if (g.type === 'band') {
+        if (!g.moved) sel = g.add;
+        else {
+          const b = g.box, inBox = function (x, y) { return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; };
+          const byId = indexOf(model);
+          const hit = model.shapes.filter(function (s) { return inBox(s.x, s.y) && inBox(s.x + s.w, s.y + s.h); }).map(function (s) { return s.id; })
+            .concat(model.edges.filter(function (ed) {
+              const gg = edgeGeom(ed, byId);
+              return gg && inBox(gg.p1.x, gg.p1.y) && inBox(gg.p2.x, gg.p2.y);
+            }).map(function (ed) { return ed.id; }));
+          sel = g.add.concat(hit.filter(function (id) { return g.add.indexOf(id) < 0; }));
+        }
+      }
+      render(); renderFormat(); refreshToolbar();
+    }
+    function onHover(e) {
+      if (gesture) return;
+      const g = e.target.closest ? e.target.closest('.dio-shape[data-id]') : null;
+      const c = e.target.closest ? e.target.closest('[data-conn]') : null;
+      const id = g ? g.getAttribute('data-id') : (c ? c.getAttribute('data-conn') : null);
+      if (id === hoverId) return;
+      hoverId = id;
+      renderOverlay();
+    }
+    function onDbl(id, w) {
+      if (id) { select([id]); startEdit(id); return; }
+      // 雙擊空白處：直接開始打字，打完才變成一段文字
+      select([]);
+      startEdit(null, w);
+    }
+    stage.addEventListener('mousedown', onDown);
+    stage.addEventListener('mousemove', onHover);
+    stage.addEventListener('mouseleave', function () { if (!gesture && hoverId) { hoverId = null; renderOverlay(); } });
+    stage.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    canvas.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      if (editing) commitEdit();
+      if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+      else {
+        if (e.shiftKey) panX -= e.deltaY; else { panX -= e.deltaX; panY -= e.deltaY; }
+        render();
+      }
+    }, { passive: false });
 
-    // 同步收掉：切到別的檢視時 app.js 叫的就是這個，不能等 draw.io 回覆。還沒匯出的
-    // 改動不會丟——原始檔（autosave 事件每改一下就送來）是最新的，只有畫面慢一拍。
+    // 左邊的圖形：點一下放中央，拖過去放在放開的地方
+    host.querySelector('.dio-side').addEventListener('mousedown', function (e) {
+      const b = e.target.closest('[data-pal]');
+      if (!b || e.button !== 0) return;
+      const p = b.getAttribute('data-pal').split(',');
+      const item = PALETTE[+p[0]].items[+p[1]];
+      const ghost = document.createElement('div');
+      ghost.className = 'dio-ghost';
+      ghost.hidden = true;
+      ghost.innerHTML = thumb(item);
+      ghost.style.left = e.clientX + 'px'; ghost.style.top = e.clientY + 'px';
+      host.appendChild(ghost);
+      if (editing) commitEdit();
+      gesture = { type: 'palette', item: item, ghost: ghost, sx: e.clientX, sy: e.clientY, moved: false };
+      e.preventDefault();
+    });
+    host.querySelector('.dio-toolbar').addEventListener('click', function (e) {
+      const b = e.target.closest('[data-act]');
+      if (b && !b.disabled) act(b.getAttribute('data-act'));
+    });
+    host.querySelector('.dio-menubar').addEventListener('click', function (e) {
+      const b = e.target.closest('[data-menu]');
+      if (b) { e.stopPropagation(); openMenu(b); }
+    });
+    function onDocDown(e) {
+      if (menuEl && !e.target.closest('.dio-menu') && !e.target.closest('.dio-menu-btn')) closeMenu();
+    }
+    document.addEventListener('mousedown', onDocDown, true);
+
+    // ---- 鍵盤 ----
+    function onKey(e) {
+      if (editing) return;
+      const tag = e.target && e.target.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+      if (e.key === ' ') { spaceDown = true; canvas.classList.add('can-pan'); e.preventDefault(); return; }
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); removeSelected(); return; }
+      if (e.key === 'Escape') { if (menuEl) closeMenu(); else if (sel.length) { e.preventDefault(); e.stopPropagation(); select([]); } return; }
+      if (e.key === 'F2' || (e.key === 'Enter' && !mod)) { if (sel.length === 1) { e.preventDefault(); startEdit(sel[0]); } return; }
+      if (mod && k === 'z') { e.preventDefault(); if (e.shiftKey) doRedo(); else doUndo(); return; }
+      if (mod && k === 'y') { e.preventDefault(); doRedo(); return; }
+      if (mod && k === 'a') { e.preventDefault(); act('selectall'); return; }
+      if (mod && k === 'c') { e.preventDefault(); copySelected(); return; }
+      if (mod && k === 'x') { e.preventDefault(); act('cut'); return; }
+      if (mod && k === 'v') { e.preventDefault(); paste(); return; }
+      if (mod && k === 'd') { e.preventDefault(); duplicate(); return; }
+      if (e.key.indexOf('Arrow') === 0 && sel.length) {
+        e.preventDefault();
+        const d = e.shiftKey ? GRID : 1;
+        const dx = e.key === 'ArrowLeft' ? -d : e.key === 'ArrowRight' ? d : 0;
+        const dy = e.key === 'ArrowUp' ? -d : e.key === 'ArrowDown' ? d : 0;
+        mutate(function () {
+          selShapes().forEach(function (s) { s.x += dx; s.y += dy; });
+          selEdges().forEach(function (ed) {
+            ['from', 'to'].forEach(function (kk) { if (!ed[kk].id) ed[kk] = { x: ed[kk].x + dx, y: ed[kk].y + dy }; });
+          });
+        });
+        return;
+      }
+      // 直接打字就開始改文字（跟 draw.io 一樣）
+      if (!mod && !e.altKey && e.key.length === 1 && sel.length === 1) {
+        startEdit(sel[0]);
+        if (editing) { editing.el.value = ''; }
+      }
+    }
+    function onKeyUp(e) { if (e.key === ' ') { spaceDown = false; canvas.classList.remove('can-pan'); } }
+    host.addEventListener('keydown', onKey);
+    host.addEventListener('keyup', onKeyUp);
+
+    // ---- 格式面板 ----
+    function colorRow(label, prop, value, allowNone) {
+      const off = value === 'none';
+      return '<div class="dio-row"><label class="dio-chk">' +
+        (allowNone ? '<input type="checkbox" data-toggle="' + prop + '"' + (off ? '' : ' checked') + '>' : '') +
+        '<span>' + label + '</span></label>' +
+        '<input class="dio-color" type="color" data-prop="' + prop + '" value="' + (off ? '#ffffff' : value) + '"' + (off ? ' disabled' : '') + '></div>';
+    }
+    function numRow(label, prop, value, min, max, step) {
+      return '<div class="dio-row"><span>' + label + '</span><input class="dio-num" type="number" data-prop="' + prop + '" value="' + fmt(value) +
+        '" min="' + min + '" max="' + max + '" step="' + (step || 1) + '"></div>';
+    }
+    function chkRow(label, prop, on) {
+      return '<div class="dio-row"><label class="dio-chk"><input type="checkbox" data-prop="' + prop + '"' + (on ? ' checked' : '') + '><span>' + label + '</span></label></div>';
+    }
+    function segRow(label, prop, value, options) {
+      return '<div class="dio-row"><span>' + label + '</span><div class="dio-seg">' + options.map(function (o) {
+        return '<button type="button" data-prop="' + prop + '" data-val="' + o[0] + '" class="' + (o[0] === value ? 'on' : '') + '" title="' + o[1] + '">' + (o[2] || o[1]) + '</button>';
+      }).join('') + '</div></div>';
+    }
+    function renderFormat() {
+      const ss = selShapes(), es = selEdges();
+      if (!ss.length && !es.length) {
+        formatEl.innerHTML = '<div class="dio-tabs"><span class="dio-tab on">圖表</span></div><div class="dio-panel">' +
+          '<div class="dio-grp">檢視</div>' +
+          '<div class="dio-row"><label class="dio-chk"><input type="checkbox" data-act="grid"' + (model.grid ? ' checked' : '') + '><span>格線</span></label></div>' +
+          '<div class="dio-row"><label class="dio-chk"><input type="checkbox" data-act="snap"' + (snapOn ? ' checked' : '') + '><span>對齊格線</span></label></div>' +
+          '<div class="dio-grp">統計</div>' +
+          '<div class="dio-row dio-dim"><span>' + model.shapes.length + ' 個圖形・' + model.edges.length + ' 條連線</span></div>' +
+          '<div class="dio-grp">操作</div><div class="dio-help">' +
+          '雙擊圖形或連線：改文字<br>雙擊空白處：加文字<br>滾輪：捲動　Ctrl+滾輪：縮放<br>空白鍵＋拖曳、右鍵拖曳：平移<br>Shift＋點：多選　拖空白處：框選</div>' +
+          '</div>';
+        return;
+      }
+      const tabs = ss.length ? [['style', '樣式'], ['text', '文字'], ['arrange', '排列']] : [['style', '樣式'], ['text', '文字']];
+      if (!tabs.some(function (t) { return t[0] === tab; })) tab = 'style';
+      let h = '<div class="dio-tabs">' + tabs.map(function (t) {
+        return '<button type="button" class="dio-tab' + (t[0] === tab ? ' on' : '') + '" data-tab="' + t[0] + '">' + t[1] + '</button>';
+      }).join('') + '</div><div class="dio-panel">';
+      const a = ss[0] || es[0];
+      if (tab === 'style') {
+        if (ss.length) {
+          h += '<div class="dio-presets">' + PRESETS.map(function (p, i) {
+            return '<button type="button" class="dio-preset" data-preset="' + i + '" style="background:' + p[0] + ';border-color:' + p[1] + '" title="填色 ' + p[0] + '／線條 ' + p[1] + '"></button>';
+          }).join('') + '</div>';
+          h += colorRow('填滿', 'fill', ss[0].fill, true);
+        }
+        h += colorRow('線條', 'stroke', a.stroke, !!ss.length && !es.length);
+        h += numRow('線寬', 'sw', a.sw, 0.5, 20, 0.5);
+        h += chkRow('虛線', 'dash', a.dash);
+        if (es.length) {
+          const e0 = es[0];
+          h += '<div class="dio-grp">連線</div>';
+          h += segRow('線型', 'style', e0.style, [['straight', '直線'], ['elbow', '折線'], ['curve', '曲線']]);
+          h += segRow('起點', 'start', e0.start, [['none', '無'], ['arrow', '箭頭']]);
+          h += segRow('終點', 'end', e0.end, [['none', '無'], ['arrow', '箭頭']]);
+        }
+      } else if (tab === 'text') {
+        h += numRow('字級', 'fs', a.fs, 6, 96, 1);
+        h += colorRow('文字顏色', 'fc', a.fc, false);
+        h += chkRow('粗體', 'bold', a.bold);
+        if (ss.length) h += segRow('對齊', 'align', ss[0].align, [['left', '靠左', ic('align-left')], ['center', '置中', ic('align-center')], ['right', '靠右', ic('align-right')]]);
+      } else {
+        const s0 = ss[0];
+        h += '<div class="dio-grp">順序</div><div class="dio-btns">' +
+          '<button type="button" class="dio-btn" data-act="front">移到最前</button><button type="button" class="dio-btn" data-act="back">移到最後</button></div>';
+        if (ss.length === 1) {
+          h += '<div class="dio-grp">位置與大小</div>' + numRow('X', 'x', s0.x, -20000, 20000, 1) + numRow('Y', 'y', s0.y, -20000, 20000, 1) +
+            numRow('寬', 'w', s0.w, MIN_SIZE, 4000, 1) + numRow('高', 'h', s0.h, MIN_SIZE, 4000, 1);
+        } else {
+          h += '<div class="dio-grp">對齊（' + ss.length + ' 個圖形）</div><div class="dio-btns dio-btns-3">' +
+            [['left', '靠左'], ['center', '水平置中'], ['right', '靠右'], ['top', '靠上'], ['middle', '垂直置中'], ['bottom', '靠下']].map(function (x) {
+              return '<button type="button" class="dio-btn" data-act="align-' + x[0] + '">' + x[1] + '</button>';
+            }).join('') + '</div>';
+        }
+      }
+      formatEl.innerHTML = h + '</div>';
+    }
+    function applyProp(prop, value) {
+      const ss = selShapes(), es = selEdges();
+      mutate(function () {
+        ss.forEach(function (s) {
+          if (prop === 'fill') s.fill = color(value, s.fill, true);
+          else if (prop === 'stroke') s.stroke = color(value, s.stroke, true);
+          else if (prop === 'sw') s.sw = num(value, s.sw, 0.5, 20);
+          else if (prop === 'dash' || prop === 'bold') s[prop] = value ? 1 : 0;
+          else if (prop === 'fs') s.fs = num(value, s.fs, 6, 96);
+          else if (prop === 'fc') s.fc = color(value, s.fc, false);
+          else if (prop === 'align' && ALIGNS.indexOf(value) >= 0) s.align = value;
+          else if (prop === 'x' || prop === 'y') s[prop] = num(value, s[prop], -20000, 20000);
+          else if (prop === 'w' || prop === 'h') s[prop] = num(value, s[prop], MIN_SIZE, 4000);
+        });
+        es.forEach(function (e) {
+          if (prop === 'stroke') e.stroke = color(value, e.stroke, false);
+          else if (prop === 'sw') e.sw = num(value, e.sw, 0.5, 20);
+          else if (prop === 'dash' || prop === 'bold') e[prop] = value ? 1 : 0;
+          else if (prop === 'fs') e.fs = num(value, e.fs, 6, 96);
+          else if (prop === 'fc') e.fc = color(value, e.fc, false);
+          else if (prop === 'style' && STYLES.indexOf(value) >= 0) e.style = value;
+          else if (prop === 'start' || prop === 'end') e[prop] = value === 'arrow' ? 'arrow' : 'none';
+        });
+      });
+    }
+    formatEl.addEventListener('change', function (e) {
+      const t = e.target;
+      if (t.hasAttribute('data-act')) { act(t.getAttribute('data-act')); return; }
+      if (t.hasAttribute('data-toggle')) {
+        const prop = t.getAttribute('data-toggle');
+        const picker = formatEl.querySelector('.dio-color[data-prop="' + prop + '"]');
+        const first = selShapes()[0];
+        // 關掉之前記住原本的顏色，再勾回來就是它，不是白色
+        if (!t.checked && first && first[prop] !== 'none') lastColor[prop] = first[prop];
+        applyProp(prop, t.checked ? (lastColor[prop] || (picker ? picker.value : '#ffffff')) : 'none');
+        return;
+      }
+      if (!t.hasAttribute('data-prop')) return;
+      applyProp(t.getAttribute('data-prop'), t.type === 'checkbox' ? t.checked : t.value);
+    });
+    formatEl.addEventListener('click', function (e) {
+      const tabBtn = e.target.closest('[data-tab]');
+      if (tabBtn) { tab = tabBtn.getAttribute('data-tab'); renderFormat(); return; }
+      const pre = e.target.closest('[data-preset]');
+      if (pre) {
+        const p = PRESETS[+pre.getAttribute('data-preset')];
+        mutate(function () { selShapes().forEach(function (s) { s.fill = p[0]; s.stroke = p[1]; }); });
+        return;
+      }
+      const seg = e.target.closest('button[data-prop]');
+      if (seg) { applyProp(seg.getAttribute('data-prop'), seg.getAttribute('data-val')); return; }
+      const b = e.target.closest('button[data-act]');
+      if (b) act(b.getAttribute('data-act'));
+    });
+    formatEl.addEventListener('keydown', function (e) { e.stopPropagation(); });
+
+    // ---- 關閉 ----
+    function teardown() {
+      clearTimeout(saveTimer);
+      closeMenu();
+      if (editing) { editing.done = true; endEdit(); }
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('resize', onResize);
+      document.removeEventListener('mousedown', onDocDown, true);
+      host.removeEventListener('keydown', onKey);
+      host.removeEventListener('keyup', onKeyUp);
+      host.innerHTML = ''; host.classList.remove('dio-page');
+    }
+    // 圖就是一段文字，存檔不用等誰回覆，所以切走時同步送出去就好
     function close() {
       if (closed) return;
-      const pending = dirty() && !!lastXml;
+      if (editing) commitEdit();
+      emit();
       closed = true;
-      clearTimeout(exportTimer); clearTimeout(closeTimer);
-      window.removeEventListener('message', onMessage);
-      if (pending && opts.onChange) opts.onChange(wrap(payloadFor(lastSvg, lastXml, true)));
-      unshell(host);
+      teardown();
       if (opts.onClose) opts.onClose();
     }
-    // 使用者自己按返回：等 draw.io 把最新的畫面匯出來再走，等不到就照上面那條路收
-    function requestClose() {
-      if (closed) return;
-      if (!ready || !dirty()) { close(); return; }
-      setStatus('儲存中…');
-      afterExport = close;
-      closeTimer = setTimeout(close, CLOSE_WAIT);
-      askExport();
-    }
-    ui.back.addEventListener('click', requestClose);
-
-    // 版本紀錄要看到的是「現在畫面上這張」，所以先把還沒存的送出去再打開
-    function whenSaved(cb) {
-      if (closed) return;
-      if (!ready || !dirty()) { cb(); return; }
-      let done = false;
-      const once = function () { if (done || closed) return; done = true; clearTimeout(t); cb(); };
-      const t = setTimeout(once, CLOSE_WAIT);
-      afterExport = once;
-      askExport();
-    }
-    if (ui.history) ui.history.addEventListener('click', function () { whenSaved(function () { opts.onHistory(); }); });
-
-    // 不存檔直接拆掉：還原到舊版本之後用的——這個編輯器裡還是還原前的圖，讓它照平常的
-    // close() 走一遍，有機會把舊圖又存回去蓋掉剛還原的版本。
+    // 不存檔直接拆掉：還原到舊版本之後用的，免得把還原前的圖又存回去
     function discard() {
       if (closed) return;
       closed = true;
-      clearTimeout(exportTimer); clearTimeout(closeTimer);
-      window.removeEventListener('message', onMessage);
-      unshell(host);
+      dirty = false;
+      teardown();
     }
+    function onResize() { if (!closed) render(); }
+    window.addEventListener('resize', onResize);
+    host.querySelector('.dio-back').addEventListener('click', close);
+    const hist = host.querySelector('.dio-history');
+    if (hist) hist.addEventListener('click', function () {
+      if (editing) commitEdit();
+      const go = function () { if (!closed) opts.onHistory(); };
+      if (!dirty) { go(); return; }
+      // 版本紀錄要看到現在畫面上這張：先把還沒存的送出去
+      clearTimeout(saveTimer);
+      dirty = false;
+      setStatus('儲存中…');
+      Promise.resolve(opts.onChange ? opts.onChange(wrap(serialize(model))) : null).then(function () {
+        if (!closed) setStatus('已儲存', 'is-ok');
+        go();
+      }, go);
+    });
 
-    return { close: close, requestClose: requestClose, discard: discard };
+    renderFormat(); refreshToolbar();
+    // 容器剛顯示出來時還沒有大小，等排版完再對位
+    requestAnimationFrame(function () { if (!closed) { fit(); if (model.shapes.length || model.edges.length) setStatus('已儲存', 'is-ok'); } });
+    setTimeout(function () { if (!closed) canvas.focus(); }, 30);
+
+    return { close: close, requestClose: close, discard: discard };
   }
 
   global.DrawIO = {
     open: open, view: view,
     isNote: isNote, generate: generate,
-    payloadOf: payloadOf, wrap: wrap, decode: decode, encode: encode,
-    imgOf: imgOf, blockHTML: blockHTML, dataUrl: dataUrl
+    payloadOf: payloadOf, wrap: wrap, parse: parse, serialize: serialize,
+    renderSVG: renderSVG, blockHTML: blockHTML, htmlOf: htmlOf
   };
 })(window);
