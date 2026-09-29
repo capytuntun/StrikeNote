@@ -3178,32 +3178,27 @@ select.sec-info-input { cursor: pointer; }
 .rm-menu-hint code { font-family: var(--mono); color: var(--text-dim); }
 
 /* ---------- drawio（js/drawio.js）：自己做的基本繪圖工具 ----------
-   版面照 draw.io：上面一條（標題／存檔狀態／版本／返回）、選單列、工具列，下面三欄——
-   左邊圖形、中間畫布、右邊格式面板。外框這些跟著主題變色；**畫布永遠是白紙**，因為圖
+   版面照 draw.io：選單列（右邊是存檔狀態）、工具列，下面三欄——左邊圖形、中間畫布、
+   右邊格式面板。它沒有自己的標題列：資料夾／標題、版本、分享、PDF 就是 app 最上面那一列，
+   跟一般筆記同一組元件（app.js 的 openDrawioNote；#app.tool-open 只把用不到的收掉）。外框這些跟著主題變色；**畫布永遠是白紙**，因為圖
    存下來、印出來都是白底，畫的時候看到的要跟之後看到的一樣。圖形自己的顏色是使用者挑的，
    直接寫在 SVG 屬性上，這裡不管。 */
 .drawio-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
-.dio-page .dio-bar {
-  display: flex; align-items: center; gap: 8px; flex: 0 0 auto;
-  padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-2);
-}
-.dio-bar-t { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: var(--fs-md); white-space: nowrap; }
-.dio-bar-t .ic-svg { width: 18px; height: 18px; color: #f08705; }
-.dio-title {
-  flex: 0 1 320px; min-width: 120px; padding: 6px 10px; border: 1px solid transparent;
-  background: transparent; color: var(--text); font: inherit; font-size: var(--fs-md); font-weight: 600; outline: none;
-}
-.dio-title:hover { border-color: var(--border); }
-.dio-title:focus { border-color: var(--accent); background: var(--bg); }
-.dio-title[readonly] { cursor: default; }
-.dio-title[readonly]:hover, .dio-title[readonly]:focus { border-color: transparent; background: transparent; }
-.dio-status { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; }
+/* 開著的是圖表：最上面那一列沿用筆記的，但分割／編輯／預覽、水豚、線上人數跟圖表無關 */
+#app.tool-open #topbar .mode-switch,
+#app.tool-open #topbar #capybara,
+#app.tool-open #topbar #presence { display: none; }
+.dio-status { flex: 0 0 auto; padding: 0 6px; font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; }
 .dio-status.is-ok { color: var(--success); }
 .dio-status.is-err { color: var(--danger); font-weight: 600; }
-.dio-bar-sp { flex: 1 1 auto; }
-.dio-bar .btn { flex: 0 0 auto; }
-.dio-readonly { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--text-dim); }
-.dio-readonly .ic-svg { width: 13px; height: 13px; }
+.dio-menubar-sp { flex: 1 1 auto; }
+/* 唯讀的說明：跟筆記的 .ro-banner 同一個樣子 */
+.dio-ro {
+  display: flex; align-items: center; gap: 7px; flex: 0 0 auto;
+  padding: 6px 16px; font-size: var(--fs-sm); font-weight: 600;
+  background: var(--accent-weak); color: var(--accent); border-bottom: 1px solid var(--border);
+}
+.dio-ro .ic-svg { width: 14px; height: 14px; }
 
 /* 選單列＋工具列 */
 .dio-menubar {
@@ -3259,7 +3254,8 @@ select.sec-info-input { cursor: pointer; }
 /* 縮圖用跟畫布一樣的黑線白底畫出來的；深色主題下外框是深的，把線反成淺色才看得見 */
 .dio-pal svg { display: block; overflow: visible; }
 :root[data-theme="dark"] .dio-pal svg { filter: invert(1) hue-rotate(180deg); }
-.dio-side-hint { margin-top: 14px; font-size: var(--fs-xs); line-height: 1.7; color: var(--text-faint); }
+/* 左邊留一點：視窗左緣那個拉出側邊欄的把手（#sidebar-reopen）剛好壓在這段字上 */
+.dio-side-hint { margin-top: 14px; padding-left: 10px; font-size: var(--fs-xs); line-height: 1.7; color: var(--text-faint); }
 .dio-ghost {
   position: fixed; z-index: 2200; pointer-events: none; transform: translate(-50%, -50%) scale(1.6);
   padding: 2px; background: rgba(255, 255, 255, .9); border: 1px dashed #4c8dff;
@@ -3392,14 +3388,6 @@ span.dio-tab { cursor: default; }
   .dio-side { flex-basis: 56px; scrollbar-width: none; }
   .dio-sec-grid { grid-template-columns: 1fr; }
   .dio-sec-t { display: none; }
-  /* 最上面那一條塞不下：「drawio」的字、按鈕的字收掉（圖示留著），標題能縮就縮，
-     「返回」一定要整顆看得到——沒有它就出不去 */
-  .dio-page .dio-bar { gap: 4px; padding: 8px; }
-  .dio-bar-t > span { display: none; }
-  .dio-title { flex: 1 1 60px; min-width: 60px; padding: 6px; }
-  .dio-bar-sp { display: none; }
-  .dio-bar .btn { font-size: 0; gap: 0; padding: 6px 9px; }
-  .dio-bar .btn .ic-svg { width: 16px; height: 16px; }
 }
 
 /* ---------- 關聯圖（反向連結＋標籤，Obsidian 風格的力導向圖） ----------

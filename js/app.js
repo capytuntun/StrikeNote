@@ -1005,7 +1005,20 @@
   // 送出的改動存掉再拆 DOM。
   const drawioWrapEl = $('#drawio-wrap');
   let drawioView = null;
+  // 圖表開著的時候，最上面那一列（資料夾／標題、版本、分享、PDF）就是一般筆記的那一組
+  // 元件、同一個位置。但整頁工具不佔用 state.current（見 editorNoteId 的說明），那幾個
+  // 元件原本的處理函式又都是看 state.current——所以沒有開著的筆記時，改問這個。
+  // { id, note(), readOnly, titleInput(v), commitTitle(), history(), pdf() }
+  let toolBar = null;
   function closeDrawioView() {
+    if (toolBar) {
+      toolBar.commitTitle();   // 標題打到一半就切走：先存
+      toolBar = null;
+      const app = document.getElementById('app');
+      if (app) app.classList.remove('tool-open');
+      titleEl.placeholder = '未命名筆記';
+      titleEl.readOnly = false;
+    }
     if (drawioView) { const v = drawioView; drawioView = null; v.close(); }
     if (drawioWrapEl) drawioWrapEl.hidden = true;
   }
@@ -1506,6 +1519,9 @@
     const titleWrap = topbar && topbar.querySelector('.note-title-wrap');
     const rightCluster = $('#history-btn');
     if (!topbar || !modeSwitch || !titleWrap || !rightCluster) return;
+    // 左邊擋住標題的東西：平常是模式切換鈕；圖表沒有那一組（#app.tool-open 收掉了），
+    // 那就是 logo 那一群——收掉的元素量出來全是 0，拿它當邊界等於左邊沒有東西
+    const leftCluster = modeSwitch.getClientRects().length ? modeSwitch : (topbar.querySelector('.topbar-left') || modeSwitch);
     // 標題置中在正中線，所以它能用的寬度是「正中線到兩側按鈕群，較近那邊的距離」乘二。
     // 放得下就不設上限；放不下但還有 TITLE_MIN 就設成剛好那麼寬，路徑會先被截成「…/」。
     function capTitle() {
@@ -1514,7 +1530,7 @@
       const gap = 12;
       const bar = topbar.getBoundingClientRect();
       const mid = bar.left + bar.width / 2;
-      const room = 2 * Math.min(mid - modeSwitch.getBoundingClientRect().right - gap,
+      const room = 2 * Math.min(mid - leftCluster.getBoundingClientRect().right - gap,
         rightCluster.getBoundingClientRect().left - gap - mid);
       if (room >= TITLE_MIN && titleWrap.getBoundingClientRect().width > room) {
         titleWrap.style.maxWidth = Math.floor(room) + 'px';
@@ -1528,7 +1544,7 @@
       if (getComputedStyle(titleWrap).visibility === 'hidden') return true;
       const gap = 12;
       const t = titleWrap.getBoundingClientRect();
-      return t.left - gap >= modeSwitch.getBoundingClientRect().right &&
+      return t.left - gap >= leftCluster.getBoundingClientRect().right &&
         t.right + gap <= rightCluster.getBoundingClientRect().left;
     }
     topbar.classList.remove('topbar-lvl1', 'topbar-lvl2', 'topbar-lvl3', 'topbar-lvl4', 'topbar-lvl5');
@@ -2043,6 +2059,7 @@
   // few keystrokes have not reached the server yet would show a "current
   // version" that is not what is on screen.
   function openHistory() {
+    if (!state.current && toolBar) { toolBar.history(); return; }   // 開著的是圖表
     if (!state.current || !window.Versions) return;
     saveNow();
     Versions.openNote(state.current, {
@@ -2325,31 +2342,52 @@
       if (n !== note) Object.assign(note, patch);
       return flushSave();
     }
-    function onClose() {
-      const mine = drawioView === view;
-      drawioView = null;
-      drawioWrapEl.hidden = true;
-      if (!mine) return;
-      LS.set('lastNote', '');
-      // 返回：區域裡的圖表回到它那個區域的資料夾，不是首頁
-      if (isMine(note) && note.area && AREA_INFO[note.area] && AREA_INFO[note.area].wrap && window.AreaBrowser) {
-        openArea(note.area, { folderId: note.folderId || null });
-      } else showEmpty();
-    }
-    const title = note.title === '未命名筆記' ? '' : (note.title || '');
+    const readOnly = note.perm === 'read';
+    const title = (note.title === '未命名筆記' || note.title === '未命名圖表') ? '' : (note.title || '');
     // 只有讀取權限（別人分享給我看的）：不開編輯器，只顯示那張圖
-    const view = note.perm === 'read'
-      ? DrawIO.view(note.content || '', { container: drawioWrapEl, title: title, onClose: onClose })
+    const view = readOnly
+      ? DrawIO.view(note.content || '', {
+        container: drawioWrapEl, title: title,
+        banner: '唯讀 — 由 ' + (note.sharedBy || '其他使用者') + ' 分享給你'
+      })
       : DrawIO.open(note.content || '', {
         container: drawioWrapEl,
-        title: title,
-        onTitle: function (t) {
-          setLocal({ title: t || '未命名圖表' }).catch(function () {});
-          renderTree();
-        },
-        onChange: function (content) { return setLocal({ content: content }); },
-        onHistory: function () {
-          if (!window.Versions) return;
+        getTitle: function () { return live().title; },   // 匯出的檔名
+        onChange: function (content) { return setLocal({ content: content }); }
+      });
+    drawioView = view;
+
+    // ---- 最上面那一列：跟一般筆記同一組元件（見 toolBar 宣告處）----
+    // 標題邊打邊存（跟筆記一樣停手半秒），走的是上面同一條 setLocal——標題跟圖只能有一個
+    // 寫入的人。還沒送出的字記在這裡，不是到時候再去讀輸入框：切到別篇筆記時輸入框會先被
+    // 換成那一篇的標題。
+    let titleTimer = null, pendingTitle = null;
+    function commitTitle() {
+      clearTimeout(titleTimer); titleTimer = null;
+      if (pendingTitle === null) return;
+      const t = pendingTitle.trim();
+      pendingTitle = null;
+      if ((t || '未命名圖表') === live().title) return;
+      setLocal({ title: t || '未命名圖表' }).catch(function () {});
+      renderTree();
+    }
+    toolBar = {
+      id: note.id,
+      readOnly: readOnly,
+      note: live,
+      titleInput: function (v) {
+        if (readOnly) return;
+        pendingTitle = v;
+        clearTimeout(titleTimer);
+        titleTimer = setTimeout(commitTitle, SAVE_DELAY);
+      },
+      commitTitle: commitTitle,
+      history: function () {
+        if (!window.Versions) return;
+        commitTitle();
+        // 版本紀錄要看到現在畫面上這張：先把還沒存的送出去
+        view.flush().then(function () {
+          if (drawioView !== view) return;
           Versions.openNote(live(), {
             onRestored: function (fresh) {
               const i = state.notes.findIndex(function (n) { return n.id === fresh.id; });
@@ -2361,10 +2399,34 @@
               openNote(fresh.id);
             }
           });
-        },
-        onClose: onClose
-      });
-    drawioView = view;
+        });
+      },
+      // PDF：圖表的內容就是一個 ```drawio 圍欄，照一般筆記的路把它畫出來再交給 PDF
+      pdf: function () {
+        commitTitle();
+        view.flush().then(function () {
+          const n = live();
+          const box = document.createElement('div');
+          box.className = 'markdown-body';
+          box.innerHTML = MD.render(n.content || '');
+          return PDF.showPreview(n, box, {
+            meta: n.meta,
+            onMeta: function (meta) {
+              if (readOnly) return;
+              // 封面欄位存在 meta 裡；不管回來的是什麼，這篇都還是一張圖表
+              setLocal({ meta: Object.assign({}, live().meta, meta, { drawio: true }) }).catch(function () {});
+            }
+          });
+        }).catch(function (err) { alert('產生列印預覽失敗：' + (err && err.message || err)); });
+      }
+    };
+    noteBar(true);
+    document.getElementById('app').classList.add('tool-open');
+    titleEl.placeholder = '未命名圖表';
+    titleEl.value = title;
+    titleEl.readOnly = readOnly;
+    if (shareBtn) shareBtn.hidden = !isMine(note);   // 只有擁有者能分享，跟筆記一樣
+    updateNotePath(note);                            // 標題前面的「資料夾 /」，裡面會重量標題寬度
   }
 
   // ---- Table of contents: beside the preview -----------------------------
@@ -4247,7 +4309,7 @@
     const oldTitle = n.title;
     n.title = val;
     return Store.updateNote(n).then(function () {
-      if (state.currentId === id) { titleEl.value = val; fitNoteTitle(); }
+      if (state.currentId === id || (toolBar && toolBar.id === id)) { titleEl.value = val; fitNoteTitle(); }
       if (state.current && state.current.id === id) state.current.title = val;
       return retargetLinks(oldTitle, val);
     });
@@ -4343,6 +4405,7 @@
 
   // ---- Export ------------------------------------------------------------
   function exportPDF() {
+    if (!state.current && toolBar) { toolBar.pdf(); return; }   // 開著的是圖表
     if (!state.current) return;
     // Make sure preview reflects latest text before export.
     previewEl.innerHTML = MD.render(editorEl.value);
@@ -4650,7 +4713,8 @@
     $('#export-pdf').addEventListener('click', exportPDF);
     $('#toggle-theme').addEventListener('click', toggleTheme);
     if (shareBtn) shareBtn.addEventListener('click', function () {
-      if (state.current && isMine(state.current)) showShareDialog(state.current);
+      const n = state.current || (toolBar && toolBar.note());
+      if (n && isMine(n)) showShareDialog(n);
     });
     if (historyBtn) historyBtn.addEventListener('click', openHistory);
     // 視窗窄到連圖示版的版本／分享／PDF 都放不下（fitTopbar 收到 lvl4）：收成一顆「更多」，
@@ -5009,8 +5073,12 @@
 
     titleEl.addEventListener('input', scheduleSave);
     titleEl.addEventListener('input', fitNoteTitle);
+    // 開著的是圖表（toolBar）：scheduleSave 不會動它（state.current 是空的），標題走它自己那條
+    titleEl.addEventListener('input', function () { if (!state.current && toolBar) toolBar.titleInput(titleEl.value); });
+    titleEl.addEventListener('change', function () { if (!state.current && toolBar) toolBar.commitTitle(); });
     if (notePathEl) notePathEl.addEventListener('click', function () {
-      if (state.current && state.current.folderId) goToFolder(state.current.folderId);
+      const n = state.current || (toolBar && toolBar.note());
+      if (n && n.folderId) goToFolder(n.folderId);
     });
 
     // 匯入 .md：建到「現在所在的地方」——跟側邊欄的「新增」同一套判斷（currentFolderId /

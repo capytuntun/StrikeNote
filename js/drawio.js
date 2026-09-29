@@ -555,54 +555,24 @@
     return html.indexOf('is-empty') >= 0 ? '' : html.replace(/^<div class="drawio-block">/, '').replace(/<\/div>$/, '');
   }
 
-  // ---------------- 頁面的殼（編輯與唯讀共用上面那一條）----------------
-  function topbar(opts, readOnly) {
-    return '<header class="dio-bar">' +
-      '<span class="dio-bar-t">' + ic('shapes') + '<span>drawio</span></span>' +
-      (opts.title !== undefined
-        ? '<input class="dio-title" type="text" placeholder="未命名圖表"' + (readOnly ? ' readonly' : '') + '>'
-        : '') +
-      '<span class="dio-status" aria-live="polite"></span>' +
-      '<span class="dio-bar-sp"></span>' +
-      (readOnly ? '<span class="dio-readonly">' + ic('lock') + ' 唯讀</span>' : '') +
-      (!readOnly && opts.onHistory
-        ? '<button class="btn btn-ghost dio-history" type="button" title="這張圖的版本紀錄（可以還原）">' + ic('history') + ' 版本</button>'
-        : '') +
-      '<button class="btn dio-back" type="button">' + ic('arrow-left') + ' 返回</button>' +
-      '</header>';
-  }
-  function wireTitle(host, opts, readOnly) {
-    const titleEl = host.querySelector('.dio-title');
-    if (!titleEl) return;
-    titleEl.value = opts.title || '';
-    if (readOnly) return;
-    titleEl.addEventListener('change', function () { if (opts.onTitle) opts.onTitle(titleEl.value.trim()); });
-    titleEl.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); }
-      e.stopPropagation();
-    });
-  }
-
+  // ---------------- 唯讀 ----------------
+  // 這一頁沒有自己的標題列：標題、版本、分享、PDF 都在 app 最上面那一列，跟一般筆記
+  // 同一個位置（app.js 的 openDrawioNote）。這裡只管圖本身。
+  // opts.banner：上面那一行說明（誰分享的）；notice：為什麼不能編輯。
   function view(content, opts, notice) {
     opts = opts || {};
     const host = opts.container;
-    if (!host) return { close: function () {}, discard: function () {} };
+    if (!host) return { close: function () {}, discard: function () {}, flush: function () { return Promise.resolve(); } };
     host.classList.add('dio-page');
-    host.innerHTML = topbar(opts, true) +
+    host.innerHTML =
+      (opts.banner ? '<div class="dio-ro">' + ic('lock') + '<span>' + esc(opts.banner) + '</span></div>' : '') +
       '<div class="dio-view">' + (notice ? '<div class="dio-notice">' + esc(notice) + '</div>' : '') +
       blockHTML(payloadOf(content) || '', opts.title) + '</div>';
-    wireTitle(host, opts, true);
     let closed = false;
-    function teardown() {
-      document.removeEventListener('keydown', onKey);
-      host.innerHTML = ''; host.classList.remove('dio-page');
-    }
+    function teardown() { host.innerHTML = ''; host.classList.remove('dio-page'); }
     function close() { if (closed) return; closed = true; teardown(); if (opts.onClose) opts.onClose(); }
     function discard() { if (closed) return; closed = true; teardown(); }
-    function onKey(e) { if (e.key === 'Escape') close(); }
-    document.addEventListener('keydown', onKey);
-    host.querySelector('.dio-back').addEventListener('click', close);
-    return { close: close, requestClose: close, discard: discard };
+    return { close: close, requestClose: close, discard: discard, flush: function () { return Promise.resolve(); } };
   }
 
   // ---------------- 編輯器 ----------------
@@ -612,7 +582,7 @@
   function open(content, opts) {
     opts = opts || {};
     const host = opts.container;
-    if (!host) return { close: function () {}, discard: function () {} };
+    if (!host) return { close: function () {}, discard: function () {}, flush: function () { return Promise.resolve(); } };
     const payload = payloadOf(content);
     if (isLegacy(payload)) {
       return view(content, opts, '這張圖是用先前內嵌的 draw.io 畫的，現在的編輯器打不開那種格式。圖還在，只是不能在這裡編輯。');
@@ -628,12 +598,14 @@
     const gridId = 'dio-grid-' + (++seq);
 
     host.classList.add('dio-page');
-    host.innerHTML = topbar(opts, false) +
+    host.innerHTML =
       '<div class="dio-menubar">' +
       ['file:檔案', 'edit:編輯', 'view:檢視', 'arrange:調整'].map(function (m) {
         const p = m.split(':');
         return '<button class="dio-menu-btn" type="button" data-menu="' + p[0] + '">' + p[1] + '</button>';
       }).join('') +
+      // 存檔狀態放在選單列的右邊（draw.io 自己也是放這裡）
+      '<span class="dio-menubar-sp"></span><span class="dio-status" aria-live="polite"></span>' +
       '</div>' +
       '<div class="dio-toolbar">' +
       tb('zoomout', 'minus', '縮小') +
@@ -662,7 +634,6 @@
     function tb(act, icon, title) {
       return '<button class="dio-tb" type="button" data-act="' + act + '" title="' + title + '">' + ic(icon) + '</button>';
     }
-    wireTitle(host, opts, false);
 
     const canvas = host.querySelector('.dio-canvas');
     const stage = host.querySelector('.dio-stage');
@@ -997,8 +968,8 @@
       setTimeout(function () { a.remove(); URL.revokeObjectURL(url); }, 1000);
     }
     function fileBase() {
-      const t = host.querySelector('.dio-title');
-      return ((t && t.value.trim()) || opts.title || '圖表').replace(/[\\/:*?"<>|]+/g, '_');
+      const t = opts.getTitle ? opts.getTitle() : opts.title;
+      return (String(t || '').trim() || '圖表').replace(/[\\/:*?"<>|]+/g, '_');
     }
     function exportSVG() {
       const svg = renderSVG(model, { background: true });
@@ -1592,28 +1563,25 @@
     }
     function onResize() { if (!closed) render(); }
     window.addEventListener('resize', onResize);
-    host.querySelector('.dio-back').addEventListener('click', close);
-    const hist = host.querySelector('.dio-history');
-    if (hist) hist.addEventListener('click', function () {
+    // 把還沒送出的改動存掉，存完才回來：版本紀錄、PDF 都要看到現在畫面上這張
+    function flush() {
+      if (closed) return Promise.resolve();
       if (editing) commitEdit();
-      const go = function () { if (!closed) opts.onHistory(); };
-      if (!dirty) { go(); return; }
-      // 版本紀錄要看到現在畫面上這張：先把還沒存的送出去
+      if (!dirty) return Promise.resolve();
       clearTimeout(saveTimer);
       dirty = false;
       setStatus('儲存中…');
-      Promise.resolve(opts.onChange ? opts.onChange(wrap(serialize(model))) : null).then(function () {
-        if (!closed) setStatus('已儲存', 'is-ok');
-        go();
-      }, go);
-    });
+      return Promise.resolve(opts.onChange ? opts.onChange(wrap(serialize(model))) : null).then(function () {
+        if (!closed && !dirty) setStatus('已儲存', 'is-ok');
+      }, function () { if (!closed) setStatus('儲存失敗', 'is-err'); });
+    }
 
     renderFormat(); refreshToolbar();
     // 容器剛顯示出來時還沒有大小，等排版完再對位
     requestAnimationFrame(function () { if (!closed) { fit(); if (model.shapes.length || model.edges.length) setStatus('已儲存', 'is-ok'); } });
     setTimeout(function () { if (!closed) canvas.focus(); }, 30);
 
-    return { close: close, requestClose: close, discard: discard };
+    return { close: close, requestClose: close, discard: discard, flush: flush };
   }
 
   global.DrawIO = {
