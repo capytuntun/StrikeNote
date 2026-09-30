@@ -560,8 +560,10 @@
     // sentence is untouched, and the markup stays a plain `[[標題]]` in the
     // source, so nothing new has to be understood to read the raw note.
     paragraph: function (text) {
+      // 連結裡面不能再有 </a>：原本是貪婪的 [\s\S]*，一段「[[某篇]] 與 #標籤」會一路吃到
+      // 最後那個 </a>，整段被當成子頁面卡片
       const m = String(text).trim().match(
-        /^<a class="note-link( missing)?" href="#" (data-note-id|data-note-title)="([^"]*)"[^>]*>([\s\S]*)<\/a>$/);
+        /^<a class="note-link( missing)?" href="#" (data-note-id|data-note-title)="([^"]*)"[^>]*>((?:(?!<\/a>)[\s\S])*)<\/a>$/);
       if (!m) return '<p>' + text + '</p>\n';
       const missing = !!m[1];
       return '<a class="page-card note-link' + (missing ? ' missing' : '') + '" href="#" ' +

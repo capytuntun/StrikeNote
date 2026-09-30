@@ -281,6 +281,7 @@
       line('檔案', [['個新建', r.files.created], ['個更新', r.files.updated], ['個已存在', r.files.skipped], ['個 id 衝突', r.files.conflicts]]);
       line('分享', [['筆', r.shares.created]]);
       line('電子書', [['個版本', r.books.versions], ['個分享連結', r.books.links], ['個略過', r.books.skipped]]);
+      if (r.links) line('公開連結', [['個還原', r.links.created], ['個略過', r.links.skipped]]);
       let html = '<div class="bk-report-head">' + ic('check') + '<span>還原完成</span></div><dl class="bk-props">' + rows.join('') + '</dl>';
       if (r.settings) html += '<div class="bk-note">註冊方式與邀請碼也已套用備份裡的設定。</div>';
       if (r.shares.missingUsers.length) {

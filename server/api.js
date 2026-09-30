@@ -90,13 +90,20 @@ function shapeNote(row, perm, ownerName, viaSite) {
     access: row.access || 'restricted',          // owner's "general access" setting
     accessPerm: row.access_perm || 'read',
     viaSite: viaSite ? true : undefined,         // reached through site-wide access, not a share
-    area: row.area || undefined          // undefined = 一般, else 'course'|'knowledge'|'quick'|'novel'
+    area: row.area || undefined,         // undefined = 一般, else 'course'|'knowledge'|'quick'|'novel'
+    publicLink: row.public_link ? true : undefined   // 擁有者才有：這篇有還沒過期的公開連結
   };
 }
 
 // ---------------- notes ----------------
 async function listNotes(user) {
-  const own = (await q.notesOwned.all(user.id)).map(r => shapeNote(r, 'owner'));
+  // 有公開連結的筆記要在清單上標出來：那是「沒有帳號的人也看得到」，關掉對話框之後
+  // 沒有別的地方會提醒你哪幾篇是開著的
+  const open = new Set((await q.notesWithLinks.all(user.id, Date.now())).map(r => r.note_id));
+  const own = (await q.notesOwned.all(user.id)).map(r => {
+    if (open.has(r.id)) r.public_link = 1;
+    return shapeNote(r, 'owner');
+  });
   const shared = (await q.notesSharedWith.all(user.id)).map(r => shapeNote(r, r.share_perm, r.owner_name));
   const site = (await q.notesSiteWide.all(user.id, user.id)).map(r => shapeNote(r, r.share_perm, r.owner_name, true));
   // 'novel' rides along in this same list once unlocked, so the client's normal
@@ -113,6 +120,7 @@ async function getNote(user, id) {
   if (!canRead(perm)) return null;
   const owner = perm === 'owner' ? null : await q.userById.get(row.owner_id);
   const viaSite = perm !== 'owner' && !(await q.shareFor.get(row.id, user.id));
+  if (perm === 'owner' && (await q.noteHasLink.get(row.id, Date.now()))) row.public_link = 1;
   return shapeNote(row, perm, owner && owner.username, viaSite);
 }
 
@@ -576,6 +584,97 @@ async function deleteBookLink(user, token) {
   if (!row) return { status: 404, error: '找不到這個分享連結' };
   await q.deleteLink.run(row.token, user.id);
   return { ok: true };
+}
+
+// ---------------- 單篇筆記的公開連結 ----------------
+// 「分享給沒有帳號的人」。規則跟上面電子書的連結完全一樣，理由也一樣：給出去的是
+// 擁有者按下去那一刻的快照（一頁打包好的 HTML），不是筆記本身——token 換不到任何
+// API、看不到之後的修改、也改不了任何東西。只有唯讀，沒有「匿名也能編輯」：那等於把
+// 存檔的 API 開給任何拿到網址的人。
+//   * 只有筆記的擁有者能建立、更新、列出、取消。被分享的人（就算有編輯權）不行。
+//   * 小說區的筆記不能有公開連結（它連分享給站內的人都不行）。
+//   * 筆記進了垃圾桶，連結立刻打不開；還原回來連結也回來。永久刪除就連同連結一起刪。
+const NOTE_LINK_MAX = 10;       // 一篇筆記最多幾個連結（不同期限、給不同對象）
+
+function shapeNoteLink(row, note) {
+  return {
+    token: row.token,
+    noteId: row.note_id,
+    title: row.title,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    expiresAt: row.expires_at || null,
+    expired: !!(row.expires_at && row.expires_at < Date.now()),
+    views: row.views || 0,
+    chars: row.chars != null ? row.chars : (row.html ? row.html.length : 0),
+    noteRev: row.note_rev || 0,
+    // 筆記在建立／更新連結之後又改過：連結上看到的已經不是最新的
+    stale: !!(note && (note.rev || 0) > (row.note_rev || 0))
+  };
+}
+// 這篇筆記能不能由這個人開公開連結：是他的、沒被刪、不是小說
+async function linkableNote(user, noteId) {
+  const row = await q.noteById.get(String(noteId));
+  if (!row || row.owner_id !== user.id || row.deleted_at) return { status: 404 };
+  if (row.area === 'novel') return { status: 400, error: '小說區的筆記不能建立公開連結' };
+  return { note: row };
+}
+function linkHtml(body, what) {
+  const html = String((body && body.html) || '');
+  if (!html) return { status: 400, error: '沒有收到筆記的內容' };
+  if (html.length > LINK_MAX_HTML) return { status: 413, error: '這篇筆記太大（超過 40 MB），無法' + what };
+  return { html: html };
+}
+async function listNoteLinks(user, noteId) {
+  const n = await linkableNote(user, noteId);
+  if (!n.note) return n;
+  return { links: (await q.noteLinkList.all(n.note.id, user.id)).map(r => shapeNoteLink(r, n.note)) };
+}
+async function createNoteLink(user, noteId, body) {
+  const n = await linkableNote(user, noteId);
+  if (!n.note) return n;
+  const h = linkHtml(body, '建立公開連結');
+  if (!h.html) return h;
+  if ((await q.countNoteLinks.get(n.note.id)).n >= NOTE_LINK_MAX) {
+    return { status: 400, error: '一篇筆記最多 ' + NOTE_LINK_MAX + ' 個公開連結，先取消用不到的' };
+  }
+  const now = Date.now();
+  const token = linkToken();
+  // rev 由前端帶上來（它打包的是第幾版），但不能比筆記現在的版本還新
+  const rev = Math.min(parseInt(body && body.rev, 10) || 0, n.note.rev || 0);
+  await q.insertNoteLink.run(token, n.note.id, user.id,
+    String((body && body.title) || n.note.title || '未命名筆記').slice(0, 200),
+    h.html, rev, now, now, expiryFrom(body && body.expiresDays));
+  return { link: shapeNoteLink(await q.noteLinkOwned.get(token, user.id), n.note) };
+}
+async function updateNoteLink(user, token, body) {
+  const row = await q.noteLinkOwned.get(String(token), user.id);
+  if (!row) return { status: 404, error: '找不到這個公開連結' };
+  const n = await linkableNote(user, row.note_id);
+  if (!n.note) return n;
+  const h = linkHtml(body, '更新公開連結');
+  if (!h.html) return h;
+  const expires = (body && body.expiresDays !== undefined)
+    ? expiryFrom(body.expiresDays) : (row.expires_at || null);
+  const rev = Math.min(parseInt(body && body.rev, 10) || 0, n.note.rev || 0);
+  await q.updateNoteLink.run(String((body && body.title) || row.title).slice(0, 200), h.html,
+    rev, Date.now(), expires, row.token);
+  return { link: shapeNoteLink(await q.noteLinkOwned.get(row.token, user.id), n.note) };
+}
+async function deleteNoteLink(user, token) {
+  const row = await q.noteLinkOwned.get(String(token), user.id);
+  if (!row) return { status: 404, error: '找不到這個公開連結' };
+  await q.deleteNoteLink.run(row.token, user.id);
+  return { ok: true };
+}
+// 公開頁（server.js 的 /s/<token>）。沒有 session，所以這裡只看 token 與筆記的狀態。
+async function publicNote(token) {
+  if (!/^[0-9a-f]{64}$/.test(String(token || ''))) return null;
+  const row = await q.noteLinkPublic.get(String(token));
+  if (!row || row.note_deleted || row.note_area === 'novel') return null;
+  if (row.expires_at && row.expires_at < Date.now()) return { expired: true };
+  try { await q.bumpNoteLinkViews.run(row.token); } catch (e) { /* ignore */ }
+  return { html: row.html, title: row.title };
 }
 
 // Called with no session at all. Returns the stored file, or null.
@@ -1252,7 +1351,9 @@ async function adminStorage() {
   const versions = await q.versionBytes.get();
   // Each share link stores a whole packed book, images and all, so these are the
   // single largest rows in the database and have to be visible in the panel.
-  const links = await q.linkBytes.get();
+  const bookLinks = await q.linkBytes.get();
+  const noteLinks = await q.noteLinkBytes.get();   // 單篇筆記的公開連結也是一整頁打包好的 HTML
+  const links = { n: Number(bookLinks.n) + Number(noteLinks.n), bytes: Number(bookLinks.bytes) + Number(noteLinks.bytes) };
   const s = storageSummary();
   return {
     dataDir: dbmod.datadir || '',
@@ -1281,6 +1382,7 @@ module.exports = {
   listBookVersions, createBookVersion, getBookVersion, getBookVersionChapter,
   restoreBookVersion, deleteBookVersion,
   listBookLinks, createBookLink, updateBookLink, deleteBookLink, publicBook,
+  listNoteLinks, createNoteLink, updateNoteLink, deleteNoteLink, publicNote,
   listFolders, createFolder, updateFolder, deleteFolder,
   listFileFolders, createFileFolder, updateFileFolder, deleteFileFolder,
   createImage, getImage, saveImage, updateFile, deleteImage, listImages, saveOrder,

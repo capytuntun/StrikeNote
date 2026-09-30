@@ -1013,6 +1013,7 @@
   function closeDrawioView() {
     if (toolBar) {
       toolBar.commitTitle();   // 標題打到一半就切走：先存
+      flushPublish(toolBar.id);
       toolBar = null;
       const app = document.getElementById('app');
       if (app) app.classList.remove('tool-open');
@@ -1034,7 +1035,9 @@
   // close()，它會把還沒送出的改動 flush 掉再拆 DOM。
   const relmapWrapEl = $('#relmap-wrap');
   let relmapView = null;
+  let relmapNoteId = null;   // 開著的關聯分析筆記（離開時要把公開連結更新掉）
   function closeRelMapView() {
+    if (relmapNoteId) { const id = relmapNoteId; relmapNoteId = null; setTimeout(function () { flushPublish(id); }, 0); }
     if (relmapView) { const v = relmapView; relmapView = null; v.close(); }
     if (relmapWrapEl) relmapWrapEl.hidden = true;
   }
@@ -2230,6 +2233,7 @@
   // 編輯器（跟資安院報告／成效報告一開筆記就是專用編輯器同一個道理），每次改動自動
   // 存檔，「返回」回首頁。標題在頁面頂列直接改。
   function openRelMapNote(note) {
+    relmapNoteId = note.id;
     if (!relmapWrapEl) return;
     showRelMapPage();
     setTreeArea(isMine(note) ? (note.area || null) : null);
@@ -2261,7 +2265,7 @@
       saving = true;
       const n = live();
       Store.updateNote({ id: n.id, title: n.title, content: n.content, folderId: n.folderId, meta: n.meta })
-        .then(syncState, function (e) { toast('儲存失敗：' + (e && e.message || e)); })
+        .then(function (r) { syncState(r); noteSaved(live()); }, function (e) { toast('儲存失敗：' + (e && e.message || e)); })
         .then(function () {
           saving = false;
           if (again) { again = false; flushSave(); }
@@ -2326,6 +2330,7 @@
             syncState(r);
             // 別篇筆記嵌了這張圖的話，下次渲染要拿新的
             if (MD.invalidateRelNote) MD.invalidateRelNote(note.id);
+            noteSaved(live());
           })
           .then(function () { if (again) { again = false; return run(); } });
       };
@@ -2561,7 +2566,66 @@
   // are the common ancestor every merge is measured against.
   let noteStream = null;   // closer fn for the current note's event stream
 
+  // ---- 公開連結的自動更新 -------------------------------------------------
+  // 連結上是一頁打包好的 HTML（server/api.js 的 note_links），筆記改了它不會自己變。
+  // 有公開連結的筆記（note.publicLink：伺服器在清單與單篇讀取時標的）每次存檔成功之後排一次
+  // 重新打包——停手 PUBLISH_DELAY 之後做，切到別篇時馬上做。打包會把每張圖內嵌成 data URL、
+  // 整頁送上去，所以不是每個字做一次，是一段編輯做一次。同一篇同時只有一次在跑，跑的時候
+  // 又有新存檔就記下來，跑完再來一次（跟存檔的 _saveAgain 同一個規則）。
+  const PUBLISH_DELAY = 8000;
+  const publishTimers = {};    // noteId -> timer
+  const publishing = {};       // noteId -> true | 'again'
+  function liveNote(id) {
+    if (state.current && state.current.id === id) return state.current;
+    return state.notes.find(function (x) { return x.id === id; }) || null;
+  }
+  function noteSaved(n) {
+    if (!n || !n.publicLink || !isMine(n)) return;
+    clearTimeout(publishTimers[n.id]);
+    publishTimers[n.id] = setTimeout(function () { republish(n.id); }, PUBLISH_DELAY);
+  }
+  function flushPublish(id) {
+    if (!id || !publishTimers[id]) return;
+    clearTimeout(publishTimers[id]);
+    delete publishTimers[id];
+    republish(id);
+  }
+  function republish(id) {
+    delete publishTimers[id];
+    if (publishing[id]) { publishing[id] = 'again'; return; }
+    const n = liveNote(id);
+    if (!n || !window.Book || !Book.renderNoteStandalone) return;
+    publishing[id] = true;
+    Store.getNoteLinks(id).then(function (links) {
+      const alive = links.filter(function (l) { return !l.expired; });
+      if (!alive.length) { markPublic(id, false); return; }
+      const rev = Math.max(n.rev || 0, n._syncRev || 0);
+      return Book.renderNoteStandalone(n).then(function (html) {
+        let p = Promise.resolve();
+        alive.forEach(function (l) {
+          p = p.then(function () { return Store.updateNoteLink(l.token, { title: n.title || '未命名筆記', html: html, rev: rev }); });
+        });
+        return p;
+      });
+    }).catch(function (e) {
+      console.warn('[公開連結] 自動更新失敗：' + (e && e.message || e));
+    }).then(function () {
+      const again = publishing[id] === 'again';
+      delete publishing[id];
+      if (again) republish(id);
+    });
+  }
+  // 清單上「有公開連結」的標記跟著對話框裡的動作走，不用等下一次重新載入
+  function markPublic(id, on) {
+    let changed = false;
+    [liveNote(id), state.notes.find(function (x) { return x.id === id; })].forEach(function (n) {
+      if (n && !!n.publicLink !== !!on) { n.publicLink = on || undefined; changed = true; }
+    });
+    if (changed) refreshViews();
+  }
+
   function closeStream() {
+    flushPublish(state.currentId);   // 離開這篇：還沒更新到公開連結的改動現在送
     if (noteStream) { noteStream(); noteStream = null; }
     renderPresence([]);
     clearRemoteCarets();
@@ -2927,6 +2991,7 @@
         cur._syncRev = saved.rev;
         if (!cur._saveAgain) cur.content = saved.content;
       }
+      noteSaved(cur);   // 有公開連結的話，停手之後把新內容更新上去
       afterSave(cur);
     }).catch(function (e) {
       cur._saving = null;
@@ -3767,6 +3832,13 @@
       '<div class="share-section-title">一般存取權</div>' +
       generalAccessHTML(radioName) +
       '<div class="share-mixed" hidden></div>' +
+      // 沒有帳號的人：公開連結（小說區的筆記沒有這一段——它連站內都不能分享）
+      (single && isMine(note) && note.area !== 'novel' ?
+        '<div class="share-section-title">公開連結（沒有帳號也能看）</div>' +
+        '<div class="share-public">' +
+        '<div class="share-public-text"><span class="share-public-ic">' + Icons.svg('link') + '</span><span class="share-public-msg">讀取中…</span></div>' +
+        '<button class="btn share-public-btn" type="button">' + Icons.svg('external-link') + '<span>管理公開連結…</span></button>' +
+        '</div>' : '') +
       (single && extras.length ?
         '<label class="share-batch">' +
         '<input type="checkbox" class="share-batch-cb">' +
@@ -3962,6 +4034,33 @@
       });
       modal.querySelector('.share-link-btn').addEventListener('click', function () { copyNoteLink(note); });
     }
+    // ---- 公開連結 ----
+    const pubMsg = modal.querySelector('.share-public-msg');
+    const pubBtn = modal.querySelector('.share-public-btn');
+    function paintPublic() {
+      if (!pubMsg) return;
+      Store.getNoteLinks(note.id).then(function (links) {
+        const alive = links.filter(function (l) { return !l.expired; });
+        markPublic(note.id, alive.length > 0);
+        if (!alive.length) { pubMsg.textContent = '目前沒有公開連結。建立一個之後，任何拿到網址的人不用帳號就能讀這篇筆記（唯讀）。'; return; }
+        const stale = alive.some(function (l) { return l.stale; });
+        pubMsg.textContent = '有 ' + alive.length + ' 個公開連結，任何拿到網址的人都看得到這篇筆記。' +
+          (stale ? '筆記在那之後改過，連結上還是舊的內容。' : '');
+        modal.querySelector('.share-public').classList.toggle('is-stale', stale);
+      }).catch(function (e) { pubMsg.textContent = '公開連結讀取失敗：' + (e && e.message || e); });
+    }
+    if (pubBtn) pubBtn.addEventListener('click', function () {
+      if (!window.Versions || !Versions.openNoteLinks) return;
+      Versions.openNoteLinks(note, {
+        // 打包用手上最新的那一份：編輯器裡剛打的字先存下去
+        note: function () {
+          if (state.current && state.current.id === note.id) saveNow();
+          return liveNote(note.id) || note;
+        },
+        onChange: paintPublic
+      });
+    });
+    paintPublic();
 
     function close() { overlay.remove(); document.removeEventListener('keydown', onKey, true); }
     function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }

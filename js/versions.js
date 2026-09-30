@@ -544,10 +544,17 @@
     }
   }
 
-  function openBookLinks(book, opts) {
-    const o = opts || {};
-    const folderId = book.folder && book.folder.id;
-    const ui = shell('分享電子書 — ' + (book.title || '未命名'), 'link');
+  // 公開連結的對話框，電子書與單篇筆記共用。cfg：
+  //   heading／warn／empty  文字
+  //   list()                 → Promise<links>
+  //   pack()                 → Promise<html>（打包現在的內容）
+  //   create(html, days)     → Promise<link>
+  //   update(lk, html)       → Promise<link>
+  //   remove(lk)             → Promise
+  //   bits(lk)               → 一列下面那行灰字的前幾段
+  //   onChange()             建立／更新／取消之後叫一下（外面的清單要重畫）
+  function openLinks(cfg) {
+    const ui = shell(cfg.heading, 'link');
     ui.modal.classList.add('share-modal');
     // This dialog stacks vertically rather than using the two-column history
     // layout, so it swaps out the shell's body instead of filling it.
@@ -557,9 +564,7 @@
     const warn = el('div', 'share-warn');
     warn.appendChild(el('span', 'share-warn-ic', ''));
     warn.querySelector('.share-warn-ic').innerHTML = icon('alert-triangle');
-    warn.appendChild(el('span', null,
-      '任何拿到連結的人都不需要帳號就能讀到這本書的全部內容。連結給出去的是「當下的快照」，' +
-      '之後修改筆記不會影響已經分享出去的內容，除非你按下「更新內容」。'));
+    warn.appendChild(el('span', null, cfg.warn));
     body.appendChild(warn);
 
     const list = el('div', 'share-list');
@@ -592,7 +597,7 @@
     function reload() {
       list.innerHTML = '';
       list.appendChild(el('div', 'ver-empty', '載入中…'));
-      return Store.getBookLinks(folderId).then(paint).catch(function (e) {
+      return cfg.list().then(paint).catch(function (e) {
         list.innerHTML = '';
         list.appendChild(el('div', 'ver-empty', '讀取失敗：' + e.message));
       });
@@ -601,12 +606,11 @@
     function paint(links) {
       list.innerHTML = '';
       if (!links.length) {
-        list.appendChild(el('div', 'ver-empty',
-          '這本書還沒有公開連結。建立之後，任何拿到網址的人都能直接閱讀。'));
+        list.appendChild(el('div', 'ver-empty', cfg.empty));
         return;
       }
       links.forEach(function (lk) {
-        const row = el('div', 'share-row' + (lk.expired ? ' is-expired' : ''));
+        const row = el('div', 'share-row' + (lk.expired ? ' is-expired' : '') + (lk.stale ? ' is-stale' : ''));
 
         const urlRow = el('div', 'share-urlrow');
         const field = document.createElement('input');
@@ -630,16 +634,23 @@
         urlRow.appendChild(openBtn);
         row.appendChild(urlRow);
 
-        const bits = [lk.chapters + ' 章', '建立於 ' + when(lk.createdAt)];
+        const bits = (cfg.bits ? cfg.bits(lk) : []).concat(['建立於 ' + when(lk.createdAt)]);
         if (lk.updatedAt && lk.updatedAt !== lk.createdAt) bits.push('內容更新於 ' + when(lk.updatedAt));
         bits.push(lk.expiresAt ? (lk.expired ? '已過期' : when(lk.expiresAt) + ' 失效') : '不設期限');
         bits.push(lk.views + ' 次開啟');
         row.appendChild(el('div', 'share-meta', bits.join(' · ')));
+        // 筆記在建立／更新連結之後又改過：連結上看到的還是舊的（單篇筆記才有這個判斷）
+        if (lk.stale) {
+          const st = el('div', 'share-stale');
+          st.innerHTML = icon('alert-triangle');
+          st.appendChild(el('span', null, '筆記在那之後改過，連結上看到的還是舊的內容——按「更新內容」。'));
+          row.appendChild(st);
+        }
 
         const acts = el('div', 'share-acts');
         const refresh = el('button', 'btn btn-ghost');
         refresh.type = 'button';
-        refresh.title = '把這本書現在的內容重新打包到同一個網址';
+        refresh.title = '把現在的內容重新打包到同一個網址';
         refresh.innerHTML = icon('rotate-ccw');
         refresh.appendChild(el('span', null, '更新內容'));
         refresh.addEventListener('click', function () { refreshLink(lk, refresh); });
@@ -656,29 +667,18 @@
       });
     }
 
-    // Packing the book takes a moment (every image is inlined), so both paths
-    // say so rather than looking frozen.
-    function pack() {
-      if (!global.Book || !Book.renderStandalone) {
-        return Promise.reject(new Error('請先開啟這本電子書'));
-      }
-      return Book.renderStandalone();
-    }
+    // Packing takes a moment (every image is inlined), so both paths say so
+    // rather than looking frozen.
+    function changed() { if (cfg.onChange) { try { cfg.onChange(); } catch (e) { /* ignore */ } } }
 
     function create() {
       busy(make, true, '打包中…');
-      pack()
-        .then(function (html) {
-          return Store.createBookLink(folderId, {
-            title: book.title || '未命名電子書',
-            html: html,
-            chapters: book.chapters.length,
-            expiresDays: Number(sel.value) || 0
-          });
-        })
+      cfg.pack()
+        .then(function (html) { return cfg.create(html, Number(sel.value) || 0); })
         .then(function (lk) {
           copyText(shareUrl(lk.token));
-          toast('已建立分享連結，網址已複製');
+          toast('已建立公開連結，網址已複製');
+          changed();
           return reload();
         })
         .catch(function (e) { toast('建立失敗：' + e.message); })
@@ -687,15 +687,9 @@
 
     function refreshLink(lk, btn) {
       busy(btn, true, '打包中…');
-      pack()
-        .then(function (html) {
-          return Store.updateBookLink(lk.token, {
-            title: book.title || '未命名電子書',
-            html: html,
-            chapters: book.chapters.length
-          });
-        })
-        .then(function () { toast('已更新這個連結的內容'); return reload(); })
+      cfg.pack()
+        .then(function (html) { return cfg.update(lk, html); })
+        .then(function () { toast('已更新這個連結的內容'); changed(); return reload(); })
         .catch(function (e) { toast('更新失敗：' + e.message); })
         .then(function () { busy(btn, false); });
     }
@@ -705,8 +699,9 @@
         '取消後這個網址會立刻失效，已經拿到連結的人也再也打不開。要繼續嗎？')
         .then(function (yes) {
           if (!yes) return;
-          return Store.deleteBookLink(lk.token).then(function () {
+          return cfg.remove(lk).then(function () {
             toast('已取消分享');
+            changed();
             return reload();
           });
         })
@@ -717,7 +712,61 @@
     return ui;
   }
 
+  function openBookLinks(book, opts) {
+    const o = opts || {};
+    const folderId = book.folder && book.folder.id;
+    return openLinks({
+      heading: '分享電子書 — ' + (book.title || '未命名'),
+      warn: '任何拿到連結的人都不需要帳號就能讀到這本書的全部內容。連結給出去的是「當下的快照」，' +
+        '之後修改筆記不會影響已經分享出去的內容，除非你按下「更新內容」。',
+      empty: '這本書還沒有公開連結。建立之後，任何拿到網址的人都能直接閱讀。',
+      bits: function (lk) { return [lk.chapters + ' 章']; },
+      list: function () { return Store.getBookLinks(folderId); },
+      pack: function () {
+        if (!global.Book || !Book.renderStandalone) return Promise.reject(new Error('請先開啟這本電子書'));
+        return Book.renderStandalone();
+      },
+      create: function (html, days) {
+        return Store.createBookLink(folderId, { title: book.title || '未命名電子書', html: html, chapters: book.chapters.length, expiresDays: days });
+      },
+      update: function (lk, html) {
+        return Store.updateBookLink(lk.token, { title: book.title || '未命名電子書', html: html, chapters: book.chapters.length });
+      },
+      remove: function (lk) { return Store.deleteBookLink(lk.token); },
+      onChange: o.onChange
+    });
+  }
+
+  // 單篇筆記的公開連結（分享對話框 → 公開連結）。note 由 app.js 給，pack 也由它給——
+  // 標題跟內容以它手上最新的為準（編輯器裡剛打的字可能還沒存）。
+  function openNoteLinks(note, opts) {
+    const o = opts || {};
+    const live = function () { return (o.note ? o.note() : null) || note; };
+    return openLinks({
+      heading: '公開連結 — ' + (note.title || '未命名筆記'),
+      warn: '任何拿到連結的人都不需要帳號就能讀到這篇筆記（唯讀）。連結上是建立或更新當下的內容；' +
+        '你之後改了筆記，停手幾秒後會自動更新到連結上，也可以隨時按「更新內容」。取消分享後網址立刻失效。',
+      empty: '這篇筆記還沒有公開連結。建立之後，任何拿到網址的人不用帳號就能直接閱讀。',
+      list: function () { return Store.getNoteLinks(note.id); },
+      pack: function () {
+        if (!global.Book || !Book.renderNoteStandalone) return Promise.reject(new Error('打包功能還沒載入'));
+        return Book.renderNoteStandalone(live());
+      },
+      create: function (html, days) {
+        const n = live();
+        return Store.createNoteLink(note.id, { title: n.title || '未命名筆記', html: html, rev: n.rev || 0, expiresDays: days });
+      },
+      update: function (lk, html) {
+        const n = live();
+        return Store.updateNoteLink(lk.token, { title: n.title || '未命名筆記', html: html, rev: n.rev || 0 });
+      },
+      remove: function (lk) { return Store.deleteNoteLink(lk.token); },
+      onChange: o.onChange
+    });
+  }
+
   global.Versions = {
+    openNoteLinks: openNoteLinks,
     openNote: openNote,
     openBook: openBook,
     openBookLinks: openBookLinks,

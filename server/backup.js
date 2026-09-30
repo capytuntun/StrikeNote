@@ -101,6 +101,7 @@ async function exportZip(user, scope, req, res) {
   const imageIds = (site ? await q.imageIdsAll.all() : await q.imageIdsOf.all(user.id)).map(r => r.id);
   const bookVersions = site ? await q.bookVersionsAll.all() : await q.bookVersionsOf.all(user.id);
   const links = site ? await q.linksAll.all() : await q.linksOf.all(user.id);
+  const noteLinks = site ? await q.noteLinksAll.all() : await q.noteLinksOf.all(user.id);
 
   res.writeHead(200, {
     'Content-Type': 'application/zip',
@@ -120,7 +121,7 @@ async function exportZip(user, scope, req, res) {
     format: FORMAT, version: FORMAT_VERSION, scope: scope,
     exportedAt: now, exportedBy: user.username,
     counts: { users: site ? users.length : 1, folders: folders.length, notes: noteIds.length, files: imageIds.length,
-      bookVersions: bookVersions.length, bookLinks: links.length }
+      bookVersions: bookVersions.length, bookLinks: links.length, noteLinks: noteLinks.length }
   });
   await addText('README.txt',
     'StrikeNote 備份（' + (site ? '整個站台' : user.username + ' 的資料') + '，' + new Date(now).toLocaleString('zh-TW') + '）\n\n' +
@@ -252,6 +253,20 @@ async function exportZip(user, scope, req, res) {
     });
   }
   await addJson('books.json', bookIndex);
+
+  // 單篇筆記的公開連結：一樣是一整頁打包好的 HTML，一個 token 一個檔
+  const linkIndex = [];
+  for (const l of noteLinks) {
+    if (res.destroyed) return;
+    const file = 'links/' + l.token + '.html';
+    await zip.add(file, Buffer.from(l.html || '', 'utf8'), { level: 1, mtime: Number(l.updated_at) || now });
+    linkIndex.push({
+      token: l.token, noteId: l.note_id, owner: nameOf.get(l.owner_id) || null, title: l.title,
+      noteRev: Number(l.note_rev || 0), createdAt: Number(l.created_at), updatedAt: Number(l.updated_at),
+      expiresAt: l.expires_at ? Number(l.expires_at) : null, views: Number(l.views || 0), file: file
+    });
+  }
+  await addJson('links.json', linkIndex);
 
   if (site) {
     await addJson('users.json', users.map(u => ({
@@ -425,6 +440,7 @@ async function runRestore(job, user, up, opts) {
     const files = list(readJson('files.json', []));
     const books = readJson('books.json', {}) || {};
     const bookVersions = list(books.versions), bookLinks = list(books.links);
+    const noteLinks = list(readJson('links.json', []));
     const users = site ? list(readJson('users.json', [])) : [];
     const savedSettings = site ? (readJson('settings.json', null) || null) : null;
 
@@ -438,6 +454,7 @@ async function runRestore(job, user, up, opts) {
       versions: { created: 0 },
       shares: { created: 0, missingUsers: [] },
       books: { versions: 0, links: 0, skipped: 0 },
+      links: { created: 0, skipped: 0 },     // 單篇筆記的公開連結
       warnings: []
     };
     const warn = (msg) => { if (report.warnings.length < 200) report.warnings.push(msg); };
@@ -695,6 +712,20 @@ async function runRestore(job, user, up, opts) {
       await q.insertLink.run(l.token, l.folderId, owner, String(l.title || ''), html, Number(l.chapters) || 0,
         Number(l.createdAt) || Date.now(), Number(l.updatedAt) || Date.now(), l.expiresAt ? Number(l.expiresAt) : null);
       report.books.links++;
+    }
+    // 單篇筆記的公開連結：筆記要在（剛還原的或本來就有的，而且是這個人的），token 沒被用過
+    for (const l of noteLinks) {
+      tick();
+      const owner = resolveOwner(l.owner);
+      if (!owner || !idOk(l.noteId) || !/^[0-9a-f]{64}$/.test(String(l.token || ''))) { report.links.skipped++; continue; }
+      const note = await q.noteById.get(l.noteId);
+      if (!note || note.owner_id !== owner) { report.links.skipped++; continue; }
+      if (await q.noteLinkPublic.get(l.token)) { report.links.skipped++; continue; }
+      const html = l.file ? readText(l.file) : null;
+      if (html == null) { report.links.skipped++; warn('備份裡缺少公開連結的內容：' + l.token.slice(0, 8) + '…'); continue; }
+      await q.insertNoteLink.run(l.token, l.noteId, owner, String(l.title || ''), html, Number(l.noteRev) || 0,
+        Number(l.createdAt) || Date.now(), Number(l.updatedAt) || Date.now(), l.expiresAt ? Number(l.expiresAt) : null);
+      report.links.created++;
     }
 
     job.phase = '完成';

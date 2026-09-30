@@ -579,6 +579,12 @@
       g.title = '網站內所有人可以' + (note.accessPerm === 'edit' ? '編輯' : '檢視');
       row.appendChild(g);
     }
+    // 有公開連結（沒有帳號的人也看得到）的筆記同理要標出來
+    if (note.publicLink) {
+      const g = el('span', 'dash-row-shared dash-row-public', ic('link'));
+      g.title = '有公開連結：拿到網址的人不用帳號就看得到';
+      row.appendChild(g);
+    }
     const meta = el('span', 'dash-row-meta');
     if (k.label) meta.appendChild(el('span', 'dash-row-kind ' + k.cls, k.label));
     meta.appendChild(el('span', 'dash-row-time', esc(relTime(note.updatedAt))));

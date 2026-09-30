@@ -278,6 +278,27 @@ const SCHEMA = [
     CONSTRAINT fk_book_links_owner FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+  // 單篇筆記的公開連結（/s/<token>，沒有帳號也能看）。跟上面電子書的連結同一套規則：
+  // 存的是擁有者按下「建立／更新內容」那一刻打包好的整頁 HTML，不是即時的筆記——拿到
+  // token 的人只拿得到那一頁，碰不到 API，也看不到之後的修改。note_rev 記下快照是筆記的
+  // 第幾版，介面上才說得出「筆記在那之後改過」。筆記被永久刪除，連結跟著消失（FK）。
+  `CREATE TABLE IF NOT EXISTS note_links (
+    token      VARCHAR(64) COLLATE utf8mb4_bin NOT NULL PRIMARY KEY,
+    note_id    VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
+    owner_id   INT NOT NULL,
+    title      TEXT NOT NULL,
+    html       LONGTEXT NOT NULL,
+    note_rev   INT NOT NULL DEFAULT 0,
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL,
+    expires_at BIGINT NULL,
+    views      INT NOT NULL DEFAULT 0,
+    KEY idx_note_links_note (note_id),
+    KEY idx_note_links_owner (owner_id),
+    CONSTRAINT fk_note_links_owner FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_note_links_note FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
   // 管理員在介面上改的站台設定（server/settings.js）：註冊方式、邀請碼。一列一個鍵。
   `CREATE TABLE IF NOT EXISTS settings (
     k          VARCHAR(64) COLLATE utf8mb4_bin NOT NULL PRIMARY KEY,
@@ -556,6 +577,35 @@ const q = {
   bumpLinkViews: stmt('UPDATE book_links SET views = views + 1 WHERE token = ?'),
   linkBytes: stmt(
     'SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(html)), 0) AS bytes FROM book_links'),
+
+  // 單篇筆記的公開連結（api.js 的 listNoteLinks 那一組）
+  noteLinkList: stmt(`
+    SELECT token, note_id, title, note_rev, created_at, updated_at, expires_at, views,
+           CHAR_LENGTH(html) AS chars
+    FROM note_links WHERE note_id = ? AND owner_id = ? ORDER BY created_at DESC`),
+  noteLinkOwned: stmt('SELECT * FROM note_links WHERE token = ? AND owner_id = ?'),
+  // 公開頁：連同筆記現在的狀態一起拿——進了垃圾桶或是小說區的筆記，連結就當作不存在
+  noteLinkPublic: stmt(`
+    SELECT l.token, l.title, l.html, l.expires_at, n.deleted_at AS note_deleted, n.area AS note_area
+    FROM note_links l JOIN notes n ON n.id = l.note_id WHERE l.token = ?`),
+  insertNoteLink: stmt(`
+    INSERT INTO note_links (token, note_id, owner_id, title, html, note_rev,
+                            created_at, updated_at, expires_at, views)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`),
+  updateNoteLink: stmt(
+    'UPDATE note_links SET title = ?, html = ?, note_rev = ?, updated_at = ?, expires_at = ? WHERE token = ?'),
+  deleteNoteLink: stmt('DELETE FROM note_links WHERE token = ? AND owner_id = ?'),
+  bumpNoteLinkViews: stmt('UPDATE note_links SET views = views + 1 WHERE token = ?'),
+  countNoteLinks: stmt('SELECT COUNT(*) AS n FROM note_links WHERE note_id = ?'),
+  // 哪些筆記現在有還沒過期的公開連結（清單上要標出來）
+  notesWithLinks: stmt(
+    'SELECT DISTINCT note_id FROM note_links WHERE owner_id = ? AND (expires_at IS NULL OR expires_at > ?)'),
+  noteHasLink: stmt(
+    'SELECT 1 AS ok FROM note_links WHERE note_id = ? AND (expires_at IS NULL OR expires_at > ?) LIMIT 1'),
+  noteLinkBytes: stmt(
+    'SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(html)), 0) AS bytes FROM note_links'),
+  noteLinksOf: stmt('SELECT * FROM note_links WHERE owner_id = ? ORDER BY created_at'),
+  noteLinksAll: stmt('SELECT * FROM note_links ORDER BY created_at'),
 
   // images
   imageById: stmt('SELECT * FROM images WHERE id = ?'),

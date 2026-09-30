@@ -333,38 +333,7 @@
     let p = Promise.resolve();
     book.chapters.forEach(function (ch) {
       p = p.then(function () {
-        work.innerHTML = MD.render(ch.note.content || '');
-        if (ch.note.meta) MD.applyColWidths(work, ch.note.meta.tableWidths);
-        // 附件 PDF 無法打包進單檔：換成一行說明
-        work.querySelectorAll('.pdf-embed').forEach(function (n) {
-          const name = (n.querySelector('.pdf-embed-name') || {}).textContent || 'PDF';
-          const note = document.createElement('p');
-          note.className = 'book-attachment-note';
-          note.textContent = '（附件「' + name + '」未包含在出版檔中）';
-          n.replaceWith(note);
-        });
-        // 附件連結（[名稱](file:…)、[名稱](pdf:…)）在出版檔裡也點不開：只留名稱
-        work.querySelectorAll('.file-chip').forEach(function (n) {
-          const name = (n.querySelector('.file-chip-name') || {}).textContent || '附件';
-          const span = document.createElement('span');
-          span.className = 'book-attachment-inline';
-          span.textContent = '（附件「' + name + '」未包含在出版檔中）';
-          n.replaceWith(span);
-        });
-        work.querySelectorAll('.img-tools, .code-copy, .mm-edit-btn, .mm-hint').forEach(function (n) { n.remove(); });
-        // 嵌入的關聯分析：出版檔沒有 relmap.js，拖曳縮放不會動，所以拿掉工具列並標成
-        // is-static（把螢幕上那個固定高度的取景框放開，整張圖直接攤平顯示）。
-        work.querySelectorAll('.relmap-embed').forEach(function (n) {
-          n.classList.add('is-static');
-          const bar = n.querySelector('.relmap-embed-bar');
-          if (bar) bar.remove();
-        });
-        // 嵌入的 drawio 圖表：出版檔裡沒有編輯器，「編輯」那一列拿掉，只留圖
-        work.querySelectorAll('.drawio-embed-bar').forEach(function (n) { n.remove(); });
-        // 出版檔沒有編輯器可以回寫，勾選框只是一份紀錄——留著勾選狀態，但不讓讀者
-        // 以為自己改得動它。
-        work.querySelectorAll('.task-check').forEach(function (n) { n.disabled = true; });
-        return MD.inlineImagesAsDataURL(work).then(function () {
+        return renderForExport(work, ch.note, '出版檔').then(function () {
           const path = chapterPath(ch, folders, cur.opts.folderId);
           outlines.push(outlineHTML(work));
           chaptersHTML.push(
@@ -384,6 +353,119 @@
       .then(function (r) {
         return buildStandalone(book, chaptersHTML, outlines, r[1], r[2], r[3]);
       });
+  }
+
+  // 把一篇筆記渲染到 work 裡，收拾成「離開這個網站也能看」的樣子：附件換成一行說明、
+  // 編輯器的按鈕拿掉、圖片內嵌成 data URL。電子書的每一章跟單篇筆記的公開頁都走這裡。
+  // where：說明文字裡的「出版檔」／「分享頁」。
+  function renderForExport(work, note, where) {
+    work.innerHTML = MD.render(note.content || '');
+    if (note.meta) MD.applyColWidths(work, note.meta.tableWidths);
+    // 附件 PDF 無法打包進單檔：換成一行說明
+    work.querySelectorAll('.pdf-embed').forEach(function (n) {
+      const name = (n.querySelector('.pdf-embed-name') || {}).textContent || 'PDF';
+      const p = document.createElement('p');
+      p.className = 'book-attachment-note';
+      p.textContent = '（附件「' + name + '」未包含在' + where + '中）';
+      n.replaceWith(p);
+    });
+    // 附件連結（[名稱](file:…)、[名稱](pdf:…)）在出版檔裡也點不開：只留名稱
+    work.querySelectorAll('.file-chip').forEach(function (n) {
+      const name = (n.querySelector('.file-chip-name') || {}).textContent || '附件';
+      const span = document.createElement('span');
+      span.className = 'book-attachment-inline';
+      span.textContent = '（附件「' + name + '」未包含在' + where + '中）';
+      n.replaceWith(span);
+    });
+    work.querySelectorAll('.img-tools, .code-copy, .mm-edit-btn, .mm-hint').forEach(function (n) { n.remove(); });
+    // 嵌入的關聯分析：出版檔沒有 relmap.js，拖曳縮放不會動，所以拿掉工具列並標成
+    // is-static（把螢幕上那個固定高度的取景框放開，整張圖直接攤平顯示）。
+    work.querySelectorAll('.relmap-embed').forEach(function (n) {
+      n.classList.add('is-static');
+      const bar = n.querySelector('.relmap-embed-bar');
+      if (bar) bar.remove();
+    });
+    // 嵌入的 drawio 圖表：出版檔裡沒有編輯器，「編輯」那一列拿掉，只留圖
+    work.querySelectorAll('.drawio-embed-bar').forEach(function (n) { n.remove(); });
+    // 出版檔沒有編輯器可以回寫，勾選框只是一份紀錄——留著勾選狀態，但不讓讀者
+    // 以為自己改得動它。
+    work.querySelectorAll('.task-check').forEach(function (n) { n.disabled = true; });
+    return MD.inlineImagesAsDataURL(work);
+  }
+
+  // 單篇筆記打包成一頁（公開連結 /s/<token> 存的就是這個）。不像電子書有目錄與章節切換：
+  // 就是一篇文章——標題、內文、最下面一行說明。整頁用文件本身捲動（不像 app 只捲內層），
+  // 拿到連結的人才能直接用瀏覽器列印或存成 PDF。
+  function renderNoteStandalone(note) {
+    const work = document.createElement('div');
+    return Promise.all([renderForExport(work, note, '分享頁'), fetchText('app.css'),
+      fetchText('vendor/hljs-github.min.css'), fetchText('vendor/hljs-github-dark.min.css')])
+      .then(function (r) {
+        // 筆記之間的連結（[[wiki]]、子頁面卡片、#標籤）在外面沒有地方可去：留字，拿掉連結
+        // （不留原本的 class：.note-link.missing 會用 ::after 補一個「點擊建立」，在這裡沒有東西可以建立）
+        work.querySelectorAll('a.note-link, a.hashtag').forEach(function (a) {
+          const span = document.createElement('span');
+          span.className = 'is-static';
+          const t = a.querySelector('.page-card-t');    // 子頁面卡片：只留標題，不留「子頁面／點擊建立」
+          span.textContent = (t || a).textContent;
+          a.replaceWith(span);
+        });
+        // [toc] 的子標題全部展開：沒有腳本去開合它
+        work.querySelectorAll('.md-toc li').forEach(function (li) { if (li.querySelector('.md-toc-kids')) li.classList.add('open'); });
+        work.querySelectorAll('.md-toc-toggle').forEach(function (b) { b.remove(); });
+        return buildNoteStandalone(note, work.innerHTML, r[1], r[2], r[3]);
+      });
+  }
+  function buildNoteStandalone(note, articleHTML, appCSS, hlLight, hlDark) {
+    const title = note.title || '未命名筆記';
+    const when = new Date().toLocaleString('zh-TW', { hour12: false });
+    const extraCSS = [
+      // app 的殼不捲動、只捲內層；這一頁反過來：整份文件捲，列印才會是整篇
+      'html, body { height: auto !important; overflow: auto !important; }',
+      'body { position: static !important; background: var(--bg); }',
+      '#hl-dark { display: none; }',
+      '.pub-top { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 10px 20px;',
+      '  background: var(--bg-2); border-bottom: 1px solid var(--border); }',
+      '.pub-top-title { flex: 1 1 auto; min-width: 0; font-weight: 700; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+      '.pub-top-when { flex: 0 0 auto; font-size: 12px; color: var(--text-faint); }',
+      '.pub-main { max-width: 880px; margin: 0 auto; padding: 32px 24px 64px; }',
+      '.pub-article > h1:first-child { margin-top: 0; }',
+      '.pub-foot { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-faint); line-height: 1.7; }',
+      '.is-static { color: inherit; text-decoration: none; cursor: default; }',
+      '@media print { .pub-top { display: none; } .pub-main { padding: 0; max-width: none; } .pub-foot { display: none; } }'
+    ].join('\n');
+    const script = [
+      '(function () {',
+      '  var tb = document.querySelector(".pub-theme");',
+      '  function applyTheme(t) {',
+      '    document.documentElement.setAttribute("data-theme", t);',
+      '    document.getElementById("hl-light").disabled = t === "dark";',
+      '    document.getElementById("hl-dark").disabled = t !== "dark";',
+      '    try { localStorage.setItem("book-theme", t); } catch (e) {}',
+      '  }',
+      '  if (tb) tb.addEventListener("click", function () { applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"); });',
+      '  var saved = null; try { saved = localStorage.getItem("book-theme"); } catch (e) {}',
+      '  applyTheme(saved || "light");',
+      '})();'
+    ].join('\n');
+    return '<!DOCTYPE html><html lang="zh-Hant" data-theme="light"><head><meta charset="utf-8">' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+      '<meta name="robots" content="noindex, nofollow">' +
+      '<title>' + esc(title) + '</title>' +
+      '<style id="hl-light">' + hlLight + '</style>' +
+      '<style id="hl-dark">' + hlDark + '</style>' +
+      '<style>' + appCSS + '</style>' +
+      '<style>' + extraCSS + '</style>' +
+      '</head><body>' +
+      '<header class="pub-top">' + ic('file-text') + '<span class="pub-top-title">' + esc(title) + '</span>' +
+        '<span class="pub-top-when">' + esc(when) + ' 的版本</span>' +
+        '<button class="icon-btn pub-theme" type="button" title="切換深色/淺色">' +
+          '<span class="theme-ic theme-ic-light">' + ic('moon') + '</span><span class="theme-ic theme-ic-dark">' + ic('sun') + '</span></button>' +
+      '</header>' +
+      '<main class="pub-main"><article class="markdown-body pub-article">' + articleHTML + '</article>' +
+      '<footer class="pub-foot">這是一份唯讀的分享頁，內容是 ' + esc(when) + ' 當時的版本。</footer></main>' +
+      '<script>' + script + '</script>' +
+      '</body></html>';
   }
 
   function publish() {
@@ -523,6 +605,7 @@
     // The share dialog packs the open book itself, so it needs the packer and
     // the book that is currently on screen.
     renderStandalone: renderStandalone,
+    renderNoteStandalone: renderNoteStandalone,   // 單篇筆記的公開連結（app.js 的 showShareDialog）
     current: function () { return cur ? cur.book : null; }
   };
 })(window);

@@ -531,6 +531,16 @@ async function handleApi(req, res, url) {
     if (method === 'PUT') return send(await api.updateBookLink(user, m[1], await readJSON(req)));
     if (method === 'DELETE') return send(await api.deleteBookLink(user, m[1]));
   }
+  // 單篇筆記的公開連結（沒有帳號也能看）：管理這些連結的人一定要登入、而且是筆記的
+  // 擁有者；沒有 session 也能用的只有最底下的 /s/<token> 那一頁。
+  if ((m = p.match(/^\/api\/notes\/([\w.-]+)\/links$/))) {
+    if (method === 'GET') return send(await api.listNoteLinks(user, m[1]));
+    if (method === 'POST') return send(await api.createNoteLink(user, m[1], await readJSON(req)));
+  }
+  if ((m = p.match(/^\/api\/note-links\/([0-9a-f]{64})$/))) {
+    if (method === 'PUT') return send(await api.updateNoteLink(user, m[1], await readJSON(req)));
+    if (method === 'DELETE') return send(await api.deleteNoteLink(user, m[1]));
+  }
 
   if ((m = p.match(/^\/api\/notes\/([\w.-]+)\/shares$/))) {
     if (method === 'GET') return send(await api.listShares(user, m[1]));
@@ -732,13 +742,13 @@ const server = http.createServer(function (req, res) {
   }
   if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: 'method not allowed' });
 
-  // The one route that answers without a session: a shared e-book snapshot.
-  // It serves a stored, self-contained HTML file and nothing else, under its own
-  // locked-down policy — no network access of any kind is granted to that page,
-  // so even if a note contained something hostile it could not call home.
+  // The one route that answers without a session: a shared snapshot — an e-book or
+  // a single note. It serves a stored, self-contained HTML file and nothing else,
+  // under its own locked-down policy — no network access of any kind is granted to
+  // that page, so even if a note contained something hostile it could not call home.
   const share = url.pathname.match(/^\/s\/([0-9a-f]{64})$/);
   if (share) {
-    serveSharedBook(req, res, share[1]).catch(function (e) {
+    serveShared(req, res, share[1]).catch(function (e) {
       console.error('[share]', e && e.message);
       if (!res.headersSent) sharePage(res, 500, '伺服器錯誤', '請稍後再試。');
     });
@@ -756,9 +766,11 @@ const server = http.createServer(function (req, res) {
 server.keepAliveTimeout = 95 * 1000;
 server.headersTimeout = 100 * 1000;   // must exceed keepAliveTimeout
 
-async function serveSharedBook(req, res, token) {
-  const row = await api.publicBook(token);
-  if (!row) return sharePage(res, 404, '找不到這本書', '這個分享連結不存在，或已經被取消。');
+// 電子書與單篇筆記的連結是兩張表，token 都是 32 bytes 的亂數，不會撞在一起：先找書，
+// 沒有再找筆記。
+async function serveShared(req, res, token) {
+  const row = (await api.publicBook(token)) || (await api.publicNote(token));
+  if (!row) return sharePage(res, 404, '找不到這個頁面', '這個分享連結不存在，或已經被取消。');
   if (row.expired) return sharePage(res, 410, '連結已過期', '請向分享者索取新的連結。');
 
   const body = Buffer.from(row.html, 'utf8');
@@ -767,6 +779,13 @@ async function serveSharedBook(req, res, token) {
     'Content-Length': body.length,
     // Everything the page needs is already inside it, so nothing may be fetched.
     'Content-Security-Policy': [
+      // sandbox（沒有 allow-same-origin）：這一頁是擁有者的瀏覽器打包、原樣存起來的 HTML，
+      // 伺服器沒有辦法檢查裡面的腳本，而它跟整個 app 同一個網域。不隔開的話，一個有帳號的人
+      // 可以做一個帶腳本的連結給另一個登入中的人點——腳本雖然不能 fetch（下面 default-src
+      // 'none'），卻可以 window.open('/') 再從那個同源的視窗裡用對方的身分打 API。
+      // 放進 sandbox 之後這一頁是自己一個來源，碰不到 cookie，也碰不到 app 的任何視窗。
+      // allow-popups*：內文裡連到外部網站的連結要能正常打開。
+      "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox",
       "default-src 'none'",
       "img-src data: blob:",
       "media-src data:",

@@ -417,6 +417,105 @@ async function main() {
   r = await call(bob, 'POST', '/api/books/' + fid + '/links', { html: html });
   ok(r.status === 404, "bob cannot share admin's folder", r.status);
 
+  // 單篇筆記的公開連結（分享給沒有帳號的人）。跟電子書的連結同一套：快照、唯讀、只有
+  // 擁有者能管、token 猜不到。多了「筆記進垃圾桶連結就打不開」跟「小說不能開」。
+  section('public note links');
+  {
+    const csp = r => r.headers.get('content-security-policy') || '';
+    r = await call(admin, 'POST', '/api/notes', { title: '公開的報告', content: '# 公開\n\n給外面的人看' });
+    const pub = r.data.note.id;
+    const page = '<!doctype html><html><head><meta charset="utf-8"><title>公開的報告</title></head><body><h1>公開的報告</h1><p>v1</p></body></html>';
+    r = await call(admin, 'GET', '/api/notes/' + pub + '/links');
+    ok(r.status === 200 && r.data.links.length === 0, 'a note starts with no public link', r.data);
+    r = await call(admin, 'GET', '/api/notes/' + pub);
+    ok(r.data.note.publicLink === undefined, 'and is not flagged as public', r.data.note.publicLink);
+    r = await call(admin, 'POST', '/api/notes/' + pub + '/links', { title: '公開的報告', html: page, rev: 0, expiresDays: 0 });
+    ok(r.status === 200 && /^[0-9a-f]{64}$/.test(r.data.link.token) && r.data.link.noteId === pub && r.data.link.stale === false && r.data.link.expiresAt === null,
+      'the owner creates a public link', r.data);
+    const ntok = r.data.link.token;
+    r = await call(anon, 'GET', '/s/' + ntok);
+    ok(r.status === 200 && r.data === page, 'anonymous GET serves the snapshot, exactly as stored');
+    ok(/sandbox allow-scripts/.test(csp(r)) && !/allow-same-origin/.test(csp(r)) && csp(r).includes("default-src 'none'") && !r.headers.get('set-cookie'),
+      'the page is sandboxed (its own origin, no cookie, no network)', csp(r));
+    r = await call(anon, 'GET', '/s/' + tok);
+    ok(/sandbox allow-scripts/.test(csp(r)) && !/allow-same-origin/.test(csp(r)), 'the e-book page is sandboxed the same way', csp(r));
+    r = await call(admin, 'GET', '/api/notes/' + pub);
+    ok(r.data.note.publicLink === true, 'the note is now flagged as having a public link', r.data.note.publicLink);
+    r = await call(admin, 'GET', '/api/notes');
+    ok(r.data.notes.find(n => n.id === pub).publicLink === true && !r.data.notes.some(n => n.id !== pub && n.publicLink), 'the listing flags it, and only it');
+
+    // 筆記改了：連結上還是舊的，stale
+    cur = (await call(admin, 'GET', '/api/notes/' + pub)).data.note;
+    r = await call(admin, 'PUT', '/api/notes/' + pub, { title: cur.title, content: cur.content + '\n\n第二版', baseContent: cur.content, folderId: null });
+    const rev2 = r.data.note.rev;
+    r = await call(admin, 'GET', '/api/notes/' + pub + '/links');
+    ok(r.data.links.length === 1 && r.data.links[0].stale === true && r.data.links[0].html === undefined, 'after an edit the link is reported stale (and never ships its html)', r.data.links[0]);
+    r = await call(anon, 'GET', '/s/' + ntok);
+    ok(r.data === page, 'the anonymous page still shows the snapshot, not the edit');
+    r = await call(admin, 'PUT', '/api/note-links/' + ntok, { html: page.replace('v1', 'v2'), rev: rev2, expiresDays: 30 });
+    ok(r.status === 200 && r.data.link.stale === false && r.data.link.expiresAt > Date.now(), 'refreshing the link clears stale and can set an expiry', r.data);
+    r = await call(anon, 'GET', '/s/' + ntok);
+    ok(r.data.includes('v2'), 'the same URL now serves the new snapshot');
+    r = await call(admin, 'PUT', '/api/note-links/' + ntok, { html: page, rev: 999 });
+    ok(r.status === 200 && r.data.link.noteRev === rev2, 'a rev from the client is capped at the note\'s real rev', r.data.link);
+
+    // 別人
+    r = await call(bob, 'GET', '/api/notes/' + pub + '/links');
+    ok(r.status === 404, "bob cannot list admin's links", r.status);
+    r = await call(bob, 'POST', '/api/notes/' + pub + '/links', { html: page });
+    ok(r.status === 404, 'nor create one', r.status);
+    r = await call(bob, 'PUT', '/api/note-links/' + ntok, { html: '<p>hijacked</p>' });
+    ok(r.status === 404, 'nor overwrite it', r.status);
+    r = await call(bob, 'DELETE', '/api/note-links/' + ntok);
+    ok(r.status === 404, 'nor revoke it', r.status);
+    await call(admin, 'POST', '/api/notes/' + pub + '/shares', { username: BOB, perm: 'edit' });
+    r = await call(bob, 'POST', '/api/notes/' + pub + '/links', { html: page });
+    ok(r.status === 404, 'an editor the owner shared with still cannot publish it', r.status);
+    r = await call(bob, 'GET', '/api/notes/' + pub);
+    ok(r.status === 200 && r.data.note.publicLink === undefined, 'the public flag is the owner\'s business only', r.data.note.publicLink);
+    r = await call(anon, 'POST', '/api/notes/' + pub + '/links', { html: page });
+    ok(r.status === 401, 'managing links needs a session', r.status);
+    ok((await call(anon, 'GET', '/api/notes/' + pub)).status === 401, 'the token grants nothing on the API');
+
+    // 限制與拒絕
+    r = await call(admin, 'POST', '/api/notes/' + pub + '/links', { html: '' });
+    ok(r.status === 400, 'an empty page is refused', r.status);
+    r = await call(admin, 'POST', '/api/notes', { title: '小說', content: 'x', area: 'novel' });
+    const novelNote = r.data.note && r.data.note.id;
+    if (novelNote) {
+      await call(admin, 'POST', '/api/novel/unlock', { password: ADMIN_PASSWORD });
+      r = await call(admin, 'POST', '/api/notes/' + novelNote + '/links', { html: page });
+      ok(r.status === 400 || r.status === 404, 'a novel note can never have a public link', r.status);
+    }
+
+    // 垃圾桶：連結跟著筆記的狀態
+    r = await call(admin, 'DELETE', '/api/notes/' + pub);
+    r = await call(anon, 'GET', '/s/' + ntok);
+    ok(r.status === 404, 'a trashed note\'s link is 404', r.status);
+    r = await call(admin, 'GET', '/api/notes/' + pub + '/links');
+    ok(r.status === 404, 'and cannot be managed while trashed', r.status);
+    await call(admin, 'POST', '/api/notes/' + pub + '/restore', {});
+    r = await call(anon, 'GET', '/s/' + ntok);
+    ok(r.status === 200, 'restoring the note brings the link back', r.status);
+
+    // 第二條、取消、上限
+    r = await call(admin, 'POST', '/api/notes/' + pub + '/links', { html: page, expiresDays: 7 });
+    const ntok2 = r.data.link.token;
+    r = await call(admin, 'GET', '/api/notes/' + pub + '/links');
+    ok(r.data.links.length === 2 && r.data.links[0].views !== undefined, 'a note can carry several links (different expiry, different people)', r.data.links.length);
+    r = await call(admin, 'DELETE', '/api/note-links/' + ntok2);
+    ok(r.status === 200 && (await call(anon, 'GET', '/s/' + ntok2)).status === 404, 'a revoked link dies at once');
+    ok((await call(anon, 'GET', '/s/' + 'e'.repeat(64))).status === 404, 'an unknown token is 404');
+
+    // 永久刪除：連結連著消失
+    await call(admin, 'DELETE', '/api/notes/' + pub);
+    await call(admin, 'DELETE', '/api/trash/' + pub);
+    r = await call(anon, 'GET', '/s/' + ntok);
+    ok(r.status === 404, 'purging the note deletes its links with it', r.status);
+    r = await call(admin, 'GET', '/api/notes');
+    ok(!r.data.notes.some(n => n.publicLink), 'no note is flagged public any more');
+  }
+
   if (!OLD) {
     section('trash (soft delete, restore, purge)');
     r = await call(admin, 'POST', '/api/notes', { title: '垃圾桶測試', content: 'bin me' });
@@ -726,6 +825,9 @@ async function main() {
     const cNoteV2 = r.data.note;
     await call(carol, 'POST', '/api/notes/' + cNote.id + '/versions', { label: '備份前標記' });
     await call(carol, 'POST', '/api/notes/' + cNote.id + '/shares', { username: BOB, perm: 'read' });
+    // 一個公開連結（分享給沒有帳號的人）：備份要帶著走，還原回來同一個網址要能開
+    r = await call(carol, 'POST', '/api/notes/' + cNote.id + '/links', { html: '<p>public snapshot</p>', rev: cNoteV2.rev });
+    const cLink = r.data.link.token;
     r = await call(carol, 'POST', '/api/notes', { title: '要丟掉的', content: 'bin' });
     const cBin = r.data.note.id;
     await call(carol, 'DELETE', '/api/notes/' + cBin);
@@ -751,6 +853,9 @@ async function main() {
       'an upload is stored byte for byte with its name', filesIdx[0]);
     ok(filesIdx[0].icon === true, 'an icon is marked as one in files.json', filesIdx[0]);
     ok(!z.zr.has('users.json'), 'a mine backup carries no accounts');
+    const linksIdx = readJson(z.zr, 'links.json');
+    ok(man.counts.noteLinks === 1 && linksIdx.length === 1 && linksIdx[0].token === cLink && linksIdx[0].noteId === cNote.id &&
+       z.zr.read(linksIdx[0].file).toString('utf8') === '<p>public snapshot</p>', 'a public note link is in the backup with its page', linksIdx[0]);
     z.zr.close(); fs.unlinkSync(z.f);
 
     r = await call(carol, 'GET', '/api/backup?scope=site');
@@ -800,6 +905,9 @@ async function main() {
     ok(r.status === 200 && r.data.versions.some(v => v.label === '備份前標記'), 'the labelled version is back', r.data && r.data.versions.map(v => v.label));
     r = await call(bob, 'GET', '/api/notes/' + cNote.id);
     ok(r.status === 200 && r.data.note.perm === 'read', 'the share to bob is back', r.status);
+    r = await call(anon, 'GET', '/s/' + cLink);
+    ok(r.status === 200 && r.data === '<p>public snapshot</p>' && job.report.links && job.report.links.created === 1,
+      'the public note link is back at the same URL', { status: r.status, report: job.report.links });
     r = await call(carol2, 'GET', '/api/trash');
     ok(r.data.notes.some(n => n.id === cBin), 'the trashed note is back in the trash');
 

@@ -915,6 +915,7 @@ mark.search-hit {
    尺寸，用 --success 是因為它是「已經開出去了」的狀態，不是警告。 */
 .dash-row-shared { display: inline-flex; flex: 0 0 auto; color: var(--success); }
 .dash-row-shared .ic-svg { width: 12px; height: 12px; }
+.dash-row-public { color: #d07005; }   /* 公開連結：沒有帳號的人也看得到，要比站內分享更醒目 */
 .dash-row-edit, .dash-folder-edit {
   min-width: 0; font: inherit; padding: 2px 6px;
   border: 1px solid var(--accent); background: var(--bg); color: var(--text); outline: none;
@@ -4109,6 +4110,18 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 .share-meta { font-size: var(--fs-xs); color: var(--text-faint); }
 .share-acts { display: flex; gap: 6px; }
 .share-acts .btn { flex: 0 0 auto; }
+/* 單篇筆記的公開連結：筆記在建立連結之後又改過 */
+.share-row.is-stale { border-color: var(--sev-med-fg); }
+.share-stale { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--sev-med-fg); }
+.share-stale .ic-svg { width: 13px; height: 13px; flex: 0 0 auto; }
+/* 分享對話框裡「公開連結」那一段：一行說明＋一顆進到連結管理的按鈕 */
+.share-public { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); background: var(--bg-2); }
+.share-public-text { flex: 1 1 auto; min-width: 0; display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-sm); line-height: 1.6; color: var(--text-dim); }
+.share-public-ic { display: inline-flex; flex: 0 0 auto; margin-top: 3px; color: #d07005; }
+.share-public-ic .ic-svg { width: 14px; height: 14px; }
+.share-public.is-stale .share-public-text { color: var(--sev-med-fg); }
+.share-public .btn { flex: 0 0 auto; }
+@media (max-width: 640px) { .share-public { flex-direction: column; align-items: stretch; } }
 
 .share-foot { display: flex; gap: 8px; align-items: center; }
 .share-foot .btn { flex: 0 0 auto; }

@@ -231,6 +231,11 @@
       return req('PUT', '/api/book-links/' + token, payload).then(r => r.link);
     },
     deleteBookLink: function (token) { return req('DELETE', '/api/book-links/' + token); },
+    // 單篇筆記的公開連結（沒有帳號也能看）：同一套規則，見 server/api.js 的 listNoteLinks
+    getNoteLinks: function (noteId) { return req('GET', '/api/notes/' + noteId + '/links').then(r => r.links || []); },
+    createNoteLink: function (noteId, payload) { return req('POST', '/api/notes/' + noteId + '/links', payload).then(r => r.link); },
+    updateNoteLink: function (token, payload) { return req('PUT', '/api/note-links/' + token, payload).then(r => r.link); },
+    deleteNoteLink: function (token) { return req('DELETE', '/api/note-links/' + token); },
 
     // Sharing
     getShares: function (noteId) { return req('GET', '/api/notes/' + noteId + '/shares').then(r => r.shares); },
