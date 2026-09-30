@@ -420,6 +420,14 @@
       p.rect(0, 0.34, 1, 0.66, 0.1, 'body');
       [0.14, 0.26, 0.38, 0.5].forEach(function (x) { p.dot(x, 0.67, 0.06); });
     } },
+    tunnel: { name: '通道（VPN／Tunnel）', w: 120, h: 44, color: C_BLUE, draw: function (p) {
+      const r = 0.08, k = r * ARC;
+      // 一根橫躺的水管：右端是鼓起來的半橢圓，左端看得到管口
+      p.path(['M', r, 0, 'L', 1 - r, 0, 'C', 1 - r + k, 0, 1 - r + k, 1, 1 - r, 1, 'L', r, 1, 'Z'], 'body');
+      p.ell(r, 0.5, r, 0.5, 'paper');
+      p.line([[r, 0.22], [1 - r, 0.22]]);                 // 管身上的一條高光線，看起來才是圓的
+      p.arrow(0.5, 0.5, 0.86, 0.5); p.arrow(0.5, 0.5, 0.22, 0.5);   // 裡面雙向的流量
+    } },
     internet: { name: '網際網路', w: 70, h: 70, color: C_BLUE, draw: function (p) {
       p.ell(0.5, 0.5, 0.5, 0.5, 'body');
       p.ell(0.5, 0.5, 0.22, 0.5, 'line');
@@ -1712,7 +1720,10 @@
     stage.addEventListener('mousedown', onDown);
     stage.addEventListener('mousemove', onHover);
     stage.addEventListener('mouseleave', function () { if (!gesture && hoverId) { hoverId = null; renderOverlay(); } });
-    stage.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    // 瀏覽器自己的右鍵選單整頁都不要：contextmenu 是在放開右鍵時發的，那時我們的選單已經
+    // 彈出來、正好蓋在游標下面，事件落在選單上而不是畫布上——只攔畫布會漏掉，兩個選單一起跳
+    function onCtxMenu(e) { e.preventDefault(); }
+    host.addEventListener('contextmenu', onCtxMenu);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     canvas.addEventListener('wheel', function (e) {
@@ -2091,6 +2102,7 @@
       document.removeEventListener('mousedown', onDocDown, true);
       host.removeEventListener('keydown', onKey);
       host.removeEventListener('keyup', onKeyUp);
+      host.removeEventListener('contextmenu', onCtxMenu);
       host.removeEventListener('dragover', onDragOver);
       host.removeEventListener('dragleave', onDragLeave);
       host.removeEventListener('drop', onDrop);
