@@ -1159,20 +1159,33 @@
     }
     function paste(offset) {
       if (!clipboard) return;
-      const data = JSON.parse(clipboard);
       pasteN++;
       const d = offset === undefined ? 20 * pasteN : offset;
+      pasteWith(d, d);
+    }
+    // 右鍵選單的「貼上」：貼在游標那裡（剪貼簿裡那一組的左上角對到游標）
+    function pasteAt(w) {
+      if (!clipboard) return;
+      const data = JSON.parse(clipboard);
+      let x0 = Infinity, y0 = Infinity;
+      data.shapes.forEach(function (s) { x0 = Math.min(x0, s.x); y0 = Math.min(y0, s.y); });
+      data.edges.forEach(function (e) { [e.from, e.to].forEach(function (q) { if (!q.id) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); } }); });
+      if (x0 === Infinity) return;
+      pasteWith(snap(w.x) - x0, snap(w.y) - y0);
+    }
+    function pasteWith(dx, dy) {
+      const data = JSON.parse(clipboard);
       mutate(function () {
         const map = {}, added = [];
         data.shapes.forEach(function (s) {
-          const c = Object.assign({}, s, { id: newId('s'), x: s.x + d, y: s.y + d });
+          const c = Object.assign({}, s, { id: newId('s'), x: s.x + dx, y: s.y + dy });
           map[s.id] = c.id;
           model.shapes.push(c); added.push(c.id);
         });
         data.edges.forEach(function (e) {
           const c = Object.assign({}, e, { id: newId('e') });
-          c.from = e.from.id ? { id: map[e.from.id] } : { x: e.from.x + d, y: e.from.y + d };
-          c.to = e.to.id ? { id: map[e.to.id] } : { x: e.to.x + d, y: e.to.y + d };
+          c.from = e.from.id ? { id: map[e.from.id] } : { x: e.from.x + dx, y: e.from.y + dy };
+          c.to = e.to.id ? { id: map[e.to.id] } : { x: e.to.x + dx, y: e.to.y + dy };
           model.edges.push(c); added.push(c.id);
         });
         sel = added;
@@ -1183,6 +1196,7 @@
       if (copySelected()) paste(20);
       clipboard = keep; pasteN = n;
     }
+    // 疊放順序就是 model.shapes 的順序（後面的畫在上面；連線永遠在圖形之上）
     function reorder(toFront) {
       const ids = {};
       selShapes().forEach(function (s) { ids[s.id] = 1; });
@@ -1191,6 +1205,25 @@
         const pick = model.shapes.filter(function (s) { return ids[s.id]; });
         const rest = model.shapes.filter(function (s) { return !ids[s.id]; });
         model.shapes = toFront ? rest.concat(pick) : pick.concat(rest);
+      });
+    }
+    // 上移／下移一層：選取的整組跟相鄰的那一個沒被選的交換位置
+    function reorderStep(up) {
+      const ids = {};
+      selShapes().forEach(function (s) { ids[s.id] = 1; });
+      if (!Object.keys(ids).length) return;
+      mutate(function () {
+        const arr = model.shapes.slice();
+        if (up) {
+          for (let i = arr.length - 2; i >= 0; i--) {
+            if (ids[arr[i].id] && !ids[arr[i + 1].id]) { const t = arr[i]; arr[i] = arr[i + 1]; arr[i + 1] = t; }
+          }
+        } else {
+          for (let i = 1; i < arr.length; i++) {
+            if (ids[arr[i].id] && !ids[arr[i - 1].id]) { const t = arr[i]; arr[i] = arr[i - 1]; arr[i - 1] = t; }
+          }
+        }
+        model.shapes = arr;
       });
     }
     function align(how) {
@@ -1319,6 +1352,9 @@
         case 'selectall': select(model.shapes.map(function (s) { return s.id; }).concat(model.edges.map(function (e) { return e.id; }))); break;
         case 'front': reorder(true); break;
         case 'back': reorder(false); break;
+        case 'forward': reorderStep(true); break;
+        case 'backward': reorderStep(false); break;
+        case 'edit': if (sel.length === 1) startEdit(sel[0]); break;
         case 'zoomin': zoomCenter(zoom * 1.25); break;
         case 'zoomout': zoomCenter(zoom / 1.25); break;
         case 'zoom100': zoomCenter(1); break;
@@ -1339,7 +1375,7 @@
       edit: [['undo', '復原', 'Ctrl+Z'], ['redo', '重做', 'Ctrl+Y'], null, ['cut', '剪下', 'Ctrl+X'], ['copy', '複製', 'Ctrl+C'],
         ['paste', '貼上', 'Ctrl+V'], ['dup', '再製', 'Ctrl+D'], ['delete', '刪除', 'Delete'], null, ['selectall', '全選', 'Ctrl+A']],
       view: [['grid', '格線'], ['snap', '對齊格線'], null, ['zoomin', '放大'], ['zoomout', '縮小'], ['zoom100', '100%'], ['fit', '符合視窗']],
-      arrange: [['front', '移到最前'], ['back', '移到最後'], null, ['align-left', '靠左對齊'], ['align-center', '水平置中'],
+      arrange: [['front', '移到最前', 'Ctrl+Shift+]'], ['forward', '上移一層', 'Ctrl+]'], ['backward', '下移一層', 'Ctrl+['], ['back', '移到最後', 'Ctrl+Shift+['], null, ['align-left', '靠左對齊'], ['align-center', '水平置中'],
         ['align-right', '靠右對齊'], ['align-top', '靠上對齊'], ['align-middle', '垂直置中'], ['align-bottom', '靠下對齊']]
     };
     function closeMenu() {
@@ -1369,6 +1405,51 @@
       menuEl.addEventListener('click', function (e) {
         const b = e.target.closest('[data-act]');
         if (b) act(b.getAttribute('data-act'));
+      });
+    }
+
+    // ---- 右鍵選單 ----
+    // 點在圖形或連線上：先選起它（原本沒選的話），選單針對選取的東西；點在空白處：取消選取，
+    // 選單是貼上、全選、檢視（跟 draw.io 一樣）
+    function openContextMenu(x, y, hitId, w) {
+      closeMenu();
+      if (editing) commitEdit();
+      if (hitId && sel.indexOf(hitId) < 0) select([hitId]);
+      if (!hitId && sel.length) select([]);
+      const shapesSel = selShapes().length, anySel = sel.length;
+      let items;
+      if (hitId) {
+        items = [
+          ['front', '移到最前', 'Ctrl+Shift+]', shapesSel > 0], ['forward', '上移一層', 'Ctrl+]', shapesSel > 0],
+          ['backward', '下移一層', 'Ctrl+[', shapesSel > 0], ['back', '移到最後', 'Ctrl+Shift+[', shapesSel > 0], null,
+          ['edit', '編輯文字', 'F2', anySel === 1], null,
+          ['cut', '剪下', 'Ctrl+X', true], ['copy', '複製', 'Ctrl+C', true], ['paste', '貼上', 'Ctrl+V', !!clipboard],
+          ['dup', '再製', 'Ctrl+D', true], null, ['delete', '刪除', 'Delete', true]
+        ];
+      } else {
+        items = [['paste', '貼上', 'Ctrl+V', !!clipboard], ['selectall', '全選', 'Ctrl+A', true], null,
+          ['fit', '符合視窗', '', true], ['grid', '格線', '', true]];
+      }
+      menuEl = document.createElement('div');
+      menuEl.className = 'dio-menu dio-ctx';
+      menuEl.setAttribute('data-for', 'ctx');
+      menuEl.innerHTML = items.map(function (it) {
+        if (!it) return '<div class="dio-menu-sep"></div>';
+        const on = it[0] === 'grid' && model.grid;
+        return '<button class="dio-menu-item' + (on ? ' on' : '') + '" type="button" data-act="' + it[0] + '"' + (it[3] ? '' : ' disabled') + '><span>' +
+          esc(it[1]) + '</span><kbd>' + (it[2] || '') + '</kbd></button>';
+      }).join('');
+      host.appendChild(menuEl);
+      // 貼在游標旁邊，超出視窗就往回折
+      const mw = menuEl.offsetWidth, mh = menuEl.offsetHeight;
+      menuEl.style.left = Math.max(4, Math.min(x, window.innerWidth - mw - 4)) + 'px';
+      menuEl.style.top = Math.max(4, Math.min(y, window.innerHeight - mh - 4)) + 'px';
+      menuEl.addEventListener('click', function (e) {
+        const b = e.target.closest('[data-act]');
+        if (!b || b.disabled) return;
+        const a = b.getAttribute('data-act');
+        closeMenu();
+        if (a === 'paste' && w) pasteAt(w); else act(a);
       });
     }
 
@@ -1446,7 +1527,10 @@
       if (editing) commitEdit();
       canvas.focus();
       if (e.button === 1 || e.button === 2 || (e.button === 0 && spaceDown)) {
-        gesture = { type: 'pan', sx: e.clientX, sy: e.clientY, px: panX, py: panY };
+        // 右鍵：拖曳是平移，按一下（沒動）放開才是右鍵選單——draw.io 也是這樣
+        const hit = e.target.closest ? e.target.closest('[data-id]') : null;
+        gesture = { type: 'pan', sx: e.clientX, sy: e.clientY, px: panX, py: panY, moved: false,
+          right: e.button === 2, hitId: hit ? hit.getAttribute('data-id') : null, w0: toWorld(e) };
         canvas.classList.add('is-panning');
         e.preventDefault();
         return;
@@ -1495,6 +1579,7 @@
       const w = toWorld(e);
       const g = gesture;
       if (g.type === 'pan') {
+        if (Math.abs(e.clientX - g.sx) + Math.abs(e.clientY - g.sy) > 3) g.moved = true;
         panX = g.px + (e.clientX - g.sx); panY = g.py + (e.clientY - g.sy);
         render();
         return;
@@ -1561,6 +1646,10 @@
       const g = gesture;
       gesture = null;
       canvas.classList.remove('is-panning');
+      if (g.type === 'pan') {
+        if (g.right && !g.moved) openContextMenu(e.clientX, e.clientY, g.hitId, g.w0);
+        return;
+      }
       const w = toWorld(e);
       if (g.type === 'palette') {
         g.ghost.remove();
@@ -1831,6 +1920,9 @@
       if (mod && k === 'x') { e.preventDefault(); act('cut'); return; }
       if (mod && k === 'v') { e.preventDefault(); paste(); return; }
       if (mod && k === 'd') { e.preventDefault(); duplicate(); return; }
+      // 疊放順序（跟 draw.io 同一組鍵）：Ctrl+] 上移一層、Ctrl+Shift+] 最前；[ 反過來
+      if (mod && (e.key === ']' || e.key === '}')) { e.preventDefault(); if (e.shiftKey || e.key === '}') reorder(true); else reorderStep(true); return; }
+      if (mod && (e.key === '[' || e.key === '{')) { e.preventDefault(); if (e.shiftKey || e.key === '{') reorder(false); else reorderStep(false); return; }
       if (e.key.indexOf('Arrow') === 0 && sel.length) {
         e.preventDefault();
         const d = e.shiftKey ? GRID : 1;
