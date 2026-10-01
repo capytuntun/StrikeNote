@@ -624,11 +624,29 @@
       });
       updateBatchBar();
       syncSelAll();
+    },
+    // 「全選」旁邊的「刪除」：把這幾項移到垃圾桶（先問一次）。unit：'篇'（筆記）或 '個'（檔案）
+    removeMany: function (ids, unit) {
+      const list = ids.filter(function (id) { return selected.has(id); });
+      if (!list.length) return;
+      const what = unit === '個' ? ' 個檔案' : ' 篇筆記';
+      showConfirm({
+        title: '移至垃圾桶',
+        message: '把勾選的 ' + list.length + what + '移到垃圾桶？\n保留期內可以從側邊欄的「垃圾桶」復原。',
+        ok: '移至垃圾桶'
+      }).then(function (yes) {
+        if (!yes) return;
+        removeNotesAndFolders(list, []).then(function (r) {
+          toast((r.notes ? '已移至垃圾桶 ' + r.notes + (unit === '個' ? ' 個檔案' : ' 篇筆記') : '') +
+            (r.failed ? (r.notes ? '，' : '') + r.failed + ' 項沒有刪成功' : ''));
+        });
+      });
     }
   };
-  // 頁面上每顆「全選」鈕（dashboard.js／areabrowser.js 的 .dash-selall）依目前的勾選重寫自己的字
+  // 頁面上每顆「全選」與它旁邊的「刪除」（dashboard.js／areabrowser.js 的 .dash-selall／.dash-seldel）
+  // 依目前的勾選重寫自己的字（刪除鈕還有灰不灰）
   function syncSelAll() {
-    document.querySelectorAll('.dash-selall').forEach(function (b) { if (b._label) b._label(); });
+    document.querySelectorAll('.dash-selall, .dash-seldel').forEach(function (b) { if (b._label) b._label(); });
   }
   // 批次動作後同時刷新側邊欄與（若正在顯示的）儀表板 / 四個獨立區域頁面
   function refreshViews() {

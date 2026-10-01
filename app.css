@@ -3736,6 +3736,14 @@ div.ver-item.ver-now { cursor: default; }
   font: inherit; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text-dim);
 }
 .trash-selall:hover, .dash-selall:hover { color: var(--accent); background: var(--accent-weak); }
+/* 「全選」旁邊的「刪除」：沒勾任何一項時是灰的 */
+.dash-seldel {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--danger);
+}
+.dash-section-head .dash-seldel .ic-svg { width: 13px; height: 13px; }
+.dash-seldel:hover:not(:disabled) { background: var(--danger-weak); }
+.dash-seldel:disabled { color: var(--text-faint); cursor: default; }
 
 .trash-row-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .trash-row-text .dash-row-title { flex: none; }

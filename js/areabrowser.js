@@ -863,6 +863,29 @@
     b.addEventListener('click', function (e) { e.stopPropagation(); o.selection.setMany(ids, !allOn()); });
     return b;
   }
+  // 「刪除」：就在「全選」旁邊。把這一段裡勾起來的移到垃圾桶——不用把側邊欄拉出來找批次列。
+  // 沒勾任何一項時是灰的；有勾就把數量寫在字後面，按下去之前就知道會動到幾項。
+  // unit：'篇'（筆記）或 '個'（檔案）。字跟灰不灰同樣由 _label 算，app.js 的 syncSelAll 會叫。
+  function selDelButton(list, o, unit) {
+    const ids = list.filter(function (n) { return !n.perm || n.perm === 'owner'; }).map(function (n) { return n.id; });
+    if (!o.selection || !o.selection.removeMany || !ids.length) return null;
+    const b = el('button', 'dash-seldel', ic('trash') + '<span></span>');
+    b.type = 'button';
+    function picked() { return ids.filter(function (id) { return o.selection.has(id); }); }
+    b._label = function () {
+      const n = picked().length;
+      b.disabled = !n;
+      b.querySelector('span').textContent = n ? '刪除 ' + n + ' ' + unit : '刪除';
+      b.title = n ? '把勾選的 ' + n + ' ' + unit + '移到垃圾桶' : '先勾選要刪除的項目';
+    };
+    b._label();
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      const p = picked();
+      if (p.length) o.selection.removeMany(p, unit);
+    });
+    return b;
+  }
 
 
   function renderBody(o) {
@@ -901,6 +924,8 @@
       const h2 = sectionHead('file-text', curFolderId ? '筆記' : '未歸類筆記', ns.length);
       const sa = selAllButton(ns, o);
       if (sa) h2.appendChild(sa);
+      const sd = selDelButton(ns, o, '篇');
+      if (sd) h2.appendChild(sd);
       sec2.appendChild(h2);
       const list = el('div', 'dash-list');
       if (!ns.length) list.appendChild(emptyState('file-text', o.emptyHint || (curFolderId ? '這個資料夾裡還沒有筆記。' : '還沒有筆記。')));
@@ -916,6 +941,8 @@
       const h3 = sectionHead('paperclip', '檔案', files.length);
       const fsa = selAllButton(files, o);
       if (fsa) h3.appendChild(fsa);
+      const fsd = selDelButton(files, o, '個');
+      if (fsd) h3.appendChild(fsd);
       sec3.appendChild(h3);
       const flist = el('div', 'dash-list');
       ups.forEach(function (u) { flist.appendChild(makeUploadRow(u)); });

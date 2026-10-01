@@ -636,6 +636,8 @@
       const mh = sectionHead('file-text', '筆記', matches.length);
       const msa = selAllButton(matches, o);
       if (msa) mh.appendChild(msa);
+      const msd = selDelButton(matches, o, '篇');
+      if (msd) mh.appendChild(msd);
       sec.appendChild(mh);
       const body = el('div', 'dash-list');
       if (!matches.length) body.appendChild(emptyState('tag', '沒有帶有 #' + tagFilter + ' 的筆記。'));
@@ -680,6 +682,8 @@
     const h2 = sectionHead('file-text', curFolderId ? '筆記' : '未歸類筆記', ns.length);
     const sa = selAllButton(ns, o);
     if (sa) h2.appendChild(sa);
+    const sd = selDelButton(ns, o, '篇');
+    if (sd) h2.appendChild(sd);
     sec2.appendChild(h2);
     const body = el('div', 'dash-list');
     if (!ns.length) {
@@ -708,6 +712,29 @@
     b._label = function () { b.textContent = allOn() ? '取消全選' : '全選'; };
     b._label();
     b.addEventListener('click', function (e) { e.stopPropagation(); o.selection.setMany(ids, !allOn()); });
+    return b;
+  }
+  // 「刪除」：就在「全選」旁邊。把這一段裡勾起來的移到垃圾桶——不用把側邊欄拉出來找批次列。
+  // 沒勾任何一項時是灰的；有勾就把數量寫在字後面，按下去之前就知道會動到幾項。
+  // unit：'篇'（筆記）或 '個'（檔案）。字跟灰不灰同樣由 _label 算，app.js 的 syncSelAll 會叫。
+  function selDelButton(list, o, unit) {
+    const ids = list.filter(function (n) { return !n.perm || n.perm === 'owner'; }).map(function (n) { return n.id; });
+    if (!o.selection || !o.selection.removeMany || !ids.length) return null;
+    const b = el('button', 'dash-seldel', ic('trash') + '<span></span>');
+    b.type = 'button';
+    function picked() { return ids.filter(function (id) { return o.selection.has(id); }); }
+    b._label = function () {
+      const n = picked().length;
+      b.disabled = !n;
+      b.querySelector('span').textContent = n ? '刪除 ' + n + ' ' + unit : '刪除';
+      b.title = n ? '把勾選的 ' + n + ' ' + unit + '移到垃圾桶' : '先勾選要刪除的項目';
+    };
+    b._label();
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      const p = picked();
+      if (p.length) o.selection.removeMany(p, unit);
+    });
     return b;
   }
 
