@@ -4116,6 +4116,11 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 .share-row.is-stale { border-color: var(--sev-med-fg); }
 .share-stale { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--sev-med-fg); }
 .share-stale .ic-svg { width: 13px; height: 13px; flex: 0 0 auto; }
+.share-stale.is-info { color: var(--text-dim); }   /* 不自動更新的連結停在舊內容：是設定，不是警告 */
+/* 「自動更新」的勾選：建立連結那一列一個、每個連結各一個 */
+.share-auto { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; font-size: var(--fs-sm); color: var(--text); cursor: pointer; user-select: none; white-space: nowrap; }
+.share-auto input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.share-acts .share-auto { margin-right: auto; padding: 0 4px; }   /* 靠左，按鈕靠右 */
 /* 分享對話框裡「公開連結」那一段：一行說明＋一顆進到連結管理的按鈕 */
 .share-public { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); background: var(--bg-2); }
 .share-public-text { flex: 1 1 auto; min-width: 0; display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-sm); line-height: 1.6; color: var(--text-dim); }

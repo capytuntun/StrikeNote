@@ -552,6 +552,7 @@
   //   update(lk, html)       → Promise<link>
   //   remove(lk)             → Promise
   //   bits(lk)               → 一列下面那行灰字的前幾段
+  //   setAuto(lk, on)        → Promise；有給才會出現「自動更新」的勾選（單篇筆記才有）
   //   onChange()             建立／更新／取消之後叫一下（外面的清單要重畫）
   function openLinks(cfg) {
     const ui = shell(cfg.heading, 'link');
@@ -580,6 +581,18 @@
       sel.appendChild(op);
     });
     foot.appendChild(sel);
+    // 新連結要不要自動更新（預設要）。建好之後每個連結各自可以再改
+    let autoBox = null;
+    if (cfg.setAuto) {
+      const lab = el('label', 'share-auto share-auto-new');
+      autoBox = document.createElement('input');
+      autoBox.type = 'checkbox';
+      autoBox.checked = true;
+      lab.appendChild(autoBox);
+      lab.appendChild(el('span', null, '自動更新'));
+      lab.title = '勾選：之後改了筆記，連結上的內容會自動跟著更新。不勾：連結停在現在這一版，要更新得自己按「更新內容」。';
+      foot.appendChild(lab);
+    }
     const make = el('button', 'btn btn-primary');
     make.type = 'button';
     make.innerHTML = icon('link');
@@ -610,7 +623,8 @@
         return;
       }
       links.forEach(function (lk) {
-        const row = el('div', 'share-row' + (lk.expired ? ' is-expired' : '') + (lk.stale ? ' is-stale' : ''));
+        const manual = lk.autoUpdate === false;      // 不自動更新：內容停在最後一次更新，是本人要的，不是出錯
+        const row = el('div', 'share-row' + (lk.expired ? ' is-expired' : '') + (lk.stale && !manual ? ' is-stale' : ''));
 
         const urlRow = el('div', 'share-urlrow');
         const field = document.createElement('input');
@@ -641,13 +655,32 @@
         row.appendChild(el('div', 'share-meta', bits.join(' · ')));
         // 筆記在建立／更新連結之後又改過：連結上看到的還是舊的（單篇筆記才有這個判斷）
         if (lk.stale) {
-          const st = el('div', 'share-stale');
-          st.innerHTML = icon('alert-triangle');
-          st.appendChild(el('span', null, '筆記在那之後改過，連結上看到的還是舊的內容——按「更新內容」。'));
+          const st = el('div', 'share-stale' + (manual ? ' is-info' : ''));
+          st.innerHTML = icon(manual ? 'clock' : 'alert-triangle');
+          st.appendChild(el('span', null, manual
+            ? '這個連結不自動更新：筆記在那之後改過，連結上還是當時的內容。要更新請按「更新內容」。'
+            : '筆記在那之後改過，連結上看到的還是舊的內容——按「更新內容」。'));
           row.appendChild(st);
         }
 
         const acts = el('div', 'share-acts');
+        if (cfg.setAuto) {
+          const lab = el('label', 'share-auto');
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = !manual;
+          lab.appendChild(cb);
+          lab.appendChild(el('span', null, '自動更新'));
+          lab.title = manual ? '現在不會自動更新。勾起來：之後改了筆記，這個連結會跟著更新。'
+            : '現在會自動更新。取消勾選：這個連結停在現在的內容，要更新得自己按「更新內容」。';
+          cb.addEventListener('change', function () {
+            cb.disabled = true;
+            cfg.setAuto(lk, cb.checked)
+              .then(function () { toast(cb.checked ? '這個連結會自動更新' : '這個連結不再自動更新'); changed(); return reload(); })
+              .catch(function (e) { cb.checked = !cb.checked; cb.disabled = false; toast('設定失敗：' + e.message); });
+          });
+          acts.appendChild(lab);
+        }
         const refresh = el('button', 'btn btn-ghost');
         refresh.type = 'button';
         refresh.title = '把現在的內容重新打包到同一個網址';
@@ -674,7 +707,7 @@
     function create() {
       busy(make, true, '打包中…');
       cfg.pack()
-        .then(function (html) { return cfg.create(html, Number(sel.value) || 0); })
+        .then(function (html) { return cfg.create(html, Number(sel.value) || 0, autoBox ? autoBox.checked : true); })
         .then(function (lk) {
           copyText(shareUrl(lk.token));
           toast('已建立公開連結，網址已複製');
@@ -744,17 +777,28 @@
     const live = function () { return (o.note ? o.note() : null) || note; };
     return openLinks({
       heading: '公開連結 — ' + (note.title || '未命名筆記'),
-      warn: '任何拿到連結的人都不需要帳號就能讀到這篇筆記（唯讀）。連結上是建立或更新當下的內容；' +
-        '你之後改了筆記，停手幾秒後會自動更新到連結上，也可以隨時按「更新內容」。取消分享後網址立刻失效。',
+      warn: '任何拿到連結的人都不需要帳號就能讀到這篇筆記（唯讀）。每個連結可以各自決定要不要「自動更新」：' +
+        '勾選的，你之後改了筆記、停手幾秒後內容就會跟上；沒勾的，連結停在你最後一次按「更新內容」的那一版。' +
+        '取消分享後網址立刻失效。',
       empty: '這篇筆記還沒有公開連結。建立之後，任何拿到網址的人不用帳號就能直接閱讀。',
       list: function () { return Store.getNoteLinks(note.id); },
       pack: function () {
         if (!global.Book || !Book.renderNoteStandalone) return Promise.reject(new Error('打包功能還沒載入'));
         return Book.renderNoteStandalone(live());
       },
-      create: function (html, days) {
+      create: function (html, days, auto) {
         const n = live();
-        return Store.createNoteLink(note.id, { title: n.title || '未命名筆記', html: html, rev: n.rev || 0, expiresDays: days });
+        return Store.createNoteLink(note.id, { title: n.title || '未命名筆記', html: html, rev: n.rev || 0, expiresDays: days, autoUpdate: auto !== false });
+      },
+      // 關掉：只改開關，連結上的頁面原封不動。打開：如果連結已經落後，順便馬上更新成現在的
+      // 內容——不然勾了「自動更新」卻要等到下一次改筆記才跟上，看起來像沒作用
+      setAuto: function (lk, on) {
+        if (!on || !lk.stale) return Store.updateNoteLink(lk.token, { autoUpdate: !!on });
+        if (!global.Book || !Book.renderNoteStandalone) return Store.updateNoteLink(lk.token, { autoUpdate: true });
+        const n = live();
+        return Book.renderNoteStandalone(n).then(function (html) {
+          return Store.updateNoteLink(lk.token, { title: n.title || '未命名筆記', html: html, rev: n.rev || 0, autoUpdate: true });
+        });
       },
       update: function (lk, html) {
         const n = live();

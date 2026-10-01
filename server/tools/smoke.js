@@ -459,6 +459,25 @@ async function main() {
     r = await call(admin, 'PUT', '/api/note-links/' + ntok, { html: page, rev: 999 });
     ok(r.status === 200 && r.data.link.noteRev === rev2, 'a rev from the client is capped at the note\'s real rev', r.data.link);
 
+    // 自動更新的開關：每個連結各自的設定，預設開
+    r = await call(admin, 'GET', '/api/notes/' + pub + '/links');
+    const before = r.data.links[0];
+    ok(before.autoUpdate === true, 'a link auto-updates unless told otherwise', before.autoUpdate);
+    r = await call(admin, 'PUT', '/api/note-links/' + ntok, { autoUpdate: false });
+    ok(r.status === 200 && r.data.link.autoUpdate === false && r.data.link.updatedAt === before.updatedAt && r.data.link.noteRev === before.noteRev,
+      'switching auto-update off is a setting only: the snapshot and its timestamp are untouched', r.data.link);
+    r = await call(anon, 'GET', '/s/' + ntok);
+    ok(r.status === 200 && r.data === page, 'and the page itself is exactly what it was');
+    r = await call(admin, 'PUT', '/api/note-links/' + ntok, {});
+    ok(r.status === 400, 'a PUT with neither a page nor a setting is refused', r.status);
+    r = await call(bob, 'PUT', '/api/note-links/' + ntok, { autoUpdate: true });
+    ok(r.status === 404, "bob cannot flip admin's setting", r.status);
+    r = await call(admin, 'PUT', '/api/note-links/' + ntok, { html: page, rev: rev2, autoUpdate: true });
+    ok(r.status === 200 && r.data.link.autoUpdate === true, 'a refresh can carry the setting too', r.data.link.autoUpdate);
+    r = await call(admin, 'POST', '/api/notes/' + pub + '/links', { html: page, autoUpdate: false });
+    ok(r.status === 200 && r.data.link.autoUpdate === false, 'a link can be created with auto-update off', r.data.link.autoUpdate);
+    await call(admin, 'DELETE', '/api/note-links/' + r.data.link.token);
+
     // 別人
     r = await call(bob, 'GET', '/api/notes/' + pub + '/links');
     ok(r.status === 404, "bob cannot list admin's links", r.status);
@@ -826,7 +845,7 @@ async function main() {
     await call(carol, 'POST', '/api/notes/' + cNote.id + '/versions', { label: '備份前標記' });
     await call(carol, 'POST', '/api/notes/' + cNote.id + '/shares', { username: BOB, perm: 'read' });
     // 一個公開連結（分享給沒有帳號的人）：備份要帶著走，還原回來同一個網址要能開
-    r = await call(carol, 'POST', '/api/notes/' + cNote.id + '/links', { html: '<p>public snapshot</p>', rev: cNoteV2.rev });
+    r = await call(carol, 'POST', '/api/notes/' + cNote.id + '/links', { html: '<p>public snapshot</p>', rev: cNoteV2.rev, autoUpdate: false });
     const cLink = r.data.link.token;
     r = await call(carol, 'POST', '/api/notes', { title: '要丟掉的', content: 'bin' });
     const cBin = r.data.note.id;
@@ -855,7 +874,8 @@ async function main() {
     ok(!z.zr.has('users.json'), 'a mine backup carries no accounts');
     const linksIdx = readJson(z.zr, 'links.json');
     ok(man.counts.noteLinks === 1 && linksIdx.length === 1 && linksIdx[0].token === cLink && linksIdx[0].noteId === cNote.id &&
-       z.zr.read(linksIdx[0].file).toString('utf8') === '<p>public snapshot</p>', 'a public note link is in the backup with its page', linksIdx[0]);
+       z.zr.read(linksIdx[0].file).toString('utf8') === '<p>public snapshot</p>' && linksIdx[0].autoUpdate === false,
+      'a public note link is in the backup with its page and its auto-update setting', linksIdx[0]);
     z.zr.close(); fs.unlinkSync(z.f);
 
     r = await call(carol, 'GET', '/api/backup?scope=site');
@@ -908,6 +928,8 @@ async function main() {
     r = await call(anon, 'GET', '/s/' + cLink);
     ok(r.status === 200 && r.data === '<p>public snapshot</p>' && job.report.links && job.report.links.created === 1,
       'the public note link is back at the same URL', { status: r.status, report: job.report.links });
+    r = await call(carol2, 'GET', '/api/notes/' + cNote.id + '/links');
+    ok(r.status === 200 && r.data.links.length === 1 && r.data.links[0].autoUpdate === false, 'with auto-update still off', r.data.links);
     r = await call(carol2, 'GET', '/api/trash');
     ok(r.data.notes.some(n => n.id === cBin), 'the trashed note is back in the trash');
 

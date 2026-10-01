@@ -351,7 +351,10 @@ const MIGRATIONS = [
   ['images', 'folder_id', 'VARCHAR(64) COLLATE utf8mb4_bin NULL'],
   // drawio 的「我的圖示」：這個上傳是不是擁有者的圖示庫裡的一個。只是一個標記——檔案
   // 本身、誰看得到它（筆記內容裡有 img:<id>）都跟其他上傳一樣，見 api.js 的 listIcons。
-  ['images', 'icon', 'TINYINT NOT NULL DEFAULT 0']
+  ['images', 'icon', 'TINYINT NOT NULL DEFAULT 0'],
+  // 公開連結要不要跟著筆記自動更新（見 api.js 的 note_links 那一段）。預設 1：加這個欄位
+  // 之前建立的連結本來就是自動更新的，升級之後行為不能變。
+  ['note_links', 'auto_update', 'TINYINT NOT NULL DEFAULT 1']
 ];
 
 async function addColumnIfMissing(table, col, ddl) {
@@ -580,7 +583,7 @@ const q = {
 
   // 單篇筆記的公開連結（api.js 的 listNoteLinks 那一組）
   noteLinkList: stmt(`
-    SELECT token, note_id, title, note_rev, created_at, updated_at, expires_at, views,
+    SELECT token, note_id, title, note_rev, auto_update, created_at, updated_at, expires_at, views,
            CHAR_LENGTH(html) AS chars
     FROM note_links WHERE note_id = ? AND owner_id = ? ORDER BY created_at DESC`),
   noteLinkOwned: stmt('SELECT * FROM note_links WHERE token = ? AND owner_id = ?'),
@@ -595,6 +598,8 @@ const q = {
   updateNoteLink: stmt(
     'UPDATE note_links SET title = ?, html = ?, note_rev = ?, updated_at = ?, expires_at = ? WHERE token = ?'),
   deleteNoteLink: stmt('DELETE FROM note_links WHERE token = ? AND owner_id = ?'),
+  // 自動更新的開關另外一句 UPDATE 設：insertNoteLink 還有 backup.js 在用，不去動它的參數個數
+  setNoteLinkAuto: stmt('UPDATE note_links SET auto_update = ? WHERE token = ? AND owner_id = ?'),
   bumpNoteLinkViews: stmt('UPDATE note_links SET views = views + 1 WHERE token = ?'),
   countNoteLinks: stmt('SELECT COUNT(*) AS n FROM note_links WHERE note_id = ?'),
   // 哪些筆記現在有還沒過期的公開連結（清單上要標出來）

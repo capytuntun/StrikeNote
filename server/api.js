@@ -608,6 +608,9 @@ function shapeNoteLink(row, note) {
     views: row.views || 0,
     chars: row.chars != null ? row.chars : (row.html ? row.html.length : 0),
     noteRev: row.note_rev || 0,
+    // 要不要跟著筆記自動更新。關掉的連結就停在最後一次「更新內容」那一刻，要更新得自己按
+    // （欄位是後來加的；讀不到就當作開著，跟加欄位之前的行為一樣）
+    autoUpdate: row.auto_update == null ? true : !!row.auto_update,
     // 筆記在建立／更新連結之後又改過：連結上看到的已經不是最新的
     stale: !!(note && (note.rev || 0) > (row.note_rev || 0))
   };
@@ -645,6 +648,8 @@ async function createNoteLink(user, noteId, body) {
   await q.insertNoteLink.run(token, n.note.id, user.id,
     String((body && body.title) || n.note.title || '未命名筆記').slice(0, 200),
     h.html, rev, now, now, expiryFrom(body && body.expiresDays));
+  // 沒說就是自動更新；明確給 false 才關
+  if (body && body.autoUpdate === false) await q.setNoteLinkAuto.run(0, token, user.id);
   return { link: shapeNoteLink(await q.noteLinkOwned.get(token, user.id), n.note) };
 }
 async function updateNoteLink(user, token, body) {
@@ -652,6 +657,11 @@ async function updateNoteLink(user, token, body) {
   if (!row) return { status: 404, error: '找不到這個公開連結' };
   const n = await linkableNote(user, row.note_id);
   if (!n.note) return n;
+  // 只改設定（自動更新的開關），不帶內容：連結上的頁面原封不動，更新時間也不動
+  if (body && body.html === undefined && typeof body.autoUpdate === 'boolean') {
+    await q.setNoteLinkAuto.run(body.autoUpdate ? 1 : 0, row.token, user.id);
+    return { link: shapeNoteLink(await q.noteLinkOwned.get(row.token, user.id), n.note) };
+  }
   const h = linkHtml(body, '更新公開連結');
   if (!h.html) return h;
   const expires = (body && body.expiresDays !== undefined)
@@ -659,6 +669,7 @@ async function updateNoteLink(user, token, body) {
   const rev = Math.min(parseInt(body && body.rev, 10) || 0, n.note.rev || 0);
   await q.updateNoteLink.run(String((body && body.title) || row.title).slice(0, 200), h.html,
     rev, Date.now(), expires, row.token);
+  if (body && typeof body.autoUpdate === 'boolean') await q.setNoteLinkAuto.run(body.autoUpdate ? 1 : 0, row.token, user.id);
   return { link: shapeNoteLink(await q.noteLinkOwned.get(row.token, user.id), n.note) };
 }
 async function deleteNoteLink(user, token) {

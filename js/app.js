@@ -2599,10 +2599,14 @@
     Store.getNoteLinks(id).then(function (links) {
       const alive = links.filter(function (l) { return !l.expired; });
       if (!alive.length) { markPublic(id, false); return; }
+      // 只更新「自動更新」開著的連結；關掉的那些停在本人最後一次按「更新內容」的那一版。
+      // 一個都沒有就不用打包了（打包會把每張圖內嵌進去，不便宜）
+      const auto = alive.filter(function (l) { return l.autoUpdate !== false; });
+      if (!auto.length) return;
       const rev = Math.max(n.rev || 0, n._syncRev || 0);
       return Book.renderNoteStandalone(n).then(function (html) {
         let p = Promise.resolve();
-        alive.forEach(function (l) {
+        auto.forEach(function (l) {
           p = p.then(function () { return Store.updateNoteLink(l.token, { title: n.title || '未命名筆記', html: html, rev: rev }); });
         });
         return p;
@@ -4043,8 +4047,11 @@
         const alive = links.filter(function (l) { return !l.expired; });
         markPublic(note.id, alive.length > 0);
         if (!alive.length) { pubMsg.textContent = '目前沒有公開連結。建立一個之後，任何拿到網址的人不用帳號就能讀這篇筆記（唯讀）。'; return; }
-        const stale = alive.some(function (l) { return l.stale; });
+        // 不自動更新的連結停在舊內容是本人要的，不算「落後」；會自動更新的落後了才要提醒
+        const manual = alive.filter(function (l) { return l.autoUpdate === false; }).length;
+        const stale = alive.some(function (l) { return l.stale && l.autoUpdate !== false; });
         pubMsg.textContent = '有 ' + alive.length + ' 個公開連結，任何拿到網址的人都看得到這篇筆記。' +
+          (manual ? (manual === alive.length ? '都不自動更新（停在你最後一次更新的內容）。' : '其中 ' + manual + ' 個不自動更新。') : '') +
           (stale ? '筆記在那之後改過，連結上還是舊的內容。' : '');
         modal.querySelector('.share-public').classList.toggle('is-stale', stale);
       }).catch(function (e) { pubMsg.textContent = '公開連結讀取失敗：' + (e && e.message || e); });

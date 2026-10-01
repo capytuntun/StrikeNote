@@ -262,7 +262,8 @@ async function exportZip(user, scope, req, res) {
     await zip.add(file, Buffer.from(l.html || '', 'utf8'), { level: 1, mtime: Number(l.updated_at) || now });
     linkIndex.push({
       token: l.token, noteId: l.note_id, owner: nameOf.get(l.owner_id) || null, title: l.title,
-      noteRev: Number(l.note_rev || 0), createdAt: Number(l.created_at), updatedAt: Number(l.updated_at),
+      noteRev: Number(l.note_rev || 0), autoUpdate: l.auto_update == null ? true : !!l.auto_update,
+      createdAt: Number(l.created_at), updatedAt: Number(l.updated_at),
       expiresAt: l.expires_at ? Number(l.expires_at) : null, views: Number(l.views || 0), file: file
     });
   }
@@ -725,6 +726,8 @@ async function runRestore(job, user, up, opts) {
       if (html == null) { report.links.skipped++; warn('備份裡缺少公開連結的內容：' + l.token.slice(0, 8) + '…'); continue; }
       await q.insertNoteLink.run(l.token, l.noteId, owner, String(l.title || ''), html, Number(l.noteRev) || 0,
         Number(l.createdAt) || Date.now(), Number(l.updatedAt) || Date.now(), l.expiresAt ? Number(l.expiresAt) : null);
+      // 舊的備份沒有這個欄位：照預設（自動更新）
+      if (l.autoUpdate === false) await q.setNoteLinkAuto.run(0, l.token, owner);
       report.links.created++;
     }
 
