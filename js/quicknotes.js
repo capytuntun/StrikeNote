@@ -244,6 +244,21 @@
     });
   }
   function itemsToText(items) { return items.map(function (it) { return '- [' + (it.done ? 'x' : ' ') + '] ' + it.text; }).join('\n'); }
+  // 文字跟清單是兩塊（使用者要的：開了勾選框還是要能打純文字）：純文字行在上、`- [ ]` 行在下
+  function splitTasks(text) {
+    const plain = [], items = [];
+    String(text || '').split('\n').forEach(function (l) {
+      const m = TASK_RE.exec(l);
+      if (m) items.push({ done: m[2] !== ' ', text: l.replace(TASK_RE, '').replace(/^\s/, '') }); else plain.push(l);
+    });
+    while (plain.length && !plain[plain.length - 1].trim()) plain.pop();
+    while (plain.length && !plain[0].trim()) plain.shift();
+    return { plain: plain.join('\n'), items: items };
+  }
+  function joinTasks(plain, items) {
+    const t = itemsToText(items || []);
+    return plain && t ? plain + '\n' + t : (plain || t);
+  }
   // Keep 的清單編輯：一列一個項目（勾選框＋輸入框），Enter 新增下一個，空的按 Backspace 刪掉，
   // 勾完的集中在下面「N 個已完成項目」
   function makeListEditor(items, onChange) {
@@ -371,27 +386,28 @@
 
     const sp0 = splitMedia(note.content || '');
     const media = sp0.media.slice();
-    let listMode = hasTasks(sp0.text);
-    let items = listMode ? parseItems(sp0.text) : null;
-    let plain = listMode ? '' : sp0.text;
+    const st0 = splitTasks(sp0.text);
+    let plain = st0.plain, items = st0.items, showList = items.length > 0;
     let ta = null;
-    function bodyText() { return listMode ? itemsToText(items) : plain; }
+    function bodyText() { return joinTasks(plain, showList ? items : []); }
     function currentContent() { return joinMedia(media, bodyText()); }
     function drawMedia() { mediaBox.innerHTML = ''; mediaBox.appendChild(makeMediaStrip(media, function () { drawMedia(); scheduleSave(); })); }
-    function drawBody(focus) {
+    // 文字框一直在（純文字），勾選清單是它下面另一塊——兩個分開，開了清單照樣能打字
+    function drawBody(focusList) {
       bodyBox.innerHTML = '';
-      if (listMode) {
+      ta = el('textarea', 'qn-modal-body');
+      ta.placeholder = showList ? '文字（清單在下面）' : '記點什麼…'; ta.value = plain;
+      ta.addEventListener('input', function () { plain = ta.value; autosize(ta); scheduleSave(); linksSoon(); });
+      bodyBox.appendChild(ta);
+      autosize(ta);
+      if (showList) {
         if (!items.length) items.push({ done: false, text: '' });
-        const ed = makeListEditor(items, function () { scheduleSave(); linksSoon(); });
-        bodyBox.appendChild(ed); ta = null;
-        if (focus) ed.focusLast();
-      } else {
-        ta = el('textarea', 'qn-modal-body');
-        ta.placeholder = '記點什麼…'; ta.value = plain;
-        ta.addEventListener('input', function () { plain = ta.value; autosize(ta); scheduleSave(); linksSoon(); });
-        bodyBox.appendChild(ta);
-        autosize(ta);
-        if (focus) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+        const ed = makeListEditor(items, function () {
+          scheduleSave(); linksSoon();
+          if (!items.length) { showList = false; drawBody(false); }
+        });
+        bodyBox.appendChild(ed);
+        if (focusList) ed.focusLast();
       }
     }
 
@@ -402,7 +418,7 @@
     function linksSoon() { clearTimeout(linkTimer); linkTimer = setTimeout(renderLinks, 300); }
     function renderLinks() {
       linksBox.innerHTML = '';
-      const text = listMode ? items.map(function (it) { return it.text; }).join('\n') : plain;
+      const text = plain + '\n' + (showList ? items.map(function (it) { return it.text; }).join('\n') : '');
       const seen = {};
       const urlRe = /https?:\/\/[^\s<>()\[\]"']+/g;
       let m;
@@ -472,9 +488,13 @@
       more: [
         { icon: 'trash', label: '刪除筆記', danger: true, fn: function () { closed = true; overlay.remove(); document.removeEventListener('keydown', onKey, true); o.onDelete(note); } },
         { icon: 'copy', label: '建立副本', fn: function () { flush(); o.onDuplicate(Object.assign({}, note, { title: title.value, content: currentContent() })); } },
-        { icon: 'list-checks', label: listMode ? '隱藏勾選框' : '顯示勾選框', fn: function () {
-          if (listMode) { plain = items.map(function (it) { return it.text; }).join('\n'); listMode = false; }
-          else { items = parseItems(plain); listMode = true; }
+        { icon: 'list-checks', label: showList ? '隱藏勾選框' : '顯示勾選框', fn: function () {
+          if (showList) {
+            // 收起清單：項目的文字併回純文字，不丟
+            const extra = items.map(function (it) { return it.text; }).filter(function (t) { return t.trim(); }).join('\n');
+            plain = plain && extra ? plain + '\n' + extra : (plain || extra);
+            items = []; showList = false;
+          } else { items = [{ done: false, text: '' }]; showList = true; }
           drawBody(true); scheduleSave(); renderLinks();
         } }
       ]
@@ -496,7 +516,7 @@
     drawMedia();
     drawBody(false);
     renderLinks();
-    setTimeout(function () { if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } else { const ed = bodyBox.firstChild; if (ed && ed.focusLast) ed.focusLast(); } }, 0);
+    setTimeout(function () { if (showList) { const ed = bodyBox.querySelector('.qn-list-editor'); if (ed && ed.focusLast) ed.focusLast(); } else if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }, 0);
   }
 
   // ---- 新增列：Keep 的「記點什麼…」——聚焦就展開成一張卡片 --------------------
@@ -526,17 +546,19 @@
     title.type = 'text'; title.placeholder = '標題';
     const foot = el('div', 'qn-composer-foot');
     function drawMedia() { mediaBox.innerHTML = ''; mediaBox.appendChild(makeMediaStrip(media, drawMedia)); }
+    // 清單是文字框下面另一塊；文字框一直在，開了清單還是能打字
     function setList(on) {
       listMode = on;
       if (on) {
-        items = parseItems(ta.value);
-        if (!items.length) items.push({ done: false, text: '' });
-        listBox.innerHTML = ''; listEd = makeListEditor(items, function () {}); listBox.appendChild(listEd);
-        listBox.hidden = false; ta.hidden = true;
+        items = [{ done: false, text: '' }];
+        listBox.innerHTML = ''; listEd = makeListEditor(items, function () { if (!items.length) setList(false); }); listBox.appendChild(listEd);
+        listBox.hidden = false;
         listEd.focusLast();
       } else {
-        ta.value = (items || []).map(function (it) { return it.text; }).join('\n'); items = null; listEd = null;
-        listBox.hidden = true; ta.hidden = false; autosize(ta); ta.focus();
+        const extra = (items || []).map(function (it) { return it.text; }).filter(function (t) { return t.trim(); }).join('\n');
+        ta.value = ta.value.trim() && extra ? ta.value.trim() + '\n' + extra : (ta.value.trim() || extra);
+        items = null; listEd = null;
+        listBox.hidden = true; listBox.innerHTML = ''; autosize(ta); ta.focus();
       }
     }
     const tools = makeToolbar({
@@ -569,7 +591,7 @@
     function reset() {
       open = false; color = ''; pinned = false; archived = false;
       media.length = 0; drawMedia();
-      if (listMode) { listMode = false; items = null; listEd = null; listBox.hidden = true; listBox.innerHTML = ''; ta.hidden = false; }
+      if (listMode) { listMode = false; items = null; listEd = null; listBox.hidden = true; listBox.innerHTML = ''; }
       ta.value = ''; title.value = ''; autosize(ta);
       pin.classList.remove('on'); pin.title = '釘選';
       box.className = 'qn-composer';
@@ -577,7 +599,7 @@
     }
     // 關閉＝存檔（有內容才建立），空的直接收合——Keep 沒有「新增」鈕
     function commit() {
-      const body = listMode ? itemsToText(items.filter(function (it) { return it.text.trim(); })) : ta.value.trim();
+      const body = joinTasks(ta.value.trim(), listMode ? items.filter(function (it) { return it.text.trim(); }) : []);
       const content = joinMedia(media, body), t = title.value.trim();
       const meta = {};
       if (color) meta.color = color;

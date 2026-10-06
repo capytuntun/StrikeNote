@@ -178,9 +178,38 @@
       changed(); refresh();
     }
     // 字級：execCommand 只認 1–7，先打 7 再把 <font size="7"> 換成 span style（Google 文件的字級單位是 pt）
+    const FONT_SIZE_PT = { 1: 8, 2: 10, 3: 12, 4: 14, 5: 18, 6: 24, 7: 36 };
+    let pendingPt = null;
+    // Chrome 偶爾還是會留下 <font size=N>（例如改字級後才打的字）：一律換成 span style
+    function normalizeFonts() {
+      let changedAny = false;
+      paper.querySelectorAll('font[size]').forEach(function (f) {
+        const span = document.createElement('span');
+        const n = parseInt(f.getAttribute('size'), 10);
+        span.style.fontSize = ((n === 7 && pendingPt) ? pendingPt : (FONT_SIZE_PT[n] || 11)) + 'pt';
+        if (f.getAttribute('color')) span.style.color = f.getAttribute('color');
+        if (f.getAttribute('face')) span.style.fontFamily = f.getAttribute('face');
+        while (f.firstChild) span.appendChild(f.firstChild);
+        f.parentNode.replaceChild(span, f);
+        changedAny = true;
+      });
+      return changedAny;
+    }
     function setFontSize(pt) {
       pt = Math.max(6, Math.min(96, Math.round(pt)));
       restoreRange();
+      pendingPt = pt;
+      const sel0 = window.getSelection();
+      if (sel0 && sel0.isCollapsed) {
+        // 沒選字：放一個帶字級的 span，游標進去，接下來打的字就是這個大小
+        document.execCommand('insertHTML', false, '<span style="font-size:' + pt + 'pt">\u200B</span>');
+        const s2 = window.getSelection();
+        let n = s2 && s2.anchorNode;
+        if (n && n.nodeType === 3 && n.nodeValue === '\u200B') { const r = document.createRange(); r.setStart(n, 1); r.collapse(true); s2.removeAllRanges(); s2.addRange(r); }
+        saveRange(); changed(); refresh();
+        if (sizeEl) sizeEl.value = String(pt);
+        return;
+      }
       try {
         document.execCommand('styleWithCSS', false, false);
         document.execCommand('fontSize', false, '7');
@@ -520,7 +549,7 @@
     }
 
     // ---- 編輯區事件 ----
-    paper.addEventListener('input', changed);
+    paper.addEventListener('input', function () { if (normalizeFonts()) { /* 換掉的 <font> 已經在 DOM 裡 */ } changed(); });
     paper.addEventListener('keyup', refresh);
     paper.addEventListener('mouseup', function () { saveRange(); refresh(); });
     document.addEventListener('selectionchange', onSel);
