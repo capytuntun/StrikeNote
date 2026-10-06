@@ -29,6 +29,7 @@
     relmap: { icon: 'network', cls: 'kind-relmap' },
     drawio: { icon: 'shapes', cls: 'kind-drawio' },
     board: { icon: 'kanban', cls: 'kind-board' },
+    start: { icon: 'layout-grid', cls: 'kind-start' },
     sec: { icon: 'shield', cls: 'kind-sec' },
     perf: { icon: 'chart', cls: 'kind-perf' },
     file: { icon: 'paperclip', cls: '' },

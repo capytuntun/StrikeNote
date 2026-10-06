@@ -562,6 +562,7 @@
     if (n.meta && n.meta.relMap) return { icon: 'network', label: '關聯分析', cls: 'kind-relmap' };
     if (n.meta && n.meta.drawio) return { icon: 'shapes', label: 'drawio', cls: 'kind-drawio' };
     if (n.meta && n.meta.board) return { icon: 'kanban', label: '看板', cls: 'kind-board' };
+    if (n.meta && n.meta.startpage) return { icon: 'layout-grid', label: '起始頁', cls: 'kind-start' };
     return { icon: 'file-text', label: '', cls: '' };
   }
   function isPinned(n) { return !!(n.meta && n.meta.pinned); }

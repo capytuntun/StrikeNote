@@ -520,6 +520,16 @@ async function main() {
       ok(r.data.notes.some(n => n.id === boardNote && n.kind === 'board'), 'the trash lists it as kind board');
       await call(admin, 'POST', '/api/notes/' + boardNote + '/restore');
     }
+    // 起始頁（js/startpage.js）：area 'start'，同一套
+    r = await call(admin, 'POST', '/api/notes', { title: '起始頁一', content: '```startpage\n{"bg":"grey","columns":4,"search":"google","widgets":[]}\n```\n', area: 'start', meta: { startpage: true } });
+    ok(r.status === 200 && r.data.note && r.data.note.area === 'start', 'a start page note is created in area start', r.status);
+    if (r.data.note) {
+      const sp = r.data.note.id;
+      await call(admin, 'DELETE', '/api/notes/' + sp);
+      r = await call(admin, 'GET', '/api/trash');
+      ok(r.data.notes.some(n => n.id === sp && n.kind === 'start'), 'the trash lists it as kind start');
+      await call(admin, 'POST', '/api/notes/' + sp + '/restore');
+    }
 
     // 垃圾桶：連結跟著筆記的狀態
     r = await call(admin, 'DELETE', '/api/notes/' + pub);

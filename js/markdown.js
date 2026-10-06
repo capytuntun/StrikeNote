@@ -607,6 +607,8 @@
       if (info === 'drawio' && global.DrawIO) return DrawIO.blockHTML(code);
       // ```board 是看板（js/board.js）：圍欄裡是看板的 JSON，畫成靜態的列表與卡片（預覽、PDF、電子書）
       if (info === 'board' && global.Board) return Board.blockHTML(code);
+      // ```startpage 是起始頁（js/startpage.js）：圍欄裡是那一頁的 JSON，畫成靜態的欄位與書籤
+      if (info === 'startpage' && global.StartPage) return StartPage.blockHTML(code);
       let requested = info, lineNumbers = false, startLine = 1;
       const opt = info.match(/^([^\s=]*)=(\d*)$/);
       if (opt) {

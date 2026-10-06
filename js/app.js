@@ -72,6 +72,7 @@
     if (note.meta && note.meta.relMap) return 'network';
     if (note.meta && note.meta.drawio) return 'shapes';
     if (note.meta && note.meta.board) return 'kanban';
+    if (note.meta && note.meta.startpage) return 'layout-grid';
     if (note.area === 'quick') return 'pin';
     if (note.meta && note.meta.perfReport) return 'chart';
     if (note.meta && note.meta.secReport) return 'shield';
@@ -132,6 +133,8 @@
         openQuick();
       } else if (location.hash === '#board') {
         openBoards();
+      } else if (location.hash === '#start') {
+        openStart();
       } else if (areaFromHash() && areaFromHash().area === 'novel') {
         // 一定要先問過密碼才能進去，重新整理也一樣——openArea('novel') 本身就會擋下來彈窗。
         // 還沒解鎖時小說的資料夾不在 state.folders 裡，所以資料夾 id 直接從網址拿
@@ -196,7 +199,7 @@
       selectedFolders.clear();
     }
     // 樹顯示哪個區域，側邊欄那一列就亮著——包括正在編輯那個區域裡的一篇筆記的時候
-    ['course', 'knowledge', 'novel', 'quick', 'board'].forEach(function (a) { setNavActive(a + '-open-btn', a === area); });
+    ['course', 'knowledge', 'novel', 'quick', 'board', 'start'].forEach(function (a) { setNavActive(a + '-open-btn', a === area); });
     renderTree();
   }
   // 新東西要建在哪個區域：有目標資料夾就跟資料夾（伺服器的 resolveArea 也是這樣要求的），
@@ -206,7 +209,7 @@
       const f = state.folders.find(function (x) { return x.id === folderId; });
       return f ? (f.area || null) : null;
     }
-    return treeArea && treeArea !== 'quick' && treeArea !== 'board' ? treeArea : null;   // 看板只從看板頁建立
+    return treeArea && treeArea !== 'quick' && treeArea !== 'board' && treeArea !== 'start' ? treeArea : null;   // 看板、起始頁只從自己的頁面建立
   }
   function withArea(folderId, opts) {
     const a = areaForNew(folderId);
@@ -229,7 +232,7 @@
     treeEl.innerHTML = '';
     // 在某個區域裡：樹的最上面標出這是哪個區域的內容，免得跟「所有筆記」的樹搞混
     if (treeArea) {
-      const info = treeArea === 'quick' ? { title: '隨筆', icon: 'pin' } : treeArea === 'board' ? { title: '看板', icon: 'kanban' } : AREA_INFO[treeArea];
+      const info = treeArea === 'quick' ? { title: '隨筆', icon: 'pin' } : treeArea === 'board' ? { title: '看板', icon: 'kanban' } : treeArea === 'start' ? { title: '起始頁', icon: 'layout-grid' } : AREA_INFO[treeArea];
       const head = document.createElement('div');
       head.className = 'tree-section tree-area-head';
       head.innerHTML = Icons.svg(info.icon) + '<span>' + MD.escapeHtml(info.title) + '</span>';
@@ -241,6 +244,7 @@
       hint.className = 'tree-hint';
       hint.textContent = treeArea === 'quick' ? '還沒有隨筆。'
         : treeArea === 'board' ? '還沒有看板。'
+        : treeArea === 'start' ? '還沒有起始頁。'
         : treeArea ? '這個區域還沒有資料夾或筆記。'
         : '尚無筆記，點上方「＋ 筆記」開始。';
       treeEl.appendChild(hint);
@@ -668,6 +672,7 @@
     if (novelWrapEl && !novelWrapEl.hidden && window.AreaBrowser) AreaBrowser.refresh(areaOpts('novel'));
     if (quickWrapEl && !quickWrapEl.hidden && window.QuickNotes) QuickNotes.refresh(quickOpts());
     if (boardsWrapEl && !boardsWrapEl.hidden && window.Board) Board.renderIndex(boardsPageEl, boardsOpts());
+    renderStart();
   }
   // 儀表板需要的資料與回呼，集中一處，render / refresh 共用
   function dashOpts() {
@@ -1012,6 +1017,8 @@
     setNavActive('quick-open-btn', false);
     if (boardsWrapEl) boardsWrapEl.hidden = true;
     setNavActive('board-open-btn', false);
+    if (startWrapEl) { startWrapEl.hidden = true; if (window.StartPage) StartPage.closePop(); }
+    setNavActive('start-open-btn', false);
   }
 
   // 進入一個區域頁面前的共用收尾：跟 openTrash／openBook 同一套「收起其他檢視」。
@@ -1124,6 +1131,74 @@
     setHash('board');
     Board.renderIndex(boardsPageEl, boardsOpts());
     setTreeArea('board');
+  }
+  // ---- 起始頁（js/startpage.js）：#start 一個畫面，上面是分頁（每一頁都是 area 'start'、meta.startpage 的筆記）----
+  // 跟看板一樣只從自己的頁面建立；存檔是每一頁一條單一寫入路徑（同時只有一個請求、其餘併成一次補送）。
+  const startWrapEl = $('#start-wrap'), startPageEl = $('#start-page');
+  let startCurrent = LS.get('startPage') || null;
+  const startSavers = {};
+  function startSave(n, content) {
+    const live = state.notes.find(function (x) { return x.id === n.id; }) || n;
+    live.content = content;
+    if (live !== n) n.content = content;
+    const s = startSavers[n.id] || (startSavers[n.id] = { saving: false, again: false });
+    const run = function () {
+      s.saving = true;
+      const cur = state.notes.find(function (x) { return x.id === n.id; }) || n;
+      Store.updateNote({ id: cur.id, title: cur.title, content: cur.content, folderId: cur.folderId, meta: cur.meta })
+        .then(function (r) { cur.rev = r.rev; cur.updatedAt = r.updatedAt; noteSaved(cur); }, function (e) { toast('儲存失敗：' + (e && e.message || e)); })
+        .then(function () { s.saving = false; if (s.again) { s.again = false; run(); } });
+    };
+    if (s.saving) s.again = true; else run();
+  }
+  function startOpts() {
+    return {
+      pages: state.notes.filter(function (n) { return n.area === 'start' && isMine(n) && window.StartPage && StartPage.isNote(n); }),
+      current: startCurrent,
+      readOnly: function (n) { return n.perm === 'read'; },
+      onSelect: function (id) { startCurrent = id; LS.set('startPage', id); renderStart(); },
+      onCreate: function (d) {
+        Store.createNote(d.title, null, { area: 'start', content: StartPage.generate(d.bg), meta: { startpage: true } }).then(function (n) {
+          state.notes.push(n);
+          startCurrent = n.id; LS.set('startPage', n.id);
+          renderStart(); renderTree();
+        }, function (e) { toast('建立失敗：' + (e && e.message || e)); });
+      },
+      onRename: function (n, title) {
+        Store.updateNote(Object.assign({}, n, { title: title })).then(function (r) {
+          Object.assign(n, { title: r.title, rev: r.rev, updatedAt: r.updatedAt });
+          refreshViews();
+        }, function (e) { toast('儲存失敗：' + (e && e.message || e)); });
+      },
+      onChange: startSave,
+      onDelete: function (n) {
+        showConfirm({ title: '移到垃圾桶', message: '把起始頁「' + n.title + '」移到垃圾桶？可以從垃圾桶還原。', ok: '移到垃圾桶', danger: true }).then(function (yes) {
+          if (!yes) return;
+          Store.deleteNote(n.id).then(function () {
+            state.notes = state.notes.filter(function (x) { return x.id !== n.id; });
+            if (startCurrent === n.id) { startCurrent = null; LS.set('startPage', ''); }
+            refreshViews();
+            toast('已移到垃圾桶');
+          }, function (e) { toast('刪除失敗：' + (e && e.message || e)); });
+        });
+      }
+    };
+  }
+  function renderStart() {
+    if (startWrapEl && !startWrapEl.hidden && window.StartPage) StartPage.render(startPageEl, startOpts());
+  }
+  function openStart(o) {
+    if (!startWrapEl || !window.StartPage) return;
+    leaveOtherViews();
+    closeAreaViews();
+    if (o && o.pageId) { startCurrent = o.pageId; LS.set('startPage', o.pageId); }
+    startWrapEl.hidden = false;
+    startWrapEl.scrollTop = 0;
+    setNavActive('start-open-btn', true);
+    setSidebarOpen(false);   // 起始頁要整個寬度（像 start.me）
+    setHash('start');
+    setTreeArea('start');
+    renderStart();
   }
   function openKanbanNote(note) {
     if (!kanbanWrapEl || !window.Board) return;
@@ -1306,7 +1381,7 @@
   // 進關聯圖的那份筆記清單。
   function graphNotes() {
     return state.notes.filter(function (n) {
-      return n.area !== 'quick' && n.area !== 'novel' && n.area !== 'board' && !isFileNote(n) && !isStickyNote(n);
+      return n.area !== 'quick' && n.area !== 'novel' && n.area !== 'board' && n.area !== 'start' && !isFileNote(n) && !isStickyNote(n);
     });
   }
 
@@ -2043,6 +2118,8 @@
       if (window.DrawIO && DrawIO.isNote(note)) { anchorBackToFolder(fromArea, note); openDrawioNote(note); return; }
       // 看板（meta.board）同理：整頁的看板（js/board.js）
       if (window.Board && Board.isNote(note)) { openKanbanNote(note); return; }
+      // 起始頁（meta.startpage）：到起始頁的畫面、切到那一頁
+      if (window.StartPage && StartPage.isNote(note)) { openStart({ pageId: note.id }); return; }
       // 不在 state.notes 裡的檔案筆記（理論上不會發生）：同樣只疊檢視器，背景沒東西就回首頁
       if (isFileNote(note)) { if (!state.currentId) showEmpty(); openFileViewer(note); return; }
       state.currentId = id;
@@ -5234,6 +5311,7 @@
       }
       if (location.hash === '#quick') { if (quickWrapEl && quickWrapEl.hidden) openQuick(); return; }
       if (location.hash === '#board') { if (boardsWrapEl && boardsWrapEl.hidden) openBoards(); return; }
+      if (location.hash === '#start') { if (startWrapEl && startWrapEl.hidden) openStart(); return; }
       const bid = bookIdFromHash();
       if (bid) {
         if (state.folders.some(function (f) { return f.id === bid; })) openBook(bid);
@@ -5283,6 +5361,7 @@
     const novelBtn = $('#novel-open-btn'); if (novelBtn) novelBtn.addEventListener('click', function () { openArea('novel'); });
     const quickBtn = $('#quick-open-btn'); if (quickBtn) quickBtn.addEventListener('click', openQuick);
     const boardBtn = $('#board-open-btn'); if (boardBtn) boardBtn.addEventListener('click', openBoards);
+    const startBtn = $('#start-open-btn'); if (startBtn) startBtn.addEventListener('click', function () { openStart(); });
 
     editorEl.addEventListener('input', function () {
       renderPreview();

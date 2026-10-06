@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=183">
+  <link rel="stylesheet" href="app.css?v=184">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -160,6 +160,7 @@
         <button id="quick-open-btn" class="sidebar-nav-item" type="button" title="隨手記一下，像 Google Keep 一樣的卡片牆" data-icon="pin">隨筆</button>
         <button id="knowledge-open-btn" class="sidebar-nav-item" type="button" title="自己整理彙整出來的筆記" data-icon="book-open">知識區</button>
         <button id="board-open-btn" class="sidebar-nav-item" type="button" title="像 Trello 一樣的看板：列表與卡片" data-icon="kanban">看板</button>
+        <button id="start-open-btn" class="sidebar-nav-item" type="button" title="像 start.me 一樣的書籤起始頁" data-icon="layout-grid">起始頁</button>
         <button id="novel-open-btn" class="sidebar-nav-item" type="button" title="需要再輸入一次密碼才能進入" data-icon="lock">小說</button>
       </nav>
       <div class="search-row">
@@ -338,6 +339,10 @@
         <div id="boards-page" class="boards-page"></div>
       </div>
       <div id="kanban-wrap" class="kanban-wrap" hidden></div>
+      <!-- 起始頁（js/startpage.js）：#start，一個畫面、上面是分頁；每一頁是一篇 meta.startpage 的筆記 -->
+      <div id="start-wrap" class="trash-wrap area-wrap" hidden>
+        <div id="start-page"></div>
+      </div>
       <!-- 關聯分析（js/relmap.js）：整頁的畫布編輯器，不是浮在上面的視窗。一篇 meta.relMap
            的筆記直接開在這裡；一般筆記裡的 ```relmap 區塊按「全螢幕」也是開到這裡，完成後回筆記。 -->
       <div id="relmap-wrap" class="relmap-wrap" hidden></div>
@@ -375,7 +380,7 @@
   <script src="js/admin.js?v=50"></script>
   <script src="js/backup.js?v=2"></script>
   <script src="js/search.js?v=41"></script>
-  <script src="js/markdown.js?v=67"></script>
+  <script src="js/markdown.js?v=68"></script>
   <script src="js/editor.js?v=54"></script>
   <script src="js/multicursor.js?v=3"></script>
   <script src="js/templates.js?v=1"></script>
@@ -386,18 +391,19 @@
   <script src="js/seceditor.js?v=43"></script>
   <script src="js/perfreport.js?v=43"></script>
   <script src="js/sorting.js?v=1"></script>
-  <script src="js/dashboard.js?v=70"></script>
-  <script src="js/areabrowser.js?v=17"></script>
+  <script src="js/dashboard.js?v=71"></script>
+  <script src="js/areabrowser.js?v=18"></script>
   <script src="js/quicknotes.js?v=10"></script>
   <script src="js/board.js?v=1"></script>
+  <script src="js/startpage.js?v=1"></script>
   <script src="js/annotate.js?v=42"></script>
-  <script src="js/pdf.js?v=58"></script>
+  <script src="js/pdf.js?v=59"></script>
   <script src="js/book.js?v=11"></script>
   <script src="js/versions.js?v=6"></script>
-  <script src="js/trash.js?v=4"></script>
+  <script src="js/trash.js?v=5"></script>
   <script src="js/imagelib.js?v=7"></script>
   <script src="js/linesync.js?v=8"></script>
   <script src="js/embedswitch.js?v=2"></script>
-  <script src="js/app.js?v=134"></script>
+  <script src="js/app.js?v=135"></script>
 </body>
 </html>

@@ -475,6 +475,17 @@
       '.pdf-content .kbs-check li { display: flex; align-items: center; gap: 1mm; } .pdf-content .kbs-check li.is-done { color: #626f86; text-decoration: line-through; }',
       '.pdf-content .kbs-check .ic-svg { width: 3mm; height: 3mm; }',
       '.pdf-content .kbs-board.is-empty { background: #f6f8fa; color: #626f86; justify-content: center; font-size: 9pt; }',
+      /* 起始頁（```startpage，js/startpage.js 的 blockHTML）：幾欄小工具與書籤 */
+      '.pdf-content .sps-page { display: grid; gap: 3mm; padding: 3mm; border-radius: 2mm; }',
+      '.pdf-content .sps-page.is-dark { color: #e6e9ef; }',
+      '.pdf-content .sps-widget { background: #fff; border-radius: 1.5mm; padding: 2mm; margin: 0 0 3mm; box-shadow: 0 0 0 .2mm #d0d4db; break-inside: avoid; color: #172b4d; }',
+      '.pdf-content .sps-widget-t { font-weight: 700; font-size: 9.5pt; margin: 0 0 1.5mm; }',
+      '.pdf-content .sps-links { list-style: none; margin: 0; padding: 0; font-size: 8.5pt; }',
+      '.pdf-content .sps-links li { display: flex; align-items: center; gap: 1.5mm; padding: .7mm 0; }',
+      '.pdf-content .sps-links a { color: #172b4d; text-decoration: none; }',
+      '.pdf-content .sps-fav { display: inline-flex; align-items: center; justify-content: center; width: 4mm; height: 4mm; border-radius: 1mm; color: #fff; font-size: 7pt; font-weight: 700; flex: 0 0 auto; }',
+      '.pdf-content .sps-note { font-size: 8.5pt; white-space: pre-wrap; }',
+      '.pdf-content .sps-page.is-empty { display: flex; justify-content: center; background: #f6f8fa; color: #626f86; font-size: 9pt; }',
       /* 便條紙：紙本上還是一張紙，但用比較淡的暖黃（列印出來不會糊成一塊），
          色帶壓深一點才印得出來。 */
       '.pdf-content .rm-note .rm-note-paper { fill: #fbf3cf; stroke: #c9b678; stroke-width: 1; }',
