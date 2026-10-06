@@ -41,7 +41,7 @@
   function fmt(n) { return String(Math.round(n * 10) / 10); }
 
   const FONT = "Helvetica, Arial, 'Noto Sans TC', 'Microsoft JhengHei', sans-serif";
-  const SHAPE_DEF = { fill: '#ffffff', stroke: '#000000', sw: 1, dash: 0, fs: 12, fc: '#000000', bold: 0, align: 'center' };
+  const SHAPE_DEF = { fill: '#ffffff', stroke: '#000000', sw: 1, dash: 0, fs: 12, fc: '#000000', bold: 0, align: 'center', rot: 0 };
   const EDGE_DEF = { stroke: '#000000', sw: 1, dash: 0, fs: 11, fc: '#000000', bold: 0, style: 'straight', start: 'none', end: 'arrow' };
   const BASIC = ['rect', 'round', 'pill', 'ellipse', 'diamond', 'para', 'hex', 'tri', 'cyl', 'cloud', 'doc', 'actor', 'text', 'image'];
   function isType(t) { return BASIC.indexOf(t) >= 0 || isDevice(t); }
@@ -133,15 +133,46 @@
     return o;
   }
 
+  // 一份圖表可以有好幾頁（draw.io 下面那排分頁）。DSL 裡一行 `page <id> "<名稱>"` 開始一頁，
+  // 之後的 shape／edge 都算在那一頁；沒有任何 page 行就是只有一頁——舊的圖一個字都不用改。
+  // parse() 回傳 { pages: [{ id, name, shapes, edges }], grid }，另外把第一頁的 shapes／edges
+  // 用 getter 掛在最外層，只認得單頁模型的舊呼叫端（測試、renderSVG(model)）照舊能用。
+  function pageName(i) { return '第 ' + (i + 1) + ' 頁'; }
+  function newPage(id, name) { return { id: id, name: name, shapes: [], edges: [] }; }
+  function pageOf(model, i) {
+    if (!model.pages) return model;
+    return model.pages[clamp(i || 0, 0, model.pages.length - 1)];
+  }
   function parse(text) {
-    const model = { shapes: [], edges: [], grid: true };
-    const seen = {};
+    const doc = { pages: [], grid: true };
+    let model = newPage('p1', pageName(0)), implicit = true;
+    doc.pages.push(model);
+    const seen = {}, pageSeen = { p1: true };
     String(text || '').split(/\r?\n/).forEach(function (raw) {
       const line = raw.trim();
       if (!line || line[0] === '#' || line.slice(0, 3) === '```') return;
       const t = tokenize(line);
       if (!t.length || t[0].q) return;
       const kind = t[0].v;
+      if (kind === 'page' && t[1] && !t[1].q) {
+        const id = t[1].v;
+        if (!ID_RE.test(id)) return;
+        const r = split(t.slice(2));
+        if (implicit && !model.shapes.length && !model.edges.length) {
+          // 第一行就是 page：隱含的第一頁就是它（id、名稱照寫的）
+          delete pageSeen[model.id];
+          if (pageSeen[id]) return;
+          model.id = id; model.name = r.label ? r.label.slice(0, 80) : pageName(0);
+          pageSeen[id] = true; implicit = false;
+          return;
+        }
+        if (pageSeen[id]) return;      // 重複的頁 id：這一行不算，後面的東西還是算在目前這一頁
+        pageSeen[id] = true;
+        model = newPage(id, r.label ? r.label.slice(0, 80) : pageName(doc.pages.length));
+        doc.pages.push(model);
+        implicit = false;
+        return;
+      }
       if (kind === 'shape' && t[1] && t[2] && !t[1].q && !t[2].q) {
         const id = t[1].v, type = t[2].v;
         if (!ID_RE.test(id) || seen[id] || !isType(type)) return;
@@ -156,7 +187,8 @@
           fill: color(a.fill, SHAPE_DEF.fill, true), stroke: color(a.stroke, SHAPE_DEF.stroke, true),
           sw: num(a.sw, SHAPE_DEF.sw, 0.5, 20), dash: a.dash === '1' ? 1 : 0,
           fs: num(a.fs, SHAPE_DEF.fs, 6, 96), fc: color(a.fc, SHAPE_DEF.fc, false),
-          bold: a.bold === '1' ? 1 : 0, align: ALIGNS.indexOf(a.align) >= 0 ? a.align : SHAPE_DEF.align
+          bold: a.bold === '1' ? 1 : 0, align: ALIGNS.indexOf(a.align) >= 0 ? a.align : SHAPE_DEF.align,
+          rot: normRot(num(a.rot, 0, -100000, 100000))
         });
         if (src) model.shapes[model.shapes.length - 1].src = src[1];
       } else if (kind === 'edge' && t[1] && t[2] && t[3] && !t[1].q && !t[2].q && !t[3].q) {
@@ -176,19 +208,29 @@
         });
       } else if (kind === 'opt') {
         const a = split(t.slice(1)).attrs;
-        if (a.grid === '0') model.grid = false;
+        if (a.grid === '0') doc.grid = false;
       }
     });
-    return model;
+    Object.defineProperty(doc, 'shapes', { get: function () { return doc.pages[0].shapes; }, enumerable: false });
+    Object.defineProperty(doc, 'edges', { get: function () { return doc.pages[0].edges; }, enumerable: false });
+    return doc;
   }
+  function normRot(d) { d = Math.round(d) % 360; return d < 0 ? d + 360 : d; }
   function endpointText(p) { return p.id ? p.id : '@' + fmt(p.x) + ',' + fmt(p.y); }
-  function serialize(model) {
+  // 只有一頁、而且 id／名稱都是預設時不寫 page 行：沒加過頁的圖存出來跟從前一模一樣
+  function serialize(doc) {
+    const pages = doc.pages || [doc];
     const lines = [];
-    if (model.grid === false) lines.push('opt grid=0');
+    if (doc.grid === false) lines.push('opt grid=0');
+    // 傳進來的是單獨一頁（沒有 pages，例如測試自己拼的模型）就當成只有一頁，不寫 page 行
+    const explicit = !!doc.pages && (pages.length > 1 || pages[0].id !== 'p1' || pages[0].name !== pageName(0));
+    pages.forEach(function (model, pi) {
+    if (explicit) lines.push('page ' + model.id + ' ' + quote(model.name || pageName(pi)));
     model.shapes.forEach(function (s) {
       let l = 'shape ' + s.id + ' ' + s.type + ' x=' + fmt(s.x) + ' y=' + fmt(s.y) + ' w=' + fmt(s.w) + ' h=' + fmt(s.h);
       if (s.label) l += ' ' + quote(s.label);
       if (s.type === 'image') l += ' src=img:' + s.src;
+      if (s.rot) l += ' rot=' + fmt(s.rot);
       if (s.fill !== SHAPE_DEF.fill) l += ' fill=' + s.fill;
       if (s.stroke !== SHAPE_DEF.stroke) l += ' stroke=' + s.stroke;
       if (s.sw !== SHAPE_DEF.sw) l += ' sw=' + fmt(s.sw);
@@ -212,6 +254,7 @@
       if (e.fc !== EDGE_DEF.fc) l += ' fc=' + e.fc;
       if (e.bold) l += ' bold=1';
       lines.push(l);
+    });
     });
     return lines.join('\n');
   }
@@ -653,7 +696,30 @@
     });
     return out;
   }
-  // 圖形實際佔的範圍（人形、圖片的文字在下面，會超出自己的框）
+  // ---- 旋轉：rot 是繞著自己中心轉的角度（0–359）。畫的時候整個 <g> 加 rotate()，所以框、
+  // 文字、連接點、點得到的範圍全部跟著轉；幾何（連線接在邊上、框選、對齊輔助線）用
+  // rotPt 把點轉進／轉出圖形自己的座標系算。----
+  function rotPt(p, c, deg) {
+    if (!deg) return { x: p.x, y: p.y };
+    const a = deg * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a), dx = p.x - c.x, dy = p.y - c.y;
+    return { x: c.x + dx * cs - dy * sn, y: c.y + dx * sn + dy * cs };
+  }
+  function rotAttr(s, ox, oy) {
+    return s.rot ? ' transform="rotate(' + fmt(s.rot) + ' ' + fmt(s.x + ox + s.w / 2) + ' ' + fmt(s.y + oy + s.h / 2) + ')"' : '';
+  }
+  // 一個框繞 c 轉 deg 之後實際佔的水平矩形
+  function rotBox(b, c, deg) {
+    if (!deg) return b;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    [[b.x, b.y], [b.x + b.w, b.y], [b.x, b.y + b.h], [b.x + b.w, b.y + b.h]].forEach(function (q) {
+      const p = rotPt({ x: q[0], y: q[1] }, c, deg);
+      x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
+    });
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  // 圖形本體（不含下面的文字）轉過之後佔的水平矩形
+  function aabb(s) { return rotBox({ x: s.x, y: s.y, w: s.w, h: s.h }, centerOf(s), s.rot); }
+  // 圖形實際佔的範圍（人形、圖片的文字在下面，會超出自己的框；轉了就是轉過之後的外框）
   function shapeBounds(s) {
     let h = s.h, x = s.x, w = s.w;
     if (labelBelow(s) && s.label) {
@@ -662,11 +728,11 @@
       const lw = Math.max.apply(null, lines.map(function (l) { return textW(l, s.fs, s.bold); }));
       if (lw > w) { x -= (lw - w) / 2; w = lw; }
     }
-    return { x: x, y: s.y, w: w, h: h };
+    return rotBox({ x: x, y: s.y, w: w, h: h }, centerOf(s), s.rot);
   }
   // hit：只有編輯器要的「點得到的範圍」。預覽、PDF、匯出的檔案裡不放，那裡沒有人要點
   function shapeSVG(s, ox, oy, hit, imgs) {
-    return '<g class="dio-shape" data-id="' + esc(s.id) + '">' +
+    return '<g class="dio-shape" data-id="' + esc(s.id) + '"' + rotAttr(s, ox, oy) + '>' +
       // 整個框都點得到：沒有填色的圖形、純文字，中間是空的
       (hit ? '<rect class="dio-hit" x="' + fmt(s.x + ox) + '" y="' + fmt(s.y + oy) + '" width="' + fmt(s.w) + '" height="' + fmt(s.h) +
       '" fill="none" stroke="none"/>' : '') +
@@ -678,14 +744,17 @@
   // 從圖形中心朝 toward 走，碰到邊界的那一點
   function perimeter(s, toward) {
     const c = centerOf(s);
-    const dx = toward.x - c.x, dy = toward.y - c.y;
+    // 轉過的圖形：把目標點轉進圖形自己的座標系算，算完再轉回來
+    const tw = s.rot ? rotPt(toward, c, -s.rot) : toward;
+    const dx = tw.x - c.x, dy = tw.y - c.y;
     if (!dx && !dy) return c;
     const a = s.w / 2, b = s.h / 2;
     let t;
     if (s.type === 'ellipse') t = 1 / Math.sqrt((dx * dx) / (a * a) + (dy * dy) / (b * b));
     else if (s.type === 'diamond') t = 1 / (Math.abs(dx) / a + Math.abs(dy) / b);
     else t = Math.min(dx ? a / Math.abs(dx) : Infinity, dy ? b / Math.abs(dy) : Infinity);
-    return { x: c.x + dx * t, y: c.y + dy * t };
+    const p = { x: c.x + dx * t, y: c.y + dy * t };
+    return s.rot ? rotPt(p, c, s.rot) : p;
   }
   function anchorOf(p, byId) {
     if (p.id) { const s = byId[p.id]; return s ? { shape: s, c: centerOf(s) } : null; }
@@ -694,6 +763,10 @@
   function side(a, dir) {
     if (!a.shape) return a.c;
     const s = a.shape;
+    // 轉過的圖形沒有「右邊的中點」這種事：拿那個方向上邊界的點
+    if (s.rot) {
+      return perimeter(s, { x: a.c.x + (dir === 'r' ? 1e5 : dir === 'l' ? -1e5 : 0), y: a.c.y + (dir === 'b' ? 1e5 : dir === 't' ? -1e5 : 0) });
+    }
     if (dir === 'r') return { x: s.x + s.w, y: a.c.y };
     if (dir === 'l') return { x: s.x, y: a.c.y };
     if (dir === 'b') return { x: a.c.x, y: s.y + s.h };
@@ -798,9 +871,10 @@
     if (x0 === Infinity) return null;
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
+  // o.page：第幾頁（預設第一頁）。傳進來的可以是整份（有 pages）或單一頁
   function renderSVG(text, o) {
     o = o || {};
-    const model = typeof text === 'string' ? parse(text) : text;
+    const model = pageOf(typeof text === 'string' ? parse(text) : text, o.page);
     if (!model.shapes.length && !model.edges.length) return '';
     const byId = indexOf(model);
     const b = boundsOf(model, byId);
@@ -815,6 +889,13 @@
       model.edges.map(function (e) { return edgeSVG(e, byId, ox, oy); }).join('') +
       '</svg>';
   }
+  // 每一頁一張 SVG：[{ id, name, svg }]（空白頁的 svg 是 ''）
+  function pagesSVG(text, o) {
+    const doc = typeof text === 'string' ? parse(text) : text;
+    const pages = doc.pages || [doc];
+    return pages.map(function (p) { return { id: p.id, name: p.name, svg: renderSVG(p, o) }; });
+  }
+  // 多頁的圖：預覽、PDF、電子書、嵌入都是每一頁一張、上下排開，頁名寫在上面
   function blockHTML(payload, alt) {
     if (isLegacy(payload)) {
       const svg = legacySvg(payload);
@@ -822,16 +903,23 @@
         ? '<div class="drawio-block"><img class="drawio-img" alt="' + esc(alt || '圖表') + '" src="data:image/svg+xml;base64,' + b64(svg) + '"></div>'
         : '<div class="drawio-block is-empty">' + ic('shapes') + '<span>這張圖的格式讀不出來</span></div>';
     }
-    const svg = renderSVG(payload || '');
-    if (svg) return '<div class="drawio-block">' + svg + '</div>';
-    return '<div class="drawio-block is-empty">' + ic('shapes') + '<span>空白的圖表</span></div>';
+    const pages = pagesSVG(payload || '');
+    if (pages.length === 1) {
+      if (pages[0].svg) return '<div class="drawio-block">' + pages[0].svg + '</div>';
+      return '<div class="drawio-block is-empty">' + ic('shapes') + '<span>空白的圖表</span></div>';
+    }
+    if (!pages.some(function (p) { return p.svg; })) return '<div class="drawio-block is-empty">' + ic('shapes') + '<span>空白的圖表</span></div>';
+    return '<div class="drawio-block drawio-multi">' + pages.map(function (p) {
+      return '<figure class="dio-pg"><figcaption class="dio-pg-t">' + esc(p.name) + '</figcaption>' +
+        (p.svg || '<div class="dio-pg-empty">（空白頁）</div>') + '</figure>';
+    }).join('') + '</div>';
   }
   // 嵌入用：一篇圖表筆記的內容 → 圖（沒有東西可畫就回空字串）
   function htmlOf(content, alt) {
     const p = payloadOf(content);
     if (p === null) return '';
     const html = blockHTML(p, alt);
-    return html.indexOf('is-empty') >= 0 ? '' : html.replace(/^<div class="drawio-block">/, '').replace(/<\/div>$/, '');
+    return html.indexOf('is-empty') >= 0 ? '' : html.replace(/^<div class="drawio-block[^"]*">/, '').replace(/<\/div>$/, '');
   }
 
   // ---------------- 唯讀 ----------------
@@ -867,7 +955,11 @@
       return view(content, opts, '這張圖是用先前內嵌的 draw.io 畫的，現在的編輯器打不開那種格式。圖還在，只是不能在這裡編輯。');
     }
 
-    let model = parse(payload || '');
+    // doc 是整份（所有頁）；model 永遠指著目前這一頁，底下大部分的程式只認得 model。
+    // 每一頁的縮放／捲動位置記在 views 裡（不存檔），切回來還在原處。
+    let doc = parse(payload || '');
+    let pi = 0, model = doc.pages[0];
+    const views = {};
     let sel = [];
     let zoom = 1, panX = 0, panY = 0;
     const undo = [], redo = [];
@@ -906,7 +998,10 @@
       '<input class="dio-icon-file" type="file" multiple hidden accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml">' +
       '</div>' +
       '<div class="dio-side-hint">點一下放到畫布中央，或直接拖到畫布上。<br>滑到圖形上，從邊上的藍點拉出連線。</div></aside>' +
-      '<div class="dio-canvas" tabindex="0">' +
+      '<div class="dio-center">' +
+      // 畫布是真的捲動容器：.dio-sheet 是「紙」，大小＝圖的範圍往四邊各延伸一個視窗，捲軸就是它的；
+      // 畫圖的 SVG 用 sticky 黏在可見區域裡，大小永遠等於可見區域
+      '<div class="dio-canvas" tabindex="0"><div class="dio-sheet">' +
       '<svg class="dio-stage" xmlns="http://www.w3.org/2000/svg" font-family="' + FONT + '">' +
       '<defs><pattern id="' + gridId + '" width="40" height="40" patternUnits="userSpaceOnUse">' +
       '<path d="M10 0V40M20 0V40M30 0V40M0 10H40M0 20H40M0 30H40" fill="none" stroke="#eceef1" stroke-width="0.6"/>' +
@@ -914,7 +1009,11 @@
       '<rect class="dio-paper" width="100%" height="100%" fill="#ffffff"/>' +
       '<g class="dio-world"><rect class="dio-grid" fill="url(#' + gridId + ')"/>' +
       '<g class="dio-content"></g><g class="dio-overlay"></g></g>' +
-      '</svg></div>' +
+      '</svg></div></div>' +
+      // 分頁（跟 draw.io 一樣在畫布下面）：＋ 新增一頁，點切換、雙擊改名、右鍵更多
+      '<div class="dio-pages"><button class="dio-padd" type="button" data-pact="add" title="新增頁面">' + ic('plus') + '</button>' +
+      '<div class="dio-ptabs"></div></div>' +
+      '</div>' +
       '<aside class="dio-format"></aside>' +
       '</div>';
     function tb(act, icon, title) {
@@ -922,6 +1021,9 @@
     }
 
     const canvas = host.querySelector('.dio-canvas');
+    const sheet = host.querySelector('.dio-sheet');
+    const ptabs = host.querySelector('.dio-ptabs');
+    const pagesEl = host.querySelector('.dio-pages');
     const stage = host.querySelector('.dio-stage');
     const world = host.querySelector('.dio-world');
     const gridRect = host.querySelector('.dio-grid');
@@ -967,7 +1069,7 @@
       if (!dirty || !opts.onChange) return;
       dirty = false;
       setStatus('儲存中…');
-      Promise.resolve(opts.onChange(wrap(serialize(model)))).then(function () {
+      Promise.resolve(opts.onChange(wrap(serialize(doc)))).then(function () {
         if (!closed && !dirty) setStatus('已儲存', 'is-ok');
       }, function () { if (!closed) setStatus('儲存失敗', 'is-err'); });
     }
@@ -977,10 +1079,11 @@
       clearTimeout(saveTimer);
       saveTimer = setTimeout(emit, 600);
     }
-    function begin() { return serialize(model); }
-    function commit(before) {
-      if (serialize(model) === before) return false;
-      undo.push(before);
+    function begin() { return serialize(doc); }
+    // 復原的快照是整份 DSL 加上「當時在哪一頁」：加頁、刪頁復原回來要站在原本那一頁
+    function commit(before, pid) {
+      if (serialize(doc) === before) return false;
+      undo.push({ dsl: before, pid: pid || model.id });
       if (undo.length > 100) undo.shift();
       redo.length = 0;
       changed();
@@ -992,36 +1095,184 @@
       commit(before);
       render(); renderFormat(); refreshToolbar();
     }
-    function restore(dsl) {
-      model = parse(dsl);
+    function restore(dsl, pid) {
+      saveView();
+      doc = parse(dsl);
+      let i = -1;
+      doc.pages.forEach(function (p, k) { if (p.id === pid) i = k; });
+      if (i < 0) i = Math.min(pi, doc.pages.length - 1);
+      pi = i; model = doc.pages[pi];
+      const v = views[model.id];
+      if (v) { zoom = v.zoom; panX = v.panX; panY = v.panY; }
       const ids = {};
       model.shapes.forEach(function (s) { ids[s.id] = 1; });
       model.edges.forEach(function (e) { ids[e.id] = 1; });
       sel = sel.filter(function (id) { return ids[id]; });
+      renderTabs();
     }
     function doUndo() {
       if (!undo.length) return;
-      redo.push(serialize(model));
-      restore(undo.pop());
+      redo.push({ dsl: serialize(doc), pid: model.id });
+      const u = undo.pop();
+      restore(u.dsl, u.pid);
       changed(); render(); renderFormat(); refreshToolbar();
     }
     function doRedo() {
       if (!redo.length) return;
-      undo.push(serialize(model));
-      restore(redo.pop());
+      undo.push({ dsl: serialize(doc), pid: model.id });
+      const u = redo.pop();
+      restore(u.dsl, u.pid);
       changed(); render(); renderFormat(); refreshToolbar();
     }
+
+    // ---- 分頁 ----
+    function saveView() { views[model.id] = { zoom: zoom, panX: panX, panY: panY }; }
+    function renderTabs() {
+      ptabs.innerHTML = doc.pages.map(function (p, i) {
+        return '<button class="dio-ptab' + (i === pi ? ' on' : '') + '" type="button" data-page="' + i + '" title="' + esc(p.name) + '（雙擊改名、右鍵更多）">' + esc(p.name) + '</button>';
+      }).join('');
+      const on = ptabs.querySelector('.on');
+      if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+    function showPage(i) {
+      if (editing) commitEdit();
+      saveView();
+      pi = clamp(i, 0, doc.pages.length - 1); model = doc.pages[pi];
+      sel = []; hoverId = null;
+      const v = views[model.id];
+      if (v) { zoom = v.zoom; panX = v.panX; panY = v.panY; render(); } else fit();
+      renderTabs(); renderFormat(); refreshToolbar();
+    }
+    function newPageId() {
+      let n = 0;
+      doc.pages.forEach(function (p) { const m = /^p(\d+)$/.exec(p.id); if (m) n = Math.max(n, parseInt(m[1], 10)); });
+      return 'p' + (n + 1);
+    }
+    function addPage() {
+      const before = begin(), pid = model.id;
+      doc.pages.splice(pi + 1, 0, newPage(newPageId(), pageName(doc.pages.length)));
+      commit(before, pid);
+      showPage(pi + 1);
+    }
+    function renamePage(i) {
+      const p = doc.pages[i];
+      const ask = global.App && App.prompt
+        ? App.prompt({ title: '重新命名頁面', placeholder: '頁面名稱', value: p.name, ok: '確定' })
+        : Promise.resolve(window.prompt('頁面名稱', p.name));
+      ask.then(function (name) {
+        name = String(name || '').trim().slice(0, 80);
+        if (!name || name === p.name) return;
+        const before = begin();
+        p.name = name;
+        commit(before);
+        renderTabs(); renderFormat();
+      });
+    }
+    function duplicatePage(i) {
+      const src = doc.pages[i];
+      const before = begin(), pid = model.id;
+      const copy = newPage(newPageId(), src.name + ' 複本');
+      doc.pages.splice(i + 1, 0, copy);
+      // 整份裡的 id 不能撞：圖形、連線都換新 id，連線兩頭照著對過去
+      const map = {};
+      src.shapes.forEach(function (sh) { const c = Object.assign({}, sh, { id: newId('s') }); map[sh.id] = c.id; copy.shapes.push(c); });
+      src.edges.forEach(function (e) {
+        const c = Object.assign({}, e, { id: newId('e') });
+        c.from = e.from.id ? { id: map[e.from.id] } : { x: e.from.x, y: e.from.y };
+        c.to = e.to.id ? { id: map[e.to.id] } : { x: e.to.x, y: e.to.y };
+        copy.edges.push(c);
+      });
+      commit(before, pid);
+      views[copy.id] = views[src.id] ? Object.assign({}, views[src.id]) : null;
+      if (!views[copy.id]) delete views[copy.id];
+      showPage(i + 1);
+    }
+    function deletePage(i) {
+      if (doc.pages.length < 2) return;
+      const p = doc.pages[i];
+      const go = function () {
+        const before = begin(), pid = model.id;
+        doc.pages.splice(i, 1);
+        delete views[p.id];
+        commit(before, pid === p.id ? doc.pages[Math.min(i, doc.pages.length - 1)].id : pid);
+        // 復原時要回到被刪的那一頁：快照裡的 pid 改成它
+        undo[undo.length - 1].pid = p.id;
+        if (model === p) showPage(Math.min(i, doc.pages.length - 1));
+        else { pi = doc.pages.indexOf(model); renderTabs(); renderFormat(); }
+      };
+      if (!p.shapes.length && !p.edges.length) { go(); return; }
+      const msg = '刪除頁面「' + p.name + '」？上面的 ' + p.shapes.length + ' 個圖形、' + p.edges.length + ' 條連線會一起刪掉（可以復原）。';
+      const ask = global.App && App.confirm ? App.confirm({ title: '刪除頁面', message: msg, ok: '刪除', danger: true }) : Promise.resolve(window.confirm(msg));
+      ask.then(function (yes) { if (yes) go(); });
+    }
+    function movePage(i, dir) {
+      const k = i + dir;
+      if (k < 0 || k >= doc.pages.length) return;
+      const before = begin(), pid = model.id;
+      const t = doc.pages[i]; doc.pages[i] = doc.pages[k]; doc.pages[k] = t;
+      commit(before, pid);
+      pi = doc.pages.indexOf(model);
+      renderTabs(); renderFormat();
+    }
+    function openPageMenu(i, x, y) {
+      closeMenu();
+      const items = [['padd', '新增頁面', '', true], ['pdup', '複製頁面', '', true], ['pren', '重新命名', '', true], null,
+        ['pleft', '往左移', '', i > 0], ['pright', '往右移', '', i < doc.pages.length - 1], null,
+        ['pdel', '刪除頁面', '', doc.pages.length > 1]];
+      menuEl = document.createElement('div');
+      menuEl.className = 'dio-menu dio-ctx';
+      menuEl.setAttribute('data-for', 'page');
+      menuEl.innerHTML = items.map(function (it) {
+        if (!it) return '<div class="dio-menu-sep"></div>';
+        return '<button class="dio-menu-item" type="button" data-pact="' + it[0] + '"' + (it[3] ? '' : ' disabled') + '><span>' + esc(it[1]) + '</span><kbd></kbd></button>';
+      }).join('');
+      host.appendChild(menuEl);
+      const mw = menuEl.offsetWidth, mh = menuEl.offsetHeight;
+      menuEl.style.left = Math.max(4, Math.min(x, window.innerWidth - mw - 4)) + 'px';
+      menuEl.style.top = Math.max(4, Math.min(y, window.innerHeight - mh - 4)) + 'px';
+      menuEl.addEventListener('click', function (e) {
+        const b = e.target.closest('[data-pact]');
+        if (!b || b.disabled) return;
+        const a = b.getAttribute('data-pact');
+        closeMenu();
+        if (a === 'padd') { if (i !== pi) showPage(i); addPage(); }
+        else if (a === 'pdup') duplicatePage(i);
+        else if (a === 'pren') renamePage(i);
+        else if (a === 'pleft') movePage(i, -1);
+        else if (a === 'pright') movePage(i, 1);
+        else if (a === 'pdel') deletePage(i);
+        canvas.focus();
+      });
+    }
+    pagesEl.addEventListener('click', function (e) {
+      if (e.target.closest('[data-pact="add"]')) { if (editing) commitEdit(); addPage(); canvas.focus(); return; }
+      const t = e.target.closest('[data-page]');
+      if (!t) return;
+      const i = parseInt(t.getAttribute('data-page'), 10);
+      if (e.detail === 2) renamePage(i);
+      else if (i !== pi) { showPage(i); canvas.focus(); }
+    });
+    pagesEl.addEventListener('contextmenu', function (e) {
+      const t = e.target.closest('[data-page]');
+      if (!t) return;
+      e.preventDefault(); e.stopPropagation();
+      openPageMenu(parseInt(t.getAttribute('data-page'), 10), e.clientX, e.clientY);
+    });
 
     // ---- 查詢 ----
     function shapeById(id) { return model.shapes.find(function (s) { return s.id === id; }); }
     function edgeById(id) { return model.edges.find(function (e) { return e.id === id; }); }
     function selShapes() { return sel.map(shapeById).filter(Boolean); }
     function selEdges() { return sel.map(edgeById).filter(Boolean); }
+    // id 在整份（所有頁）裡唯一：複製到別頁、複製整頁都不會撞
     function newId(prefix) {
       let n = 0;
-      model.shapes.concat(model.edges).forEach(function (o) {
-        const m = new RegExp('^' + prefix + '(\\d+)$').exec(o.id);
-        if (m) n = Math.max(n, parseInt(m[1], 10));
+      const re = new RegExp('^' + prefix + '(\\d+)$');
+      doc.pages.forEach(function (p) {
+        p.shapes.concat(p.edges).forEach(function (o) {
+          const m = re.exec(o.id);
+          if (m) n = Math.max(n, parseInt(m[1], 10));
+        });
       });
       return prefix + (n + 1);
     }
@@ -1030,26 +1281,70 @@
       const r = stage.getBoundingClientRect();
       return { x: (e.clientX - r.left - panX) / zoom, y: (e.clientY - r.top - panY) / zoom };
     }
+    // 可見區域的大小一律看 canvas，不看 stage：stage 在第一次 render() 之前沒有尺寸（SVG 預設
+    // 300×150），fit() 拿它來量會把整張圖縮到 0.28 倍
+    function viewSize() { return { w: canvas.clientWidth || stage.getBoundingClientRect().width, h: canvas.clientHeight || stage.getBoundingClientRect().height }; }
     function viewCenter() {
-      const r = stage.getBoundingClientRect();
-      return { x: (r.width / 2 - panX) / zoom, y: (r.height / 2 - panY) / zoom };
+      const v = viewSize();
+      return { x: (v.w / 2 - panX) / zoom, y: (v.h / 2 - panY) / zoom };
     }
 
     // ---- 畫 ----
+    // 紙的範圍：圖的範圍往四邊各延伸一個視窗（世界座標）。圖形被拖出去，紙就跟著長大
+    let lastExt = null, syncingScroll = false;
+    function extentOf(byId) {
+      const vw = canvas.clientWidth / zoom, vh = canvas.clientHeight / zoom;
+      const b = boundsOf(model, byId) || { x: 0, y: 0, w: 0, h: 0 };
+      return { x0: b.x - vw, y0: b.y - vh, x1: b.x + b.w + vw, y1: b.y + b.h + vh };
+    }
     function render() {
+      const byId = indexOf(model);
+      // panX／panY 還是「世界 → 螢幕」的位移；現在它跟捲動位置是同一件事：寫進去再讀回來，
+      // 捲不到的地方（紙的外面）瀏覽器會夾住，位移跟著回來
+      const cw = canvas.clientWidth, ch = canvas.clientHeight;
+      if (cw && ch) {
+        const ext = extentOf(byId);
+        sheet.style.width = Math.max(cw, Math.ceil((ext.x1 - ext.x0) * zoom)) + 'px';
+        sheet.style.height = Math.max(ch, Math.ceil((ext.y1 - ext.y0) * zoom)) + 'px';
+        stage.style.width = cw + 'px'; stage.style.height = ch + 'px';
+        syncingScroll = true;
+        canvas.scrollLeft = -panX - ext.x0 * zoom;
+        canvas.scrollTop = -panY - ext.y0 * zoom;
+        syncingScroll = false;
+        panX = -canvas.scrollLeft - ext.x0 * zoom;
+        panY = -canvas.scrollTop - ext.y0 * zoom;
+        lastExt = ext;
+      }
       world.setAttribute('transform', 'translate(' + fmt(panX) + ',' + fmt(panY) + ') scale(' + zoom + ')');
-      const r = stage.getBoundingClientRect();
+      const v = viewSize();
       const vx = -panX / zoom, vy = -panY / zoom;
       gridRect.setAttribute('x', Math.floor(vx / 40) * 40 - 40);
       gridRect.setAttribute('y', Math.floor(vy / 40) * 40 - 40);
-      gridRect.setAttribute('width', Math.ceil(r.width / zoom) + 120);
-      gridRect.setAttribute('height', Math.ceil(r.height / zoom) + 120);
-      gridRect.style.display = model.grid ? '' : 'none';
-      const byId = indexOf(model);
+      gridRect.setAttribute('width', Math.ceil(v.w / zoom) + 120);
+      gridRect.setAttribute('height', Math.ceil(v.h / zoom) + 120);
+      gridRect.style.display = doc.grid ? '' : 'none';
       contentEl.innerHTML = model.shapes.map(function (s) { return shapeSVG(s, 0, 0, true); }).join('') +
         model.edges.map(function (e) { return edgeSVG(e, byId, 0, 0, true); }).join('');
       renderOverlay(byId);
       zoomEl.textContent = Math.round(zoom * 100) + '%';
+    }
+    // 使用者拉捲軸、滾滾輪：捲動位置 → 位移
+    canvas.addEventListener('scroll', function () {
+      if (syncingScroll || !lastExt) return;
+      const nx = -canvas.scrollLeft - lastExt.x0 * zoom, ny = -canvas.scrollTop - lastExt.y0 * zoom;
+      if (Math.abs(nx - panX) < 0.5 && Math.abs(ny - panY) < 0.5) return;
+      panX = nx; panY = ny;
+      if (editing) commitEdit();
+      render();
+    });
+    // 拖著東西拖出畫布邊緣：往那邊捲（紙會跟著圖形長大，所以捲得過去）
+    function edgeScroll(e) {
+      const r = canvas.getBoundingClientRect();
+      const dx = e.clientX < r.left ? e.clientX - r.left : e.clientX > r.right ? e.clientX - r.right : 0;
+      const dy = e.clientY < r.top ? e.clientY - r.top : e.clientY > r.bottom ? e.clientY - r.bottom : 0;
+      if (!dx && !dy) return false;
+      panX -= dx * 0.25; panY -= dy * 0.25;
+      return true;
     }
     function renderOverlay(byId) {
       byId = byId || indexOf(model);
@@ -1059,7 +1354,7 @@
         const sh = byId[id];
         if (sh) {
           s += '<rect class="dio-selbox" x="' + fmt(sh.x) + '" y="' + fmt(sh.y) + '" width="' + fmt(sh.w) + '" height="' + fmt(sh.h) +
-            '" stroke-width="' + k + '" stroke-dasharray="' + 4 * k + ' ' + 3 * k + '"/>';
+            '"' + rotAttr(sh, 0, 0) + ' stroke-width="' + k + '" stroke-dasharray="' + 4 * k + ' ' + 3 * k + '"/>';
           return;
         }
         const e = edgeById(id), g = e && edgeGeom(e, byId);
@@ -1067,19 +1362,28 @@
       });
       // 連接點：滑到圖形上才出現，壓在邊的中點上（不在外面——從圖形裡移過去的路上不會離開圖形）
       if (hoverId && !gesture && byId[hoverId]) {
-        const h = byId[hoverId];
-        [[h.x + h.w / 2, h.y], [h.x + h.w, h.y + h.h / 2], [h.x + h.w / 2, h.y + h.h], [h.x, h.y + h.h / 2]].forEach(function (p) {
-          s += '<circle class="dio-conn" data-conn="' + esc(h.id) + '" cx="' + fmt(p[0]) + '" cy="' + fmt(p[1]) + '" r="' + 5 * k + '" stroke-width="' + 1.5 * k + '"/>';
+        const h = byId[hoverId], hc = centerOf(h);
+        [[h.x + h.w / 2, h.y], [h.x + h.w, h.y + h.h / 2], [h.x + h.w / 2, h.y + h.h], [h.x, h.y + h.h / 2]].forEach(function (q) {
+          const p = rotPt({ x: q[0], y: q[1] }, hc, h.rot);
+          s += '<circle class="dio-conn" data-conn="' + esc(h.id) + '" cx="' + fmt(p.x) + '" cy="' + fmt(p.y) + '" r="' + 5 * k + '" stroke-width="' + 1.5 * k + '"/>';
         });
       }
-      // 控制點：只有單選才給，畫在連接點上面（四個角，跟連接點不重疊）
+      // 控制點：只有單選才給，畫在連接點上面（四個角，跟連接點不重疊）；轉過的圖形，角也跟著轉
       if (sel.length === 1) {
         const sh = byId[sel[0]];
         if (sh) {
+          const c0 = centerOf(sh);
           [['nw', sh.x, sh.y], ['ne', sh.x + sh.w, sh.y], ['se', sh.x + sh.w, sh.y + sh.h], ['sw', sh.x, sh.y + sh.h]].forEach(function (c) {
-            s += '<rect class="dio-handle" data-handle="' + c[0] + '" x="' + fmt(c[1] - 4 * k) + '" y="' + fmt(c[2] - 4 * k) +
+            const p = rotPt({ x: c[1], y: c[2] }, c0, sh.rot);
+            s += '<rect class="dio-handle" data-handle="' + c[0] + '" x="' + fmt(p.x - 4 * k) + '" y="' + fmt(p.y - 4 * k) +
               '" width="' + 8 * k + '" height="' + 8 * k + '" stroke-width="' + k + '"/>';
           });
+          // 旋轉把手：右上角外面一點的圓點（draw.io 放的位置），拖它繞中心轉
+          const rp = rotPt({ x: sh.x + sh.w + 10 * k, y: sh.y - 14 * k }, c0, sh.rot);
+          s += '<circle class="dio-rot" data-rot="' + esc(sh.id) + '" cx="' + fmt(rp.x) + '" cy="' + fmt(rp.y) + '" r="' + 5.5 * k + '" stroke-width="' + 1.5 * k + '"><title>旋轉（拖曳；Shift 每 15°）</title></circle>';
+          if (gesture && gesture.type === 'rotate') {
+            s += '<text class="dio-rot-lbl" x="' + fmt(rp.x + 10 * k) + '" y="' + fmt(rp.y - 6 * k) + '" font-size="' + 11 * k + '">' + sh.rot + '°</text>';
+          }
         } else {
           const e = edgeById(sel[0]), g = e && edgeGeom(e, byId);
           if (g) {
@@ -1091,6 +1395,15 @@
       if (gesture && gesture.type === 'band' && gesture.moved) {
         const b = gesture.box;
         s += '<rect class="dio-band" x="' + fmt(b.x) + '" y="' + fmt(b.y) + '" width="' + fmt(b.w) + '" height="' + fmt(b.h) + '" stroke-width="' + k + '"/>';
+      }
+      // 對齊輔助線：拖曳／縮放時跟別的圖形的邊或中線對齊了，畫一條橫跨可見範圍的線
+      if (gesture && gesture.guides && gesture.guides.length) {
+        const v = viewSize();
+        const vx = -panX / zoom, vy = -panY / zoom, vw = v.w / zoom, vh = v.h / zoom;
+        gesture.guides.forEach(function (gd) {
+          if (gd.x !== undefined) s += '<line class="dio-guide" x1="' + fmt(gd.x) + '" y1="' + fmt(vy) + '" x2="' + fmt(gd.x) + '" y2="' + fmt(vy + vh) + '" stroke-width="' + k + '" stroke-dasharray="' + 6 * k + ' ' + 4 * k + '"/>';
+          else s += '<line class="dio-guide" x1="' + fmt(vx) + '" y1="' + fmt(gd.y) + '" x2="' + fmt(vx + vw) + '" y2="' + fmt(gd.y) + '" stroke-width="' + k + '" stroke-dasharray="' + 6 * k + ' ' + 4 * k + '"/>';
+        });
       }
       if (gesture && (gesture.type === 'connect' || gesture.type === 'endpoint') && gesture.preview) {
         const g = edgeGeom(gesture.preview, byId);
@@ -1123,16 +1436,16 @@
       render();
     }
     function zoomCenter(z) {
-      const r = stage.getBoundingClientRect();
-      zoomAt(r.left + r.width / 2, r.top + r.height / 2, z);
+      const r = stage.getBoundingClientRect(), v = viewSize();
+      zoomAt(r.left + v.w / 2, r.top + v.h / 2, z);
     }
     function fit() {
       const b = boundsOf(model, indexOf(model));
-      const r = stage.getBoundingClientRect();
-      if (!b || !r.width) { zoom = 1; panX = 40; panY = 40; render(); return; }
-      zoom = clamp(Math.min((r.width - 80) / b.w, (r.height - 80) / b.h), 0.1, 1);
-      panX = (r.width - b.w * zoom) / 2 - b.x * zoom;
-      panY = (r.height - b.h * zoom) / 2 - b.y * zoom;
+      const v = viewSize();
+      if (!b || !v.w) { zoom = 1; panX = 40; panY = 40; render(); return; }
+      zoom = clamp(Math.min((v.w - 80) / b.w, (v.h - 80) / b.h), 0.1, 1);
+      panX = (v.w - b.w * zoom) / 2 - b.x * zoom;
+      panY = (v.h - b.h * zoom) / 2 - b.y * zoom;
       render();
     }
 
@@ -1252,6 +1565,29 @@
         });
       });
     }
+    // 等距分佈（三個以上）：最左／最右（最上／最下）的不動，中間的排到每個間距一樣
+    function distribute(horizontal) {
+      const ss = selShapes();
+      if (ss.length < 3) return;
+      const boxes = ss.map(function (sh) { return { s: sh, b: aabb(sh) }; });
+      const pos = function (o) { return horizontal ? o.b.x : o.b.y; }, size = function (o) { return horizontal ? o.b.w : o.b.h; };
+      boxes.sort(function (p, q) { return (pos(p) + size(p) / 2) - (pos(q) + size(q) / 2); });
+      const lo = Math.min.apply(null, boxes.map(pos)), hi = Math.max.apply(null, boxes.map(function (o) { return pos(o) + size(o); }));
+      const total = boxes.reduce(function (t, o) { return t + size(o); }, 0);
+      const gap = (hi - lo - total) / (boxes.length - 1);
+      mutate(function () {
+        let at = lo;
+        boxes.forEach(function (o) {
+          const d = at - pos(o);
+          if (horizontal) o.s.x += d; else o.s.y += d;
+          at += size(o) + gap;
+        });
+      });
+    }
+    function rotateBy(deg) {
+      if (!selShapes().length) return;
+      mutate(function () { selShapes().forEach(function (sh) { sh.rot = normRot((sh.rot || 0) + deg); }); });
+    }
     function insert(it, at) {
       const c = at || viewCenter();
       mutate(function () {
@@ -1291,7 +1627,9 @@
     }
     function fileBase() {
       const t = opts.getTitle ? opts.getTitle() : opts.title;
-      return (String(t || '').trim() || '圖表').replace(/[\\/:*?"<>|]+/g, '_');
+      const base = (String(t || '').trim() || '圖表').replace(/[\\/:*?"<>|]+/g, '_');
+      // 匯出的是目前這一頁；不只一頁時檔名帶上頁名
+      return doc.pages.length > 1 ? base + '-' + model.name.replace(/[\\/:*?"<>|]+/g, '_') : base;
     }
     // 存成檔案的圖不能回頭跟伺服器要圖片（離開這個網站就沒有登入狀態；當成圖片載入的
     // SVG 更是什麼外部資源都不准抓），所以用到的圖示先換成 data URL 包進去
@@ -1367,8 +1705,13 @@
         case 'zoomout': zoomCenter(zoom / 1.25); break;
         case 'zoom100': zoomCenter(1); break;
         case 'fit': fit(); break;
-        case 'grid': mutate(function () { model.grid = !model.grid; }); break;
+        case 'grid': mutate(function () { doc.grid = !doc.grid; }); break;
         case 'snap': snapOn = !snapOn; renderFormat(); break;
+        case 'dist-h': distribute(true); break;
+        case 'dist-v': distribute(false); break;
+        case 'rot-cw': rotateBy(90); break;
+        case 'rot-ccw': rotateBy(-90); break;
+        case 'page-add': addPage(); break;
         case 'export-png': exportPNG(); break;
         case 'export-svg': exportSVG(); break;
         default:
@@ -1384,7 +1727,9 @@
         ['paste', '貼上', 'Ctrl+V'], ['dup', '再製', 'Ctrl+D'], ['delete', '刪除', 'Delete'], null, ['selectall', '全選', 'Ctrl+A']],
       view: [['grid', '格線'], ['snap', '對齊格線'], null, ['zoomin', '放大'], ['zoomout', '縮小'], ['zoom100', '100%'], ['fit', '符合視窗']],
       arrange: [['front', '移到最前', 'Ctrl+Shift+]'], ['forward', '上移一層', 'Ctrl+]'], ['backward', '下移一層', 'Ctrl+['], ['back', '移到最後', 'Ctrl+Shift+['], null, ['align-left', '靠左對齊'], ['align-center', '水平置中'],
-        ['align-right', '靠右對齊'], ['align-top', '靠上對齊'], ['align-middle', '垂直置中'], ['align-bottom', '靠下對齊']]
+        ['align-right', '靠右對齊'], ['align-top', '靠上對齊'], ['align-middle', '垂直置中'], ['align-bottom', '靠下對齊'], null,
+        ['dist-h', '水平等距分佈'], ['dist-v', '垂直等距分佈'], null,
+        ['rot-cw', '順時針轉 90°'], ['rot-ccw', '逆時針轉 90°']]
     };
     function closeMenu() {
       if (!menuEl) return;
@@ -1404,7 +1749,7 @@
       menuEl.style.top = r.bottom + 'px';
       menuEl.innerHTML = MENUS[name].map(function (it) {
         if (!it) return '<div class="dio-menu-sep"></div>';
-        const on = (it[0] === 'grid' && model.grid) || (it[0] === 'snap' && snapOn);
+        const on = (it[0] === 'grid' && doc.grid) || (it[0] === 'snap' && snapOn);
         return '<button class="dio-menu-item' + (on ? ' on' : '') + '" type="button" data-act="' + it[0] + '"><span>' + esc(it[1]) +
           '</span><kbd>' + (it[2] || '') + '</kbd></button>';
       }).join('');
@@ -1430,20 +1775,21 @@
         items = [
           ['front', '移到最前', 'Ctrl+Shift+]', shapesSel > 0], ['forward', '上移一層', 'Ctrl+]', shapesSel > 0],
           ['backward', '下移一層', 'Ctrl+[', shapesSel > 0], ['back', '移到最後', 'Ctrl+Shift+[', shapesSel > 0], null,
+          ['rot-cw', '順時針轉 90°', '', shapesSel > 0], ['rot-ccw', '逆時針轉 90°', '', shapesSel > 0], null,
           ['edit', '編輯文字', 'F2', anySel === 1], null,
           ['cut', '剪下', 'Ctrl+X', true], ['copy', '複製', 'Ctrl+C', true], ['paste', '貼上', 'Ctrl+V', !!clipboard],
           ['dup', '再製', 'Ctrl+D', true], null, ['delete', '刪除', 'Delete', true]
         ];
       } else {
         items = [['paste', '貼上', 'Ctrl+V', !!clipboard], ['selectall', '全選', 'Ctrl+A', true], null,
-          ['fit', '符合視窗', '', true], ['grid', '格線', '', true]];
+          ['fit', '符合視窗', '', true], ['grid', '格線', '', true], null, ['page-add', '新增頁面', '', true]];
       }
       menuEl = document.createElement('div');
       menuEl.className = 'dio-menu dio-ctx';
       menuEl.setAttribute('data-for', 'ctx');
       menuEl.innerHTML = items.map(function (it) {
         if (!it) return '<div class="dio-menu-sep"></div>';
-        const on = it[0] === 'grid' && model.grid;
+        const on = it[0] === 'grid' && doc.grid;
         return '<button class="dio-menu-item' + (on ? ' on' : '') + '" type="button" data-act="' + it[0] + '"' + (it[3] ? '' : ' disabled') + '><span>' +
           esc(it[1]) + '</span><kbd>' + (it[2] || '') + '</kbd></button>';
       }).join('');
@@ -1546,16 +1892,19 @@
       if (e.button !== 0) return;
       const t = e.target;
       const w = toWorld(e);
-      const handle = t.closest('[data-handle]'), endH = t.closest('[data-end]'), dot = t.closest('[data-conn]');
+      const handle = t.closest('[data-handle]'), endH = t.closest('[data-end]'), dot = t.closest('[data-conn]'), rotH = t.closest('[data-rot]');
       const el = t.closest('[data-id]');
       // 雙擊在這裡自己認（第二下的 mousedown）：按下時整張圖會重畫，被按的那個元素就不在了，
       // 瀏覽器找不到按下與放開的共同祖先，click 跟 dblclick 都不會發
-      if (e.detail === 2 && !handle && !endH && !dot) {
+      if (e.detail === 2 && !handle && !endH && !dot && !rotH) {
         e.preventDefault();
         onDbl(el ? el.getAttribute('data-id') : null, w);
         return;
       }
-      if (handle && sel.length === 1 && shapeById(sel[0])) {
+      if (rotH && sel.length === 1 && shapeById(sel[0])) {
+        const s = shapeById(sel[0]), c = centerOf(s);
+        gesture = { type: 'rotate', before: begin(), id: s.id, c: c, start: Math.atan2(w.y - c.y, w.x - c.x) * 180 / Math.PI, rot0: s.rot || 0 };
+      } else if (handle && sel.length === 1 && shapeById(sel[0])) {
         const s = shapeById(sel[0]);
         gesture = { type: 'resize', dir: handle.getAttribute('data-handle'), before: begin(), id: s.id, o: { x: s.x, y: s.y, w: s.w, h: s.h } };
       } else if (endH && sel.length === 1 && edgeById(sel[0])) {
@@ -1597,15 +1946,44 @@
         if (Math.abs(e.clientX - g.sx) + Math.abs(e.clientY - g.sy) > 4) { g.moved = true; g.ghost.hidden = false; }
         return;
       }
+      if (g.type === 'rotate') {
+        const s = shapeById(g.id);
+        if (!s) return;
+        let a = g.rot0 + Math.atan2(w.y - g.c.y, w.x - g.c.x) * 180 / Math.PI - g.start;
+        a = normRot(a);
+        // 靠近 15° 的倍數就吸過去（按著 Shift 一律每 15°；Alt 完全自由），跟 draw.io 一樣
+        if (!e.altKey) { const q = Math.round(a / 15) * 15; if (e.shiftKey || Math.abs(a - q) <= 3) a = q % 360; }
+        s.rot = a;
+        render();
+        return;
+      }
       if (g.type === 'move') {
         if (!g.moved && Math.abs(e.clientX - g.sx) + Math.abs(e.clientY - g.sy) < 3) return;
         g.moved = true;
+        edgeScroll(e);
         const dx = w.x - g.w0.x, dy = w.y - g.w0.y;
         // 整組一起對齊格線：以第一個圖形為準算出位移，其他人照同樣的量走，相對位置才不會跑掉
         const first = Object.keys(g.shapes)[0];
         let ax = dx, ay = dy;
         if (first) { ax = snap(g.shapes[first].x + dx) - g.shapes[first].x; ay = snap(g.shapes[first].y + dy) - g.shapes[first].y; }
         else if (g.ends.length) { ax = snap(g.ends[0].x + dx) - g.ends[0].x; ay = snap(g.ends[0].y + dy) - g.ends[0].y; }
+        // 對齊輔助線：移動中那一組的外框（左／中／右、上／中／下）跟別的圖形的對上了就吸過去，
+        // 輔助線優先於格線（draw.io 也是）
+        g.guides = [];
+        if (first) {
+          let mb = null;
+          Object.keys(g.shapes).forEach(function (id) {
+            const s = shapeById(id);
+            if (!s) return;
+            const b = aabb(Object.assign({}, s, { x: g.shapes[id].x + ax, y: g.shapes[id].y + ay }));
+            mb = mb ? { x: Math.min(mb.x, b.x), y: Math.min(mb.y, b.y), x1: Math.max(mb.x1, b.x + b.w), y1: Math.max(mb.y1, b.y + b.h) } : { x: b.x, y: b.y, x1: b.x + b.w, y1: b.y + b.h };
+          });
+          if (mb) {
+            const hit = snapGuides({ x: mb.x, y: mb.y, w: mb.x1 - mb.x, h: mb.y1 - mb.y }, g.shapes);
+            if (hit.x) { ax += hit.x.d; g.guides.push({ x: hit.x.at }); }
+            if (hit.y) { ay += hit.y.d; g.guides.push({ y: hit.y.at }); }
+          }
+        }
         Object.keys(g.shapes).forEach(function (id) {
           const s = shapeById(id);
           if (s) { s.x = g.shapes[id].x + ax; s.y = g.shapes[id].y + ay; }
@@ -1617,15 +1995,35 @@
       if (g.type === 'resize') {
         const s = shapeById(g.id), o = g.o;
         if (!s) return;
+        edgeScroll(e);
+        const c0 = { x: o.x + o.w / 2, y: o.y + o.h / 2 };
+        // 轉過的圖形：在它自己的座標系裡縮放（把游標轉進去），再把新的中心轉回世界座標
+        const lp = s.rot ? rotPt(w, c0, -s.rot) : w;
+        const sn = function (v) { return s.rot ? v : snap(v); };
         let x0 = o.x, y0 = o.y, x1 = o.x + o.w, y1 = o.y + o.h;
-        if (g.dir.indexOf('w') >= 0) x0 = Math.min(snap(w.x), x1 - MIN_SIZE);
-        if (g.dir.indexOf('e') >= 0) x1 = Math.max(snap(w.x), x0 + MIN_SIZE);
-        if (g.dir.indexOf('n') >= 0) y0 = Math.min(snap(w.y), y1 - MIN_SIZE);
-        if (g.dir.indexOf('s') >= 0) y1 = Math.max(snap(w.y), y0 + MIN_SIZE);
-        s.x = x0; s.y = y0; s.w = x1 - x0; s.h = y1 - y0;
+        if (g.dir.indexOf('w') >= 0) x0 = Math.min(sn(lp.x), x1 - MIN_SIZE);
+        if (g.dir.indexOf('e') >= 0) x1 = Math.max(sn(lp.x), x0 + MIN_SIZE);
+        if (g.dir.indexOf('n') >= 0) y0 = Math.min(sn(lp.y), y1 - MIN_SIZE);
+        if (g.dir.indexOf('s') >= 0) y1 = Math.max(sn(lp.y), y0 + MIN_SIZE);
+        g.guides = [];
+        if (!s.rot) {
+          // 拉的那一邊對上別的圖形的邊或中線就吸過去
+          const only = {}; only[s.id] = 1;
+          const ex = g.dir.indexOf('w') >= 0 ? 'x0' : g.dir.indexOf('e') >= 0 ? 'x1' : null;
+          const ey = g.dir.indexOf('n') >= 0 ? 'y0' : g.dir.indexOf('s') >= 0 ? 'y1' : null;
+          const hx = ex ? snapEdge(ex === 'x0' ? x0 : x1, true, only) : null;
+          const hy = ey ? snapEdge(ey === 'y0' ? y0 : y1, false, only) : null;
+          if (hx) { if (ex === 'x0') x0 = Math.min(hx.at, x1 - MIN_SIZE); else x1 = Math.max(hx.at, x0 + MIN_SIZE); g.guides.push({ x: hx.at }); }
+          if (hy) { if (ey === 'y0') y0 = Math.min(hy.at, y1 - MIN_SIZE); else y1 = Math.max(hy.at, y0 + MIN_SIZE); g.guides.push({ y: hy.at }); }
+          s.x = x0; s.y = y0; s.w = x1 - x0; s.h = y1 - y0;
+        } else {
+          const wc = rotPt({ x: (x0 + x1) / 2, y: (y0 + y1) / 2 }, c0, s.rot);
+          s.w = x1 - x0; s.h = y1 - y0; s.x = wc.x - s.w / 2; s.y = wc.y - s.h / 2;
+        }
         render();
         return;
       }
+      if (g.type === 'connect' || g.type === 'endpoint') edgeScroll(e);
       if (g.type === 'connect') {
         g.target = targetShapeAt(e, g.from);
         g.preview.to = g.target ? { id: g.target } : { x: w.x, y: w.y };
@@ -1646,8 +2044,38 @@
         if (!g.moved && Math.abs(e.clientX - g.sx) + Math.abs(e.clientY - g.sy) < 3) return;
         g.moved = true;
         g.box = { x: Math.min(g.w0.x, w.x), y: Math.min(g.w0.y, w.y), w: Math.abs(w.x - g.w0.x), h: Math.abs(w.y - g.w0.y) };
-        renderOverlay();
+        if (edgeScroll(e)) render(); else renderOverlay();
       }
+    }
+    // 對齊輔助線的吸附距離（螢幕像素）
+    const GUIDE = 6;
+    // 一個值（x 或 y）跟沒被選的圖形的邊／中線比，最近而且在吸附距離內的那條
+    function snapEdge(v, horizontal, skip) {
+      const th = GUIDE / zoom;
+      let best = null;
+      model.shapes.forEach(function (o) {
+        if (skip[o.id]) return;
+        const b = aabb(o);
+        const cands = horizontal ? [b.x, b.x + b.w / 2, b.x + b.w] : [b.y, b.y + b.h / 2, b.y + b.h];
+        cands.forEach(function (cv) {
+          const d = cv - v;
+          if (Math.abs(d) <= th && (!best || Math.abs(d) < Math.abs(best.d))) best = { d: d, at: cv };
+        });
+      });
+      return best;
+    }
+    // 移動中那一組的外框：左／中／右各試一次（上／中／下同理），取最近的
+    function snapGuides(mb, skip) {
+      let bx = null, by = null;
+      [mb.x, mb.x + mb.w / 2, mb.x + mb.w].forEach(function (v) {
+        const h = snapEdge(v, true, skip);
+        if (h && (!bx || Math.abs(h.d) < Math.abs(bx.d))) bx = h;
+      });
+      [mb.y, mb.y + mb.h / 2, mb.y + mb.h].forEach(function (v) {
+        const h = snapEdge(v, false, skip);
+        if (h && (!by || Math.abs(h.d) < Math.abs(by.d))) by = h;
+      });
+      return { x: bx, y: by };
     }
     function onUp(e) {
       if (!gesture) return;
@@ -1668,7 +2096,7 @@
         canvas.focus();
         return;
       }
-      if (g.type === 'move' || g.type === 'resize') {
+      if (g.type === 'move' || g.type === 'resize' || g.type === 'rotate') {
         commit(g.before);
       } else if (g.type === 'connect') {
         const far = Math.abs(w.x - centerOf(shapeById(g.from)).x) + Math.abs(w.y - centerOf(shapeById(g.from)).y) > 12;
@@ -1692,7 +2120,7 @@
         else {
           const b = g.box, inBox = function (x, y) { return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h; };
           const byId = indexOf(model);
-          const hit = model.shapes.filter(function (s) { return inBox(s.x, s.y) && inBox(s.x + s.w, s.y + s.h); }).map(function (s) { return s.id; })
+          const hit = model.shapes.filter(function (s) { const bb = aabb(s); return inBox(bb.x, bb.y) && inBox(bb.x + bb.w, bb.y + bb.h); }).map(function (s) { return s.id; })
             .concat(model.edges.filter(function (ed) {
               const gg = edgeGeom(ed, byId);
               return gg && inBox(gg.p1.x, gg.p1.y) && inBox(gg.p2.x, gg.p2.y);
@@ -1726,14 +2154,12 @@
     host.addEventListener('contextmenu', onCtxMenu);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
+    // 滾輪就是捲動（畫布是真的捲動容器，瀏覽器自己來，Shift＋滾輪橫捲也是）；Ctrl＋滾輪才是縮放
     canvas.addEventListener('wheel', function (e) {
+      if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
       if (editing) commitEdit();
-      if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
-      else {
-        if (e.shiftKey) panX -= e.deltaY; else { panX -= e.deltaX; panY -= e.deltaY; }
-        render();
-      }
+      zoomAt(e.clientX, e.clientY, zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
     }, { passive: false });
 
     // 左邊的圖形：點一下放中央，拖過去放在放開的地方
@@ -1982,12 +2408,15 @@
       if (!ss.length && !es.length) {
         formatEl.innerHTML = '<div class="dio-tabs"><span class="dio-tab on">圖表</span></div><div class="dio-panel">' +
           '<div class="dio-grp">檢視</div>' +
-          '<div class="dio-row"><label class="dio-chk"><input type="checkbox" data-act="grid"' + (model.grid ? ' checked' : '') + '><span>格線</span></label></div>' +
+          '<div class="dio-row"><label class="dio-chk"><input type="checkbox" data-act="grid"' + (doc.grid ? ' checked' : '') + '><span>格線</span></label></div>' +
           '<div class="dio-row"><label class="dio-chk"><input type="checkbox" data-act="snap"' + (snapOn ? ' checked' : '') + '><span>對齊格線</span></label></div>' +
+          '<div class="dio-grp">頁面</div>' +
+          '<div class="dio-row dio-dim"><span>第 ' + (pi + 1) + ' 頁／共 ' + doc.pages.length + ' 頁・' + esc(model.name) + '</span></div>' +
+          '<div class="dio-btns"><button type="button" class="dio-btn" data-act="page-add">新增頁面</button><button type="button" class="dio-btn" data-pact="pren">重新命名</button></div>' +
           '<div class="dio-grp">統計</div>' +
           '<div class="dio-row dio-dim"><span>' + model.shapes.length + ' 個圖形・' + model.edges.length + ' 條連線</span></div>' +
           '<div class="dio-grp">操作</div><div class="dio-help">' +
-          '雙擊圖形或連線：改文字<br>雙擊空白處：加文字<br>滾輪：捲動　Ctrl+滾輪：縮放<br>空白鍵＋拖曳、右鍵拖曳：平移<br>Shift＋點：多選　拖空白處：框選</div>' +
+          '雙擊圖形或連線：改文字<br>雙擊空白處：加文字<br>滾輪、捲軸：捲動　Ctrl+滾輪：縮放<br>空白鍵＋拖曳、右鍵拖曳：平移<br>Shift＋點：多選　拖空白處：框選<br>拖右上角的圓點：旋轉</div>' +
           '</div>';
         return;
       }
@@ -2031,7 +2460,13 @@
             [['left', '靠左'], ['center', '水平置中'], ['right', '靠右'], ['top', '靠上'], ['middle', '垂直置中'], ['bottom', '靠下']].map(function (x) {
               return '<button type="button" class="dio-btn" data-act="align-' + x[0] + '">' + x[1] + '</button>';
             }).join('') + '</div>';
+          if (ss.length >= 3) {
+            h += '<div class="dio-grp">等距分佈</div><div class="dio-btns">' +
+              '<button type="button" class="dio-btn" data-act="dist-h">水平</button><button type="button" class="dio-btn" data-act="dist-v">垂直</button></div>';
+          }
         }
+        h += '<div class="dio-grp">旋轉</div>' + numRow('角度', 'rot', s0.rot || 0, 0, 359, 1) + '<div class="dio-btns">' +
+          '<button type="button" class="dio-btn" data-act="rot-ccw">↺ 逆時針 90°</button><button type="button" class="dio-btn" data-act="rot-cw">↻ 順時針 90°</button></div>';
       }
       formatEl.innerHTML = h + '</div>';
     }
@@ -2048,6 +2483,7 @@
           else if (prop === 'align' && ALIGNS.indexOf(value) >= 0) s.align = value;
           else if (prop === 'x' || prop === 'y') s[prop] = num(value, s[prop], -20000, 20000);
           else if (prop === 'w' || prop === 'h') s[prop] = num(value, s[prop], MIN_SIZE, 4000);
+          else if (prop === 'rot') s.rot = normRot(num(value, s.rot || 0, -100000, 100000));
         });
         es.forEach(function (e) {
           if (prop === 'stroke') e.stroke = color(value, e.stroke, false);
@@ -2086,6 +2522,8 @@
       }
       const seg = e.target.closest('button[data-prop]');
       if (seg) { applyProp(seg.getAttribute('data-prop'), seg.getAttribute('data-val')); return; }
+      const pb = e.target.closest('button[data-pact]');
+      if (pb) { if (pb.getAttribute('data-pact') === 'pren') renamePage(pi); return; }
       const b = e.target.closest('button[data-act]');
       if (b) act(b.getAttribute('data-act'));
     });
@@ -2134,12 +2572,12 @@
       clearTimeout(saveTimer);
       dirty = false;
       setStatus('儲存中…');
-      return Promise.resolve(opts.onChange ? opts.onChange(wrap(serialize(model))) : null).then(function () {
+      return Promise.resolve(opts.onChange ? opts.onChange(wrap(serialize(doc))) : null).then(function () {
         if (!closed && !dirty) setStatus('已儲存', 'is-ok');
       }, function () { if (!closed) setStatus('儲存失敗', 'is-err'); });
     }
 
-    renderFormat(); refreshToolbar();
+    renderTabs(); renderFormat(); refreshToolbar();
     // 容器剛顯示出來時還沒有大小，等排版完再對位
     requestAnimationFrame(function () { if (!closed) { fit(); if (model.shapes.length || model.edges.length) setStatus('已儲存', 'is-ok'); } });
     setTimeout(function () { if (!closed) canvas.focus(); }, 30);
@@ -2151,6 +2589,6 @@
     open: open, view: view,
     isNote: isNote, generate: generate,
     payloadOf: payloadOf, wrap: wrap, parse: parse, serialize: serialize,
-    renderSVG: renderSVG, blockHTML: blockHTML, htmlOf: htmlOf
+    renderSVG: renderSVG, pagesSVG: pagesSVG, blockHTML: blockHTML, htmlOf: htmlOf
   };
 })(window);

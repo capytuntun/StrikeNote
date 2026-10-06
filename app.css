@@ -3335,10 +3335,15 @@ select.sec-info-input { cursor: pointer; }
 .dio-page.is-filedrag .dio-icons { outline: 2px dashed var(--accent); outline-offset: 3px; }
 .dio-page.is-filedrag .dio-canvas { box-shadow: inset 0 0 0 2px #4c8dff; }
 
-.dio-canvas { flex: 1 1 auto; min-width: 0; position: relative; overflow: hidden; outline: none; background: #fff; cursor: default; }
+/* 畫布一欄：上面是畫布（真的捲動容器），下面是分頁列 */
+.dio-center { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.dio-canvas { flex: 1 1 auto; min-width: 0; min-height: 0; position: relative; overflow: auto; outline: none; background: #fff; cursor: default; scrollbar-width: thin; }
+/* 「紙」：大小由 drawio.js 設（圖的範圍往四邊各延伸一個視窗），捲軸是它撐出來的 */
+.dio-sheet { position: relative; }
 .dio-canvas.can-pan { cursor: grab; }
 .dio-canvas.is-panning { cursor: grabbing; }
-.dio-stage { position: absolute; inset: 0; width: 100%; height: 100%; display: block; user-select: none; }
+/* 畫圖的 SVG 黏在可見區域（大小＝可見區域，由 JS 設）；紙在它底下捲 */
+.dio-stage { position: sticky; top: 0; left: 0; display: block; user-select: none; }
 .dio-stage text { pointer-events: none; }
 /* 沒有填色的圖形、純文字，中間也要點得到；連線則是線的附近才算 */
 .dio-stage .dio-shape .dio-hit { pointer-events: all; }
@@ -3358,6 +3363,28 @@ select.sec-info-input { cursor: pointer; }
 .dio-conn { fill: #4c8dff; fill-opacity: .85; stroke: #fff; cursor: crosshair; }
 .dio-conn:hover { fill: #1a5fe0; fill-opacity: 1; }
 .dio-end { fill: #fff; stroke: #4c8dff; cursor: move; }
+/* 旋轉把手（右上角外面的圓點）與拖曳時的角度 */
+.dio-rot { fill: #fff; stroke: #4c8dff; cursor: grab; }
+.dio-rot:hover { fill: #4c8dff; }
+.dio-rot-lbl { fill: #4c8dff; font-weight: 600; pointer-events: none; }
+/* 拖曳／縮放時的對齊輔助線 */
+.dio-guide { stroke: #ff7a1a; pointer-events: none; }
+/* 分頁列（畫布下面，跟 draw.io 一樣） */
+.dio-pages { flex: 0 0 auto; display: flex; align-items: stretch; height: 30px; border-top: 1px solid var(--border); background: var(--bg-2); }
+.dio-ptabs { display: flex; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.dio-ptab {
+  flex: 0 0 auto; max-width: 180px; padding: 0 14px; border: 0; border-right: 1px solid var(--border);
+  background: transparent; color: var(--text-dim); font: inherit; font-size: var(--fs-sm);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.dio-ptab:hover { background: var(--row-hover); color: var(--text); }
+.dio-ptab.on { background: var(--bg); color: var(--text); font-weight: 600; box-shadow: inset 0 2px 0 var(--accent); }
+.dio-padd {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 32px;
+  border: 0; border-right: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer;
+}
+.dio-padd:hover { background: var(--row-hover); color: var(--text); }
+.dio-padd .ic-svg { width: 14px; height: 14px; }
 /* 就地改文字：座標是視窗座標，所以是 fixed */
 .dio-edit {
   position: fixed; z-index: 2100; box-sizing: border-box; margin: 0; padding: 4px 6px; resize: none; overflow: hidden;
@@ -3427,6 +3454,11 @@ span.dio-tab { cursor: default; }
    主題的底上會整張看不見。 */
 .drawio-block { margin: 0 0 14px; padding: 12px; border: 1px solid var(--border); background: #fff; text-align: center; overflow-x: auto; }
 .drawio-block .dio-svg, .drawio-embed-canvas .dio-svg, .drawio-img { display: block; max-width: 100%; height: auto; margin: 0 auto; background: #fff; }
+/* 多頁的圖：一頁一張，頁名在上面 */
+.dio-pg { margin: 0 0 16px; }
+.dio-pg:last-child { margin-bottom: 0; }
+.dio-pg-t { margin: 0 0 6px; font-size: var(--fs-xs); font-weight: 600; color: var(--text-dim); text-align: left; }
+.dio-pg-empty { padding: 14px; font-size: var(--fs-xs); color: var(--text-faint); }
 .drawio-block.is-empty {
   display: flex; align-items: center; justify-content: center; gap: 8px; padding: 28px 12px;
   background: var(--bg-2); color: var(--text-faint); font-size: var(--fs-sm);

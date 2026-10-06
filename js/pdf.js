@@ -453,6 +453,10 @@
       '.pdf-content .drawio-embed-bar { display: none; }',
       '.pdf-content .drawio-embed-canvas { display: block; padding: 0; }',
       '.pdf-content .dio-svg, .pdf-content .drawio-img { display: block; margin: 0 auto; max-width: 100%; max-height: 225mm; width: auto; height: auto; }',
+      /* 多頁的圖：每一頁連著頁名一起不切開 */
+      '.pdf-content .dio-pg { break-inside: avoid; margin: 0 0 5mm; }',
+      '.pdf-content .dio-pg-t { margin: 0 0 2mm; font-size: 9pt; font-weight: 600; color: #57606a; text-align: left; }',
+      '.pdf-content .dio-pg-empty { font-size: 9pt; color: #8c959f; }',
       /* 便條紙：紙本上還是一張紙，但用比較淡的暖黃（列印出來不會糊成一塊），
          色帶壓深一點才印得出來。 */
       '.pdf-content .rm-note .rm-note-paper { fill: #fbf3cf; stroke: #c9b678; stroke-width: 1; }',
