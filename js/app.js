@@ -73,6 +73,7 @@
     if (note.meta && note.meta.drawio) return 'shapes';
     if (note.meta && note.meta.board) return 'kanban';
     if (note.meta && note.meta.startpage) return 'layout-grid';
+    if (note.meta && note.meta.doc) return 'file-pen';
     if (note.area === 'quick') return 'pin';
     if (note.meta && note.meta.perfReport) return 'chart';
     if (note.meta && note.meta.secReport) return 'shield';
@@ -1040,6 +1041,7 @@
     closeRelMapView();
     closeDrawioView();
     closeKanbanView();
+    closeDocView();
     closeGraphView();
   }
 
@@ -1199,6 +1201,134 @@
     setHash('start');
     setTreeArea('start');
     renderStart();
+  }
+  // ---- 文件（js/doc.js）：所見即所得的編輯器，整頁；內容是 HTML。最上面那一列是它的標題列（toolBar，
+  // 跟 drawio／看板同一套），單一寫入路徑同上。----
+  const docWrapEl = $('#doc-wrap');
+  let docView = null, docNoteId = null;
+  function closeDocView() {
+    if (docNoteId) { const id = docNoteId; docNoteId = null; setTimeout(function () { flushPublish(id); }, 0); }
+    dropToolBar('doc');
+    if (docView) { const v = docView; docView = null; v.close(); }
+    if (docWrapEl) docWrapEl.hidden = true;
+  }
+  function openDocNote(note) {
+    if (!docWrapEl || !window.Doc) return;
+    leaveOtherViews();
+    closeAreaViews();
+    docWrapEl.hidden = false;
+    docNoteId = note.id;
+    setTreeArea(isMine(note) ? (note.area || null) : null);
+    LS.set('lastNote', note.id);
+    setHash('note/' + note.id);
+    function syncState(n) {
+      const idx = state.notes.findIndex(function (x) { return x.id === n.id; });
+      if (idx >= 0) { state.notes[idx].rev = n.rev; state.notes[idx].updatedAt = n.updatedAt; }
+      note.rev = n.rev; note.updatedAt = n.updatedAt;
+    }
+    function live() { return state.notes.find(function (x) { return x.id === note.id; }) || note; }
+    let saving = null, again = false;
+    function flushSave() {
+      if (saving) { again = true; return saving; }
+      const run = function () {
+        const n = live();
+        return Store.updateNote({ id: n.id, title: n.title, content: n.content, folderId: n.folderId, meta: n.meta })
+          .then(function (r) { syncState(r); noteSaved(live()); })
+          .then(function () { if (again) { again = false; return run(); } });
+      };
+      saving = run().then(function () { saving = null; }, function (e) {
+        saving = null; again = false;
+        toast('儲存失敗：' + (e && e.message || e));
+        throw e;
+      });
+      return saving;
+    }
+    function setLocal(patch) {
+      const n = live();
+      Object.assign(n, patch);
+      if (n !== note) Object.assign(note, patch);
+      return flushSave();
+    }
+    const readOnly = note.perm === 'read';
+    const title = (note.title === '未命名筆記' || note.title === '未命名文件') ? '' : (note.title || '');
+    const view = Doc.open(note.content || '', {
+      container: docWrapEl,
+      readOnly: readOnly,
+      banner: readOnly ? '唯讀 — 由 ' + (note.sharedBy || '其他使用者') + ' 分享給你' : '',
+      onChange: function (html) { return setLocal({ content: html }); },
+      // 圖片走跟編輯器同一條上傳路（uploadFiles），回來的是 Markdown 參照，這裡只要 id 與名稱
+      onUpload: function (files) {
+        return uploadFiles(files).then(function (mds) {
+          return mds.map(function (md) {
+            const m = /^!\[([^\]]*)\]\(img:([^)#]+)\)/.exec(md || '');
+            return m ? { id: m[2], alt: m[1] } : null;
+          }).filter(Boolean);
+        });
+      }
+    });
+    docView = view;
+    let titleTimer = null, pendingTitle = null;
+    function commitTitle() {
+      clearTimeout(titleTimer); titleTimer = null;
+      if (pendingTitle === null) return;
+      const t = pendingTitle.trim();
+      pendingTitle = null;
+      if ((t || '未命名文件') === live().title) return;
+      setLocal({ title: t || '未命名文件' }).catch(function () {});
+      renderTree();
+    }
+    toolBar = {
+      kind: 'doc',
+      id: note.id,
+      readOnly: readOnly,
+      note: live,
+      titleInput: function (v) {
+        if (readOnly) return;
+        pendingTitle = v;
+        clearTimeout(titleTimer);
+        titleTimer = setTimeout(commitTitle, SAVE_DELAY);
+      },
+      commitTitle: commitTitle,
+      history: function () {
+        if (!window.Versions) return;
+        commitTitle();
+        view.flush().then(function () {
+          if (docView !== view) return;
+          Versions.openNote(live(), {
+            onRestored: function (fresh) {
+              const i = state.notes.findIndex(function (n) { return n.id === fresh.id; });
+              if (i >= 0) state.notes[i] = Object.assign(state.notes[i], fresh);
+              renderTree();
+              if (docView === view) view.setContent(fresh.content || '');
+            }
+          });
+        });
+      },
+      // PDF：內容就是 HTML，照一般筆記的路（MD.render 會原樣放行、清過）交給 PDF
+      pdf: function () {
+        commitTitle();
+        view.flush().then(function () {
+          const n = live();
+          const box = document.createElement('div');
+          box.className = 'markdown-body';
+          box.innerHTML = MD.render(n.content || '');
+          return PDF.showPreview(n, box, {
+            meta: n.meta,
+            onMeta: function (meta) {
+              if (readOnly) return;
+              setLocal({ meta: Object.assign({}, live().meta, meta, { doc: true }) }).catch(function () {});
+            }
+          });
+        }).catch(function (err) { alert('產生列印預覽失敗：' + (err && err.message || err)); });
+      }
+    };
+    noteBar(true);
+    document.getElementById('app').classList.add('tool-open');
+    titleEl.placeholder = '未命名文件';
+    titleEl.value = title;
+    titleEl.readOnly = readOnly;
+    if (shareBtn) shareBtn.hidden = !isMine(note);
+    updateNotePath(note);
   }
   function openKanbanNote(note) {
     if (!kanbanWrapEl || !window.Board) return;
@@ -1882,6 +2012,7 @@
     closeRelMapView();
     closeDrawioView();
     closeKanbanView();
+    closeDocView();
     closeGraphView();
     setTreeArea(null);    // 首頁＝所有筆記，側邊欄的樹也回到一般區域
     if (window.Dashboard) {
@@ -1948,6 +2079,7 @@
     closeRelMapView();
     closeDrawioView();
     closeKanbanView();
+    closeDocView();
     closeGraphView();
     closeFilesView();
     filesWrapEl.hidden = false;
@@ -1981,6 +2113,7 @@
     closeRelMapView();
     closeDrawioView();
     closeKanbanView();
+    closeDocView();
     closeGraphView();
     closeFilesView();
     trashWrapEl.hidden = false;
@@ -2010,6 +2143,7 @@
     closeRelMapView();
     closeDrawioView();
     closeKanbanView();
+    closeDocView();
     closeGraphView();
     setTreeArea(null);
     bookWrapEl.hidden = false;
@@ -2120,6 +2254,8 @@
       if (window.Board && Board.isNote(note)) { openKanbanNote(note); return; }
       // 起始頁（meta.startpage）：到起始頁的畫面、切到那一頁
       if (window.StartPage && StartPage.isNote(note)) { openStart({ pageId: note.id }); return; }
+      // 文件（meta.doc）：所見即所得的整頁編輯器
+      if (window.Doc && Doc.isNote(note)) { anchorBackToFolder(fromArea, note); openDocNote(note); return; }
       // 不在 state.notes 裡的檔案筆記（理論上不會發生）：同樣只疊檢視器，背景沒東西就回首頁
       if (isFileNote(note)) { if (!state.currentId) showEmpty(); openFileViewer(note); return; }
       state.currentId = id;
@@ -2139,6 +2275,7 @@
       closeRelMapView();
       closeDrawioView();
       closeKanbanView();
+      closeDocView();
       closeGraphView();
       // 區域裡的筆記：側邊欄留在那個區域的樹（別人分享來的不屬於我的任何區域）
       setTreeArea(isMine(note) ? (note.area || null) : null);
@@ -5242,6 +5379,17 @@
         }, function (e) { toast('新增失敗：' + (e && e.message || e)); });
     });
 
+    const docBtn = $('#new-doc');
+    if (docBtn && window.Doc) docBtn.addEventListener('click', function () {
+      createOnce('doc', function () {
+        return Store.createNote('未命名文件', currentFolderId(), withArea(currentFolderId(), { meta: { doc: true }, content: Doc.generate() }))
+          .then(function (n) {
+            state.notes.push(n);
+            refreshViews();
+            openNote(n.id);
+          });
+      });
+    });
     const dioBtn = $('#new-drawio');
     if (dioBtn && window.DrawIO) dioBtn.addEventListener('click', function () {
       createOnce('drawio', function () {

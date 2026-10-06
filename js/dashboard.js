@@ -46,6 +46,7 @@
     if (n.meta && n.meta.drawio) return { icon: 'shapes', label: 'drawio', cls: 'kind-drawio' };
     if (n.meta && n.meta.board) return { icon: 'kanban', label: '看板', cls: 'kind-board' };
     if (n.meta && n.meta.startpage) return { icon: 'layout-grid', label: '起始頁', cls: 'kind-start' };
+    if (n.meta && n.meta.doc) return { icon: 'file-pen', label: '文件', cls: 'kind-doc' };
     return { icon: 'file-text', label: '', cls: '' };
   }
 

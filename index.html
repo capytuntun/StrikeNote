@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=184">
+  <link rel="stylesheet" href="app.css?v=185">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -143,6 +143,7 @@
             <button id="sec-report" class="user-menu-item" role="menuitem" type="button" title="資安院報告模式" data-icon="shield">資安院報告</button>
             <button id="perf-report" class="user-menu-item" role="menuitem" type="button" title="成效報告模式" data-icon="chart">成效報告</button>
             <button id="rel-map" class="user-menu-item" role="menuitem" type="button" title="自由畫布的節點／連線圖，像簡化版的 React Flow" data-icon="network">關聯分析</button>
+            <button id="new-doc" class="user-menu-item" role="menuitem" type="button" title="所見即所得的文件：工具列排版，像 Google 文件，不用 Markdown" data-icon="file-pen">文件</button>
             <button id="new-drawio" class="user-menu-item" role="menuitem" type="button" title="畫流程圖、網路架構圖：拖圖形、拉連線、改文字與顏色（版面像 draw.io 的基本繪圖工具）" data-icon="shapes">drawio</button>
             <div class="user-menu-sep" role="separator"></div>
             <button id="new-book" class="user-menu-item" role="menuitem" type="button" title="挑一個資料夾做成電子書；做過的電子書會列在首頁的「電子書」區" data-icon="book-open">電子書</button>
@@ -339,6 +340,8 @@
         <div id="boards-page" class="boards-page"></div>
       </div>
       <div id="kanban-wrap" class="kanban-wrap" hidden></div>
+      <!-- 文件（js/doc.js）：所見即所得的編輯器，一篇 meta.doc 的筆記開在這裡整頁 -->
+      <div id="doc-wrap" class="doc-wrap" hidden></div>
       <!-- 起始頁（js/startpage.js）：#start，一個畫面、上面是分頁；每一頁是一篇 meta.startpage 的筆記 -->
       <div id="start-wrap" class="trash-wrap area-wrap" hidden>
         <div id="start-page"></div>
@@ -367,7 +370,7 @@
   <script src="vendor/hljs-dos.min.js"></script>
 
   <!-- App -->
-  <script src="js/icons.js?v=14"></script>
+  <script src="js/icons.js?v=15"></script>
   <script src="js/merge.js?v=4"></script>
   <script src="js/mdimport.js?v=1"></script>
   <script src="js/mindmap.js?v=3"></script>
@@ -391,19 +394,20 @@
   <script src="js/seceditor.js?v=43"></script>
   <script src="js/perfreport.js?v=43"></script>
   <script src="js/sorting.js?v=1"></script>
-  <script src="js/dashboard.js?v=71"></script>
-  <script src="js/areabrowser.js?v=18"></script>
+  <script src="js/dashboard.js?v=72"></script>
+  <script src="js/areabrowser.js?v=19"></script>
   <script src="js/quicknotes.js?v=10"></script>
   <script src="js/board.js?v=1"></script>
   <script src="js/startpage.js?v=1"></script>
+  <script src="js/doc.js?v=1"></script>
   <script src="js/annotate.js?v=42"></script>
   <script src="js/pdf.js?v=59"></script>
   <script src="js/book.js?v=11"></script>
   <script src="js/versions.js?v=6"></script>
-  <script src="js/trash.js?v=5"></script>
+  <script src="js/trash.js?v=6"></script>
   <script src="js/imagelib.js?v=7"></script>
   <script src="js/linesync.js?v=8"></script>
   <script src="js/embedswitch.js?v=2"></script>
-  <script src="js/app.js?v=135"></script>
+  <script src="js/app.js?v=136"></script>
 </body>
 </html>
