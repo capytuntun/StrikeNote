@@ -475,6 +475,9 @@
       '.pdf-content .kbs-check li { display: flex; align-items: center; gap: 1mm; } .pdf-content .kbs-check li.is-done { color: #626f86; text-decoration: line-through; }',
       '.pdf-content .kbs-check .ic-svg { width: 3mm; height: 3mm; }',
       '.pdf-content .kbs-board.is-empty { background: #f6f8fa; color: #626f86; justify-content: center; font-size: 9pt; }',
+      /* 文件（js/doc.js）的分頁符號、目錄、程式碼區塊，筆記裡若貼了這些 HTML 也照樣印 */
+      '.pdf-content .gd-pagebreak { break-after: page; height: 0; margin: 0; border: 0; visibility: hidden; }',
+      '.pdf-content pre.gd-code { font-family: "Courier New", Consolas, monospace; font-size: 9pt; background: #f1f3f4; border: 1px solid #dadce0; padding: 2mm 3mm; white-space: pre-wrap; }',
       /* 心智圖（```xmind，js/xmind.js 的 blockHTML）：一張 SVG，太高就縮到一頁內；多張工作表各自一塊 */
       '.pdf-content .xmind-block { margin: 0 0 5mm; }',
       '.pdf-content .xmind-block svg { display: block; max-width: 100%; height: auto; max-height: 225mm; border-radius: 2mm; }',
@@ -982,6 +985,49 @@
     render();
   }
 
+  // 泛用版的列印預覽：拿到的 html 就是完整的文件（<!DOCTYPE html>…），不加封面、目錄、樣式或浮水印——
+  // 文件（js/doc.js）自己排好 @page 與頁首頁尾，這裡只負責用 paged.js 分頁、數頁、列印。
+  function showHTML(html, o) {
+    o = o || {};
+    const overlay = el('div', 'modal-overlay pv-overlay');
+    const modal = el('div', 'modal pv-modal');
+    const head = el('div', 'pv-head');
+    head.appendChild(el('div', 'modal-title', o.title ? '列印預覽 — ' + o.title : '列印預覽'));
+    const pages = el('div', 'pv-pages', '排版中…');
+    head.appendChild(pages);
+    modal.appendChild(head);
+    const stage = el('div', 'pv-stage');
+    const frame = document.createElement('iframe');
+    frame.className = 'pv-frame';
+    frame.setAttribute('title', '列印預覽');
+    stage.appendChild(frame);
+    modal.appendChild(stage);
+    const actions = el('div', 'modal-actions');
+    actions.appendChild(el('span', 'pv-hint', '在列印視窗選擇「另存為 PDF」'));
+    const cancel = el('button', 'btn modal-cancel', '關閉');
+    const print = el('button', 'btn btn-primary', '⭳ 列印 / 另存 PDF');
+    [cancel, print].forEach(function (b) { b.type = 'button'; actions.appendChild(b); });
+    modal.appendChild(actions);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    let token = 1;
+    print.disabled = true;
+    boot(frame.contentDocument, html, { autoPrint: false, watermark: '' }, function (doc) {
+      if (!token) return;
+      const n = doc.querySelectorAll('.pagedjs_page').length;
+      pages.textContent = n ? '共 ' + n + ' 頁' : '';
+      print.disabled = false;
+      if (o.onReady) o.onReady(doc, n);
+    });
+    print.addEventListener('click', function () { frame.contentWindow.focus(); frame.contentWindow.print(); });
+    function close() { token = 0; overlay.remove(); document.removeEventListener('keydown', onKey, true); if (o.onClose) o.onClose(); }
+    function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+    document.addEventListener('keydown', onKey, true);
+    overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) close(); });
+    cancel.addEventListener('click', close);
+    return Promise.resolve({ close: close, frame: frame });
+  }
+
   // Legacy direct path: paginate in a popup and print immediately, no preview.
   function exportNote(note, previewEl) {
     return prepare(note, previewEl).then(function (parts) {
@@ -999,6 +1045,7 @@
 
   global.PDF = {
     showPreview: showPreview,
+    showHTML: showHTML,
     exportNote: exportNote,
     themes: THEMES,
     watermarks: WATERMARK_PRESETS

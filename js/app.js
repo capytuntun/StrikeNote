@@ -1445,6 +1445,10 @@
       margins: (note.meta && note.meta.docMargins) || null,
       // 尺規上拖出來的左右邊界：存在 meta（bookkeeping，不動 rev）
       onMargins: function (m) { setLocal({ meta: Object.assign({}, live().meta, { docMargins: m }) }).catch(function () {}); },
+      // 頁面設定（紙張、上下邊界、頁首頁尾、頁碼與起始頁碼）：同樣是 meta
+      page: (note.meta && note.meta.docPage) || null,
+      onPage: function (pg) { if (readOnly) return; setLocal({ meta: Object.assign({}, live().meta, { docPage: pg }) }).catch(function () {}); },
+      getTitle: function () { return live().title; },
       onChange: function (html) { return setLocal({ content: html }); },
       // 圖片走跟編輯器同一條上傳路（uploadFiles），回來的是 Markdown 參照，這裡只要 id 與名稱
       onUpload: function (files) {
@@ -1494,22 +1498,10 @@
           });
         });
       },
-      // PDF：內容就是 HTML，照一般筆記的路（MD.render 會原樣放行、清過）交給 PDF
+      // PDF：文件自己的列印預覽（Google 文件下載 PDF 的樣子：沒有封面，頁首頁尾與頁碼照頁面設定）
       pdf: function () {
         commitTitle();
-        view.flush().then(function () {
-          const n = live();
-          const box = document.createElement('div');
-          box.className = 'markdown-body';
-          box.innerHTML = MD.render(n.content || '');
-          return PDF.showPreview(n, box, {
-            meta: n.meta,
-            onMeta: function (meta) {
-              if (readOnly) return;
-              setLocal({ meta: Object.assign({}, live().meta, meta, { doc: true }) }).catch(function () {});
-            }
-          });
-        }).catch(function (err) { alert('產生列印預覽失敗：' + (err && err.message || err)); });
+        view.exportPDF().catch(function (err) { alert('產生列印預覽失敗：' + (err && err.message || err)); });
       }
     };
     noteBar(true);

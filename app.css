@@ -4953,6 +4953,89 @@ select.kb-input { cursor: pointer; }
   .kb-archive { width: min(340px, 100vw); }
 }
 
+/* ---------- 文件第三批：選單列、紙上的頁首頁尾條、分頁符號、目錄、程式碼區塊、尋找與取代、頁面設定對話框 ---------- */
+.gd-menubar { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin: 6px 16px 0; padding: 0 6px; }
+.gd-menu { height: 26px; padding: 0 8px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.gd-menu:hover, .gd-menu.on { background: var(--row-hover); }
+.gd-menu.on { background: var(--accent-weak); color: var(--accent); }
+.gd-pop-menu { min-width: 220px; padding: 4px; }
+.gd-menu-item { display: flex; align-items: center; justify-content: space-between; gap: 24px; width: 100%; padding: 7px 12px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
+.gd-menu-item:hover { background: var(--row-hover); }
+.gd-menu-item.on { background: var(--accent-weak); color: var(--accent); }
+.gd-menu-k { font-size: var(--fs-xs); color: var(--text-faint); }
+.gd-menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+.gd-pop-count { min-width: 260px; }
+.gd-count-tb { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.gd-count-tb td { padding: 5px 4px; border-bottom: 1px solid var(--border); }
+.gd-count-tb td:last-child { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.gd-count-tb tr:last-child td { border-bottom: 0; }
+/* 一張紙 = 頁首條 + 內文 + 頁尾條；陰影在紙上，不在內文框上 */
+.gd-sheet { display: flex; flex-direction: column; width: 816px; max-width: 100%; min-height: 1056px; margin: 0 auto; background: #fff; box-shadow: 0 1px 3px 1px rgba(60, 64, 67, .15); }
+.gd-sheet .gd-paper { flex: 1 1 auto; min-height: 960px; margin: 0; box-shadow: none; padding-top: 24px; padding-bottom: 24px; }
+.gd-hf { position: relative; display: flex; align-items: flex-start; flex: 0 0 48px; height: 48px; padding: 14px 96px 0; box-sizing: border-box; color: #5f6368; font-family: Arial, 'Noto Sans TC', sans-serif; font-size: 9pt; line-height: 1.4; cursor: default; }
+.gd-hf-bottom { align-items: flex-end; padding: 0 96px 14px; }
+.gd-hf > span { flex: 1 1 0; min-width: 0; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.gd-hf-c { text-align: center; }
+.gd-hf-r { text-align: right; }
+.gd-hf-num { padding: 0 2px; border-radius: 2px; background: #e8f0fe; color: #1a73e8; }
+.gd-hf-hint { position: absolute; left: 0; right: 0; text-align: center; color: #bdc1c6; font-size: var(--fs-xs); opacity: 0; transition: opacity var(--dur-1) var(--ease-out); pointer-events: none; }
+.gd-hf-top .gd-hf-hint { top: 16px; }
+.gd-hf-bottom .gd-hf-hint { bottom: 14px; }
+.gd-hf:hover .gd-hf-hint { opacity: 1; }
+.gd-hf:hover { background: #f8f9fa; }
+/* 分頁符號：一條虛線加小字；列印時換頁 */
+.gd-paper .gd-pagebreak { position: relative; height: 0; margin: 14px 0; border-top: 2px dashed #9aa0a6; user-select: none; }
+.gd-paper .gd-pagebreak span { position: absolute; left: 50%; top: -9px; transform: translateX(-50%); padding: 0 8px; background: #fff; color: #9aa0a6; font-size: 10px; letter-spacing: .1em; }
+.markdown-body .gd-pagebreak { height: 0; margin: 14px 0; border-top: 2px dashed var(--border-strong); }
+.markdown-body .gd-pagebreak span { display: none; }
+/* 目錄 */
+.gd-paper .gd-toc, .markdown-body .gd-toc { position: relative; margin: 8pt 0 14pt; padding: 10px 14px; border: 1px solid #dadce0; border-radius: 4px; background: #fafafa; }
+.gd-paper .gd-toc-t, .markdown-body .gd-toc-t { font-size: 14pt; margin: 0 0 6px; color: #202124; }
+.gd-paper .gd-toc ol, .markdown-body .gd-toc ol { list-style: none; margin: 0; padding: 0; }
+.gd-paper .gd-toc li, .markdown-body .gd-toc li { margin: 2px 0; font-size: 11pt; }
+.gd-toc li.lv2 { padding-left: 18pt; } .gd-toc li.lv3 { padding-left: 36pt; } .gd-toc li.lv4 { padding-left: 54pt; }
+.gd-paper .gd-toc a, .markdown-body .gd-toc a { color: #1155cc; text-decoration: none; cursor: pointer; }
+.gd-paper .gd-toc a:hover { text-decoration: underline; }
+.gd-toc-empty { color: #80868b; font-style: italic; }
+.gd-toc-tools { position: absolute; right: 6px; top: 6px; display: none; gap: 2px; }
+.gd-paper .gd-toc:hover .gd-toc-tools { display: inline-flex; }
+.markdown-body .gd-toc-tools { display: none !important; }
+.gd-toc-btn { width: 24px; height: 24px; border: 1px solid #dadce0; border-radius: 4px; background: #fff; color: #5f6368; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.gd-toc-btn:hover { background: #f1f3f4; color: #202124; }
+.gd-toc-btn .ic-svg { width: 13px; height: 13px; }
+/* 程式碼區塊 */
+.gd-paper pre.gd-code, .markdown-body pre.gd-code { font-family: 'Courier New', Consolas, monospace; font-size: 10pt; line-height: 1.45; background: #f1f3f4; color: #202124; border: 1px solid #dadce0; border-radius: 4px; padding: 8pt 10pt; margin: 6pt 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.gd-paper sup, .gd-paper sub { font-size: .75em; }
+/* 尋找與取代：浮在紙的右上角 */
+.gd-page { position: relative; }
+.gd-find { position: absolute; right: 24px; top: 92px; z-index: 5; width: 360px; padding: 10px; border-radius: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); box-shadow: var(--shadow); }
+.gd-find-row { display: flex; align-items: center; gap: 6px; }
+.gd-find-row + .gd-find-row { margin-top: 8px; }
+.gd-find-row .gd-input { flex: 1 1 auto; width: auto; }
+.gd-find-n { flex: 0 0 auto; min-width: 54px; text-align: center; font-size: var(--fs-xs); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+::highlight(gd-find) { background: #fff176; color: #000; }
+::highlight(gd-find-cur) { background: #ff9800; color: #000; }
+/* 頁面設定對話框 */
+.gd-dialog { width: 560px; max-width: calc(100vw - 32px); }
+.gd-dialog-body { display: flex; flex-direction: column; gap: 12px; max-height: 70vh; overflow: auto; padding-right: 4px; }
+.gd-dsec { padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; }
+.gd-dsec-t { font-size: var(--fs-xs); font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+.gd-drow { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+.gd-drow > label { flex: 0 0 auto; color: var(--text-dim); font-size: var(--fs-sm); }
+.gd-drow .gd-input { flex: 1 1 140px; width: auto; }
+.gd-drow .gd-dsel { flex: 0 1 auto; width: auto; min-width: 100px; }
+.gd-drow .gd-dnum { flex: 0 0 90px; width: 90px; }
+.gd-dunit { color: var(--text-dim); font-size: var(--fs-xs); }
+.gd-dcheck { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: var(--fs-sm); cursor: pointer; }
+.gd-dhint { font-size: var(--fs-xs); color: var(--text-faint); margin-top: 4px; }
+@media (max-width: 900px) {
+  .gd-menubar { margin: 4px 8px 0; }
+  .gd-find { right: 8px; top: 120px; width: calc(100vw - 16px); }
+  .gd-hf { display: none; }
+  .gd-sheet { min-height: 0; }
+}
+
+
 /* ---------- 心智圖（js/xmind.js）：照 XMind 的版面 ----------
    列表頁（#xmind-wrap > .xmind-page，沿用 trello 列表頁的 .boards-page 間距）：一格一張圖、格子裡是縮圖；
    編輯頁（#xmind-edit-wrap > .xm-page）：上面工具列、中間畫布（左邊可開大綱、右邊格式面板）、下面工作表分頁。
