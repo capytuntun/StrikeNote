@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=178">
+  <link rel="stylesheet" href="app.css?v=179">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -118,7 +118,7 @@
           <div id="user-dropdown" class="user-dropdown" role="menu" hidden>
             <button id="passwd-btn" class="user-menu-item" role="menuitem" data-icon="key">更改密碼</button>
             <button id="admin-btn" class="user-menu-item" role="menuitem" hidden data-icon="users">帳號管理</button>
-            <button id="storage-btn" class="user-menu-item" role="menuitem" hidden data-icon="hard-drive">儲存空間</button>
+            <button id="storage-btn" class="user-menu-item" role="menuitem" hidden data-icon="activity">系統監控</button>
             <!-- 備份與還原（js/backup.js）：一個 zip 帶走全部資料，上傳同一個 zip 還原 -->
             <button id="backup-btn" class="user-menu-item" role="menuitem" data-icon="save">備份與還原</button>
             <div class="user-menu-sep" role="separator"></div>
@@ -354,17 +354,17 @@
   <script src="vendor/hljs-dos.min.js"></script>
 
   <!-- App -->
-  <script src="js/icons.js?v=12"></script>
+  <script src="js/icons.js?v=13"></script>
   <script src="js/merge.js?v=4"></script>
   <script src="js/mdimport.js?v=1"></script>
   <script src="js/mindmap.js?v=3"></script>
   <script src="js/relmap.js?v=8"></script>
   <script src="js/drawio.js?v=7"></script>
   <script src="js/graph.js?v=11"></script>
-  <script src="js/store.js?v=61"></script>
+  <script src="js/store.js?v=62"></script>
   <script src="js/auth.js?v=48"></script>
   <script src="js/migrate.js?v=41"></script>
-  <script src="js/admin.js?v=49"></script>
+  <script src="js/admin.js?v=50"></script>
   <script src="js/backup.js?v=2"></script>
   <script src="js/search.js?v=41"></script>
   <script src="js/markdown.js?v=66"></script>

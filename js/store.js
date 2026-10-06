@@ -427,6 +427,7 @@
     },
     adminDeleteUser: function (id) { return req('DELETE', '/api/admin/users/' + id); },
     adminStorage: function () { return req('GET', '/api/admin/storage'); },
+    adminSystem: function () { return req('GET', '/api/admin/system'); },
     // Backup and restore (js/backup.js). The zip is downloaded by navigating a
     // hidden frame to backupUrl; a restore is uploaded in chunks, inspected, then
     // run as a server-side job that is polled.

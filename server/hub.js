@@ -78,4 +78,12 @@ function ping() {
 }
 setInterval(ping, 25000).unref();
 
-module.exports = { subscribe, broadcastUpdate, broadcastCursor, presenceList };
+// 系統監控用：現在有幾條 SSE 連線、幾篇筆記有人開著、幾個不同的人
+function stats() {
+  let conns = 0;
+  const users = new Set();
+  channels.forEach(function (set) { conns += set.size; set.forEach(function (c) { users.add(c.userId); }); });
+  return { connections: conns, notesOpen: channels.size, users: users.size };
+}
+
+module.exports = { subscribe, broadcastUpdate, broadcastCursor, presenceList, stats };

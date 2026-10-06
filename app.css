@@ -2648,6 +2648,37 @@ select.sec-info-input { cursor: pointer; }
 .storage-stat-l { font-size: var(--fs-xs); color: var(--text-dim); margin-top: 2px; }
 .storage-path { font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-faint); margin-top: 10px; word-break: break-all; }
 @media (max-width: 640px) { .storage-grid { grid-template-columns: 1fr; } }
+/* 系統監控（原本的「儲存空間」面板擴充）：上面機器的四格儀表＋走勢線，中間伺服器的兩欄 */
+.modal.sys-modal { width: min(820px, 94vw); }
+.sys-live { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; font-size: var(--fs-xs); font-weight: 600; color: var(--success); }
+.sys-live .ic-svg { width: 12px; height: 12px; animation: sys-spin 4s linear infinite; }
+@keyframes sys-spin { to { transform: rotate(360deg); } }
+.sys-sec-t { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 8px; font-size: var(--fs-xs); font-weight: 700; color: var(--text-dim); letter-spacing: .06em; text-transform: uppercase; }
+.sys-sec-t .ic-svg { width: 14px; height: 14px; align-self: center; }
+.sys-sec-m { margin-left: auto; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sys-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.sys-card { padding: 12px 14px; background: var(--bg-2); border-left: 3px solid var(--accent); }
+.sys-card.is-warm { border-left-color: var(--warn); }
+.sys-card.is-hot { border-left-color: var(--danger); }
+.sys-card.is-warm .storage-bar-fill { background: var(--warn); }
+.sys-card.is-hot .storage-bar-fill { background: var(--danger); }
+.sys-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.sys-card-l { font-size: var(--fs-xs); font-weight: 700; color: var(--text-dim); }
+.sys-card-n { font-size: var(--fs-xl); font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.sys-card-sub { font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.6; }
+.sys-spark { display: block; width: 100%; height: 36px; margin-top: 8px; overflow: visible; }
+.sys-spark-line { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.sys-spark-fill { fill: var(--accent); opacity: .12; }
+.sys-spark-dot { fill: var(--accent); }
+.sys-card.is-warm .sys-spark-line, .sys-card.is-warm .sys-spark-dot { stroke: var(--warn); fill: var(--warn); }
+.sys-card.is-warm .sys-spark-line { fill: none; }
+.sys-card.is-hot .sys-spark-line, .sys-card.is-hot .sys-spark-dot { stroke: var(--danger); fill: var(--danger); }
+.sys-card.is-hot .sys-spark-line { fill: none; }
+.sys-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; }
+.sys-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; padding: 10px 14px; background: var(--bg-2); font-size: var(--fs-sm); }
+.sys-kv dt { color: var(--text-dim); white-space: nowrap; }
+.sys-kv dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .sys-grid, .sys-two { grid-template-columns: 1fr; } .sys-sec-m { display: none; } }
 /* 磁碟不足：登入後頂端主動跳出的橫幅 */
 .storage-banner {
   position: fixed; top: calc(var(--topbar-h) + 10px); left: 50%; transform: translateX(-50%); z-index: 1500;

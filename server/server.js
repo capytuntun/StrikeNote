@@ -20,6 +20,7 @@ const hub = require('./hub');
 const linkpreview = require('./linkpreview');
 const settings = require('./settings');
 const backup = require('./backup');
+const sysmon = require('./sysmon');
 
 // A crash is better than limping on with unknown state; systemd (or whoever
 // supervises the process) restarts it. Log first so the reason is in the journal.
@@ -414,6 +415,7 @@ async function handleApi(req, res, url) {
 
     if (p === '/api/admin/users' && method === 'GET') return json(res, 200, await api.adminListUsers(user));
     if (p === '/api/admin/storage' && method === 'GET') return json(res, 200, await api.adminStorage());
+    if (p === '/api/admin/system' && method === 'GET') return json(res, 200, await api.adminSystem());
     // Registration mode and invite code (server/settings.js).
     if (p === '/api/admin/settings' && method === 'GET') return json(res, 200, settings.get());
     if (p === '/api/admin/settings' && method === 'PUT') {
@@ -882,6 +884,7 @@ function start() {
   backup.startHousekeeping();
   checkStorage();
   setInterval(checkStorage, 3600000).unref();
+  sysmon.start();   // 系統監控：每 5 秒量一次 CPU／記憶體，面板打開才有走勢可看
   purgeTrash();
   setInterval(purgeTrash, 3600000).unref();
   server.listen(config.port, config.host, function () {

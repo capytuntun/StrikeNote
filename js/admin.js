@@ -296,6 +296,11 @@
   // ---------------- storage (admin only) ----------------
   // How much room the data directory has left, what the database is made of,
   // and who is using it — sizes and counts, never content.
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
   function fmtBytes(n) {
     n = Number(n) || 0;
     if (n >= 1073741824) return (n / 1073741824).toFixed(2) + ' GB';
@@ -344,12 +349,130 @@
     document.body.appendChild(bar);
   }
 
+  // ---- 系統監控 ----
+  // 上半是機器：CPU、記憶體、負載、溫度、磁碟、這個 Node 程序、現在有幾個人連著；
+  // 下半是原本「儲存空間」那些：資料庫、圖片、筆記、版本、連結、每個帳號用多少。
+  // 面板開著的時候每 5 秒跟伺服器要一次（伺服器自己每 5 秒量一次 CPU，見 server/sysmon.js）。
+  function fmtDur(sec) {
+    sec = Math.floor(Number(sec) || 0);
+    const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+    if (d) return d + ' 天 ' + h + ' 小時';
+    if (h) return h + ' 小時 ' + m + ' 分';
+    return m + ' 分 ' + (sec % 60) + ' 秒';
+  }
+  function pctClass(p) { return p >= 90 ? ' is-hot' : p >= 70 ? ' is-warm' : ''; }
+  // 一條走勢線（最近 10 分鐘），純 SVG，沒有函式庫
+  function sparkline(points, key, cls) {
+    const W = 220, H = 36;
+    if (!points || points.length < 2) return '<svg class="sys-spark ' + cls + '" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '"></svg>';
+    const n = points.length;
+    const d = points.map(function (q, i) {
+      const x = (i / (n - 1)) * W, y = H - 1 - (Math.max(0, Math.min(100, q[key])) / 100) * (H - 2);
+      return (i ? 'L' : 'M') + x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    const last = points[n - 1];
+    const lx = W, ly = H - 1 - (Math.max(0, Math.min(100, last[key])) / 100) * (H - 2);
+    return '<svg class="sys-spark ' + cls + '" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" preserveAspectRatio="none">' +
+      '<path class="sys-spark-fill" d="' + d + ' L' + W + ',' + H + ' L0,' + H + ' Z"/>' +
+      '<path class="sys-spark-line" d="' + d + '"/>' +
+      '<circle class="sys-spark-dot" cx="' + lx.toFixed(1) + '" cy="' + ly.toFixed(1) + '" r="2.5"/></svg>';
+  }
+  function gauge(label, pct, text, sub, cls, extraHTML) {
+    const p = Math.max(0, Math.min(100, Number(pct) || 0));
+    return '<div class="sys-card' + pctClass(p) + (cls ? ' ' + cls : '') + '">' +
+      '<div class="sys-card-head"><span class="sys-card-l">' + label + '</span><span class="sys-card-n">' + text + '</span></div>' +
+      '<div class="storage-bar"><div class="storage-bar-fill" style="width:' + p.toFixed(1) + '%"></div></div>' +
+      (sub ? '<div class="sys-card-sub">' + sub + '</div>' : '') + (extraHTML || '') + '</div>';
+  }
+  function kv(pairs) {
+    return '<dl class="sys-kv">' + pairs.filter(function (x) { return x[1] != null && x[1] !== ''; })
+      .map(function (x) { return '<dt>' + x[0] + '</dt><dd>' + x[1] + '</dd>'; }).join('') + '</dl>';
+  }
+  function renderSystem(body, s) {
+    const st = s.storage || {};
+    const host = s.host || {}, mem = s.mem || {}, proc = s.proc || {};
+    const parts = [];
+    // 磁碟門檻的警告照舊放最上面
+    if (st.disk && st.low) {
+      parts.push('<div class="storage-warn">' + ic('alert-triangle') + '<span>磁碟剩餘空間低於門檻（' + fmtBytes(st.thresholds.bytes) + ' 或 ' + st.thresholds.pct + '%），請儘快處理。</span></div>');
+    }
+    // ---- 機器 ----
+    parts.push('<div class="sys-sec-t">' + ic('cpu') + '<span>機器</span>' +
+      '<span class="sys-sec-m">' + esc(host.hostname || '') + ' · ' + esc(host.platform || '') + ' ' + esc(host.release || '') + ' · ' + esc(host.arch || '') +
+      ' · 開機 ' + fmtDur(host.uptime) + '</span></div>');
+    const memPct = mem.total ? (mem.used / mem.total * 100) : 0;
+    const diskUsed = st.disk ? Math.max(0, st.disk.total - st.disk.free) : 0;
+    const diskPct = st.disk && st.disk.total ? diskUsed / st.disk.total * 100 : 0;
+    const load = (host.load || []).map(function (x) { return x.toFixed(2); }).join(' / ');
+    parts.push('<div class="sys-grid">' +
+      gauge('CPU', s.cpu, s.cpu == null ? '量測中…' : s.cpu.toFixed(0) + '%',
+        (host.cores || 0) + ' 核心' + (host.model ? ' · ' + esc(host.model.replace(/\s+/g, ' ').slice(0, 40)) : '') + (load ? '<br>負載 ' + load + '（1／5／15 分鐘）' : ''),
+        'sys-cpu', sparkline(s.history, 'cpu', 'sys-spark-cpu')) +
+      gauge('記憶體', memPct, memPct.toFixed(0) + '%',
+        '已用 ' + fmtBytes(mem.used) + ' / ' + fmtBytes(mem.total) +
+        (mem.swapTotal ? '<br>Swap ' + fmtBytes(mem.swapUsed || 0) + ' / ' + fmtBytes(mem.swapTotal) : ''),
+        'sys-mem', sparkline(s.history, 'mem', 'sys-spark-mem')) +
+      (st.disk
+        ? gauge('磁碟', diskPct, diskPct.toFixed(0) + '%', '已用 ' + fmtBytes(diskUsed) + ' / ' + fmtBytes(st.disk.total) + '<br>剩餘 ' + fmtBytes(st.disk.free) +
+            (st.low ? '' : ' · 門檻 ' + fmtBytes(st.thresholds.bytes) + ' 或 ' + st.thresholds.pct + '%'), st.low ? 'sys-disk is-hot' : 'sys-disk')
+        : '<div class="sys-card"><div class="sys-card-head"><span class="sys-card-l">磁碟</span><span class="sys-card-n">—</span></div><div class="sys-card-sub">這個平台讀不到磁碟容量</div></div>') +
+      (host.temp != null
+        ? gauge('溫度', host.temp / 85 * 100, host.temp.toFixed(1) + ' °C', host.temp >= 80 ? '太熱了，檢查散熱' : host.temp >= 65 ? '偏熱' : '正常', 'sys-temp' + (host.temp >= 80 ? ' is-hot' : host.temp >= 65 ? ' is-warm' : ''))
+        : '') +
+      '</div>');
+    // ---- 伺服器 ----
+    const hub = s.hub || {}, sess = s.sessions || {};
+    parts.push('<div class="sys-sec-t">' + ic('server') + '<span>StrikeNote 伺服器</span></div>');
+    parts.push('<div class="sys-two">' +
+      kv([['程序', 'PID ' + proc.pid + ' · Node ' + esc(proc.node || '')], ['執行', fmtDur(proc.uptime)],
+        ['程序 CPU', (proc.cpu != null ? proc.cpu.toFixed(1) : '—') + '%'],
+        ['程序記憶體', fmtBytes(proc.rss) + '（heap ' + fmtBytes(proc.heapUsed) + ' / ' + fmtBytes(proc.heapTotal) + '）']]) +
+      kv([['帳號', s.users + ' 個'], ['登入中', (sess.n || 0) + ' 個 session · ' + (sess.users || 0) + ' 個帳號'],
+        ['正在編輯', (hub.users || 0) + ' 人 · ' + (hub.notesOpen || 0) + ' 篇筆記 · ' + (hub.connections || 0) + ' 條連線'],
+        ['資料庫', fmtBytes(st.dbBytes) + '（InnoDB 資料＋索引）']]) +
+      '</div>');
+    // ---- 儲存 ----
+    parts.push('<div class="sys-sec-t">' + ic('hard-drive') + '<span>儲存</span></div>');
+    const grid = el('div', 'storage-grid');
+    [
+      [fmtBytes(st.dbBytes), '資料庫（InnoDB 資料＋索引）'],
+      [fmtBytes((st.images || {}).bytes), ((st.images || {}).count || 0) + ' 張圖片 / 附件'],
+      [fmtBytes((st.notes || {}).bytes), ((st.notes || {}).count || 0) + ' 篇筆記內文'],
+      [fmtBytes((st.versions || {}).bytes), ((st.versions || {}).count || 0) + ' 個歷史版本'],
+      [fmtBytes((st.links || {}).bytes || 0), ((st.links || {}).count || 0) + ' 個公開連結']
+    ].forEach(function (x) {
+      grid.appendChild(elh('div', 'storage-stat', '<div class="storage-stat-n">' + x[0] + '</div><div class="storage-stat-l">' + x[1] + '</div>'));
+    });
+    const wrap = el('div', 'admin-wrap');
+    const table = el('table', 'admin-table');
+    table.innerHTML = '<thead><tr><th>帳號</th><th class="num">筆記</th><th class="num">內文</th>' +
+      '<th class="num">版本</th><th class="num">版本大小</th>' +
+      '<th class="num">圖片</th><th class="num">圖片大小</th><th class="num">合計</th></tr></thead>';
+    const tb = document.createElement('tbody');
+    (st.perUser || []).forEach(function (u) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td class="admin-name"></td><td class="num">' + u.notes + '</td><td class="num">' + fmtBytes(u.noteBytes) + '</td>' +
+        '<td class="num">' + (u.versions || 0) + '</td><td class="num">' + fmtBytes(u.versionBytes || 0) + '</td>' +
+        '<td class="num">' + u.images + '</td><td class="num">' + fmtBytes(u.imageBytes) + '</td>' +
+        '<td class="num"><b>' + fmtBytes(u.noteBytes + (u.versionBytes || 0) + u.imageBytes) + '</b></td>';
+      tr.querySelector('.admin-name').textContent = u.username;
+      tb.appendChild(tr);
+    });
+    table.appendChild(tb);
+    wrap.appendChild(table);
+
+    body.innerHTML = parts.join('');
+    body.appendChild(grid);
+    body.appendChild(wrap);
+    body.appendChild(el('div', 'storage-path', 'MariaDB 資料目錄：' + (st.dataDir || '（未知）')));
+  }
+
   function showStorage() {
     const overlay = el('div', 'modal-overlay');
-    const modal = el('div', 'modal storage-modal');
+    const modal = el('div', 'modal storage-modal sys-modal');
     modal.innerHTML =
-      '<div class="modal-title">' + ic('hard-drive') + ' 儲存空間</div>' +
-      '<div class="admin-hint">資料庫所在磁碟的剩餘空間，以及每個帳號用掉多少。只有大小與數量，看不到內容。</div>' +
+      '<div class="modal-title">' + ic('activity') + ' 系統監控<span class="sys-live" title="每 5 秒更新">' + ic('refresh-cw') + '<span>即時</span></span></div>' +
+      '<div class="admin-hint">這台機器與這個站台現在的狀態。只有數字與大小，看不到任何筆記內容。</div>' +
       '<div class="admin-error" hidden></div>' +
       '<div class="storage-body"><div class="dash-empty">讀取中…</div></div>' +
       '<div class="modal-actions"><span class="admin-count"></span>' +
@@ -359,75 +482,34 @@
     const body = modal.querySelector('.storage-body');
     const errEl = modal.querySelector('.admin-error');
     const countEl = modal.querySelector('.admin-count');
+    let timer = null, closed = false;
 
-    function close() { overlay.remove(); document.removeEventListener('keydown', onKey, true); }
+    function close() { closed = true; clearTimeout(timer); overlay.remove(); document.removeEventListener('keydown', onKey, true); }
     function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
     document.addEventListener('keydown', onKey, true);
     overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) close(); });
     modal.querySelector('.modal-cancel').addEventListener('click', close);
 
-    Store.adminStorage().then(function (s) {
-      body.innerHTML = '';
-      if (s.disk) {
-        const used = Math.max(0, s.disk.total - s.disk.free);
-        const pct = s.disk.total ? Math.min(100, used / s.disk.total * 100) : 0;
-        const status = el('div', s.low ? 'storage-warn' : 'storage-ok');
-        status.innerHTML = ic(s.low ? 'alert-triangle' : 'check') +
-          '<span>' + (s.low
-            ? '剩餘空間低於門檻（' + fmtBytes(s.thresholds.bytes) + ' 或 ' + s.thresholds.pct + '%），請儘快處理。'
-            : '空間充足。門檻：剩餘低於 ' + fmtBytes(s.thresholds.bytes) + ' 或 ' + s.thresholds.pct + '% 時警告。') + '</span>';
-        body.appendChild(status);
-        const bar = el('div', 'storage-bar');
-        bar.appendChild(el('div', 'storage-bar-fill' + (s.low ? ' low' : '')));
-        bar.firstChild.style.width = pct.toFixed(1) + '%';
-        body.appendChild(bar);
-        body.appendChild(elh('div', 'storage-bar-label',
-          '<span>已用 ' + fmtBytes(used) + '（' + pct.toFixed(0) + '%）</span>' +
-          '<span>剩餘 ' + fmtBytes(s.disk.free) + ' / 共 ' + fmtBytes(s.disk.total) + '</span>'));
-      } else {
-        body.appendChild(elh('div', 'storage-warn', ic('info') + '<span>這個平台無法讀取磁碟容量，只能顯示資料庫本身的大小。</span>'));
-      }
-      const grid = el('div', 'storage-grid');
-      [
-        [fmtBytes(s.dbBytes), '資料庫（InnoDB 資料＋索引）'],
-        [fmtBytes(s.images.bytes), s.images.count + ' 張圖片 / 附件'],
-        [fmtBytes(s.notes.bytes), s.notes.count + ' 篇筆記內文'],
-        [fmtBytes(s.versions.bytes), (s.versions.count || 0) + ' 個歷史版本'],
-        [fmtBytes((s.links || {}).bytes || 0), ((s.links || {}).count || 0) + ' 個電子書分享連結']
-      ].forEach(function (x) {
-        grid.appendChild(elh('div', 'storage-stat', '<div class="storage-stat-n">' + x[0] + '</div><div class="storage-stat-l">' + x[1] + '</div>'));
-      });
-      body.appendChild(grid);
-
-      const wrap = el('div', 'admin-wrap');
-      const table = el('table', 'admin-table');
-      table.innerHTML = '<thead><tr><th>帳號</th><th class="num">筆記</th><th class="num">內文</th>' +
-        '<th class="num">版本</th><th class="num">版本大小</th>' +
-        '<th class="num">圖片</th><th class="num">圖片大小</th><th class="num">合計</th></tr></thead>';
-      const tb = document.createElement('tbody');
-      (s.perUser || []).forEach(function (u) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = '<td class="admin-name"></td><td class="num">' + u.notes + '</td><td class="num">' + fmtBytes(u.noteBytes) + '</td>' +
-          '<td class="num">' + (u.versions || 0) + '</td><td class="num">' + fmtBytes(u.versionBytes || 0) + '</td>' +
-          '<td class="num">' + u.images + '</td><td class="num">' + fmtBytes(u.imageBytes) + '</td>' +
-          '<td class="num"><b>' + fmtBytes(u.noteBytes + (u.versionBytes || 0) + u.imageBytes) + '</b></td>';
-        tr.querySelector('.admin-name').textContent = u.username;
-        tb.appendChild(tr);
-      });
-      table.appendChild(tb);
-      wrap.appendChild(table);
-      body.appendChild(wrap);
-      body.appendChild(el('div', 'storage-path', 'MariaDB 資料目錄：' + (s.dataDir || '（未知）')));
-      countEl.textContent = '門檻可用環境變數 STORAGE_WARN_MB / STORAGE_WARN_PCT 調整';
-    }).catch(function (e) {
-      body.innerHTML = '';
-      // 這個端點是後來加的：伺服器還沒重啟就會回 404，講清楚比顯示 not found 有用
-      const msg = String(e && e.message || e);
-      errEl.textContent = /not found|404/i.test(msg)
-        ? '伺服器沒有這個端點——它是新加的，請重新啟動伺服器（node server/server.js）後再試。'
-        : msg;
-      errEl.hidden = false;
-    });
+    function tick() {
+      if (closed) return;
+      const call = (global.Store && Store.adminSystem) ? Store.adminSystem() : Promise.reject(new Error('not found'));
+      call.then(function (s) {
+        if (closed) return;
+        errEl.hidden = true;
+        renderSystem(body, s);
+        countEl.textContent = '更新於 ' + new Date(s.at || Date.now()).toLocaleTimeString('zh-TW', { hour12: false }) + ' · 門檻可用 STORAGE_WARN_MB / STORAGE_WARN_PCT 調整';
+      }).catch(function (e) {
+        if (closed) return;
+        // 這個端點是後來加的：伺服器還沒重啟就會回 404，講清楚比顯示 not found 有用
+        const msg = String(e && e.message || e);
+        errEl.textContent = /not found|404/i.test(msg)
+          ? '伺服器沒有這個端點——它是新加的，請重新啟動伺服器（node server/server.js）後再試。'
+          : msg;
+        errEl.hidden = false;
+        if (body.querySelector('.dash-empty')) body.innerHTML = '';
+      }).then(function () { if (!closed) timer = setTimeout(tick, 5000); });
+    }
+    tick();
   }
 
   global.Admin = {

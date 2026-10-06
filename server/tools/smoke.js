@@ -741,6 +741,14 @@ async function main() {
   }
 
   section('admin');
+  // 系統監控（/api/admin/system）：只有數字，沒有筆記內容；非管理員 403
+  r = await call(admin, 'GET', '/api/admin/system');
+  ok(r.status === 200 && r.data.host && typeof r.data.host.cores === 'number' && r.data.mem && r.data.mem.total > 0 &&
+     r.data.proc && r.data.proc.pid > 0 && r.data.hub && r.data.sessions && r.data.storage && r.data.storage.notes,
+    'system monitor returns host / mem / proc / hub / sessions / storage', r.data && Object.keys(r.data));
+  ok(!/"content"|"title"/.test(JSON.stringify(r.data)), 'and carries no note text');
+  r = await call(bob, 'GET', '/api/admin/system');
+  ok(r.status === 403, 'system monitor is admin only', r.status);
   r = await call(bob, 'GET', '/api/admin/users');
   ok(r.status === 403, 'non-admin is 403', r.status);
   r = await call(admin, 'GET', '/api/admin/users');

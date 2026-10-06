@@ -18,6 +18,7 @@ const path = require('node:path');
 const dbmod = require('./db');
 const { q, tx } = dbmod;
 const hub = require('./hub');
+const sysmon = require('./sysmon');
 const config = require('./config');
 const { merge3 } = require('./merge');
 
@@ -1385,8 +1386,20 @@ async function adminStorage() {
   };
 }
 
+// 系統監控（帳號選單 → 系統監控）：機器本身（server/sysmon.js）＋ 這個站台現在的狀態。
+// 跟 adminStorage 一樣只有數字，沒有任何筆記內容。
+async function adminSystem() {
+  const sess = await q.sessionStats.get(Date.now());
+  return sysmon.snapshot({
+    hub: hub.stats(),
+    sessions: { n: Number(sess.n), users: Number(sess.users) },
+    users: Number((await q.countUsers.get()).n),
+    storage: await adminStorage()
+  });
+}
+
 module.exports = {
-  adminListUsers, adminSetDisabled, adminSetRole, adminDeleteUser, adminStorage, storageSummary,
+  adminListUsers, adminSetDisabled, adminSetRole, adminDeleteUser, adminStorage, adminSystem, storageSummary,
   listNotes, getNote, createNote, updateNote, deleteNote, broadcastCursor, setAccess, moveNoteArea,
   listTrash, restoreNote, purgeNote, emptyTrash, purgeExpiredTrash,
   listVersions, getVersion, createVersion, renameVersion, deleteVersion, restoreVersion,

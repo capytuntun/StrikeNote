@@ -447,6 +447,8 @@ const q = {
   sessionByHash: stmt('SELECT * FROM sessions WHERE token_hash = ?'),
   deleteSession: stmt('DELETE FROM sessions WHERE token_hash = ?'),
   deleteExpiredSessions: stmt('DELETE FROM sessions WHERE expires_at < ?'),
+  // 系統監控：還沒過期的登入有幾個、是幾個不同的帳號
+  sessionStats: stmt('SELECT COUNT(*) AS n, COUNT(DISTINCT user_id) AS users FROM sessions WHERE expires_at > ?'),
   // 小說區解鎖（server/auth.js unlockNovel）：這個 session 最後一次成功重新輸入密碼的時間。
   setNovelUnlock: stmt('UPDATE sessions SET novel_unlocked_at = ? WHERE token_hash = ?'),
 
