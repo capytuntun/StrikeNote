@@ -786,6 +786,16 @@
         node.removeAttribute('srcdoc');
       }
     });
+    // 連到外面的網址一律開新分頁：在同一個分頁裡跟著連結走，等於把整個 app 換掉，
+    // 回來還要重新載入。隨筆的卡片、預覽、電子書都是同一條渲染路，所以在這裡做一次就好。
+    DOMPurify.addHook('afterSanitizeAttributes', function (node) {
+      if (node.tagName !== 'A') return;
+      const href = node.getAttribute('href') || '';
+      if (/^(https?:)?\/\//i.test(href) || /^mailto:/i.test(href)) {
+        node.setAttribute('target', '_blank');
+        node.setAttribute('rel', 'noopener noreferrer');
+      }
+    });
   }
 
   // ---- Public render -----------------------------------------------------

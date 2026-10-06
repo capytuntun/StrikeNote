@@ -205,7 +205,15 @@
     }));
 
     card.addEventListener('click', function (e) {
-      if (e.target.closest('.qn-toolbar, .qn-pin-corner, .task-check, a, button')) return;
+      // 卡片裡的連結要能點：外部網址開新分頁（markdown.js 已經加了 target=_blank，讓它走），
+      // [[wiki 連結]] 開那篇筆記，#標籤 回首頁篩選——這些在預覽裡是 app.js 接的，卡片上沒有人接
+      const a = e.target.closest('a');
+      if (a) {
+        if (a.classList.contains('note-link')) { e.preventDefault(); if (o.onOpenNote) o.onOpenNote(a); return; }
+        if (a.classList.contains('hashtag')) { e.preventDefault(); if (o.onTag) o.onTag(a.getAttribute('data-tag')); return; }
+        return;   // 一般網址：瀏覽器自己開（新分頁）
+      }
+      if (e.target.closest('.qn-toolbar, .qn-pin-corner, .task-check, button')) return;
       openModal(note, o);
     });
     return card;

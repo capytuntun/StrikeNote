@@ -118,6 +118,10 @@
       const last = wantNote || LS.get('lastNote', null);
       if (location.hash === '#trash') {
         openTrash();
+      } else if (tagFromHash()) {
+        const wantTag = tagFromHash();   // showEmpty 會把 hash 清掉，先記下來
+        showEmpty();
+        if (window.Dashboard && Dashboard.setTag) Dashboard.setTag(wantTag);
       } else if (areaFromHash() && areaFromHash().area !== 'novel') {
         // #course、#course/<資料夾>（知識區同理）：重新整理停在原本那一層
         openArea(areaFromHash().area, { folderId: areaFromHash().folderId, keepHash: true });
@@ -968,6 +972,9 @@
         return uploadFiles(files).catch(function (e) { toast('上傳失敗：' + (e && e.message || e)); return []; });
       },
       onClosed: refreshQuick,
+      // 卡片裡的 [[wiki 連結]] 與 #標籤（跟預覽同一套處理）
+      onOpenNote: function (a) { handleNoteLink(a); },
+      onTag: function (tag) { browseTag(tag); },
       onPatch: function (note, patch) {
         const meta = Object.assign({}, note.meta || {});
         if (patch.pinned !== undefined) meta.pinned = patch.pinned || undefined;
@@ -1770,6 +1777,12 @@
     const known = state.notes.find(function (n) { return n.id === id; });
     if (isFileNote(known)) { openFileViewer(known); return; }
     if (isStickyNote(known) && goToSticky(known)) return;
+    // 隨筆沒有整頁編輯器：到它那一頁、用 Keep 式的對話框打開（新分頁的 #note/<隨筆>、搜尋結果都走這裡）
+    if (known && known.area === 'quick' && window.QuickNotes && QuickNotes.open) {
+      if (!quickWrapEl || quickWrapEl.hidden) { saveNow(); openQuick(); }
+      QuickNotes.open(id);
+      return;
+    }
     closeStream();   // stop listening to the note we're leaving
     // 從這一刻起 #note-title/#editor 裝的還是上一篇，但 state.current 馬上要換人——
     // 在「真的把新內容載進編輯器」之前，不准 saveNow 動它（見 editorNoteId）。
@@ -3691,6 +3704,11 @@
     const m = location.hash.match(/^#note\/([^\/?#]+)/);
     return m ? decodeURIComponent(m[1]) : null;
   }
+  // #tag/<標籤>：首頁依標籤篩選（中鍵點 #標籤 開新分頁用的；篩選本身不會改網址）
+  function tagFromHash() {
+    const m = location.hash.match(/^#tag\/([^\/?#]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
   function bookIdFromHash() {
     const m = location.hash.match(/^#book\/([^\/?#]+)/);
     return m ? decodeURIComponent(m[1]) : null;
@@ -4611,6 +4629,7 @@
       const row = document.createElement('div');
       row.className = 'search-row' + (i === search.index ? ' active' : '') +
         (r.note.id === state.currentId ? ' current' : '');
+      row.dataset.id = r.note.id;   // 中鍵開新分頁要用
       const title = document.createElement('div');
       title.className = 'search-row-title';
       const ic = document.createElement('span');
@@ -5194,6 +5213,36 @@
         : (block.querySelector('pre code') || {}).textContent;
       if (text != null) copyText(text, btn);
     });
+
+    // ---- 中鍵（滾輪按下）開新分頁 ----
+    // 清單上的筆記列、側邊欄的樹、資料夾磚、電子書磚、搜尋結果、隨筆卡片、預覽裡的 [[wiki]] 與
+    // #標籤：點了會開東西的地方，中鍵就在新分頁開同一個東西（跟一般網站的連結一樣）。
+    // 真正的 <a href="http…"> 瀏覽器自己會處理，這裡不碰。mousedown 也要擋：Chrome 在非連結
+    // 的地方按中鍵會進入自動捲動模式。
+    function middleTarget(t) {
+      if (!t || !t.closest) return null;
+      const fh = function (f) { return f ? (f.area ? '#' + f.area + '/' + f.id : '#folder/' + f.id) : null; };
+      let el;
+      if ((el = t.closest('.note-link[data-note-id]'))) return '#note/' + el.getAttribute('data-note-id');
+      if ((el = t.closest('.hashtag[data-tag]'))) return '#tag/' + encodeURIComponent(el.getAttribute('data-tag'));
+      if (t.closest('a[href]')) return null;
+      if ((el = t.closest('.dash-note-wrap[data-id], #tree .note-row[data-id], .search-row[data-id], .qn-card[data-id]'))) return '#note/' + el.dataset.id;
+      if ((el = t.closest('.dash-book-tile[data-id]'))) return '#book/' + el.dataset.id;
+      if ((el = t.closest('.dash-folder-tile[data-id], #tree .folder-row[data-id]'))) {
+        return fh(state.folders.find(function (f) { return f.id === el.dataset.id; }));
+      }
+      return null;
+    }
+    document.addEventListener('mousedown', function (e) {
+      if (e.button === 1 && middleTarget(e.target)) e.preventDefault();
+    });
+    document.addEventListener('auxclick', function (e) {
+      if (e.button !== 1) return;
+      const h = middleTarget(e.target);
+      if (!h) return;
+      e.preventDefault(); e.stopPropagation();
+      window.open(location.pathname + location.search + h, '_blank', 'noopener');
+    }, true);
 
     titleEl.addEventListener('input', scheduleSave);
     titleEl.addEventListener('input', fitNoteTitle);
