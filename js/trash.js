@@ -30,6 +30,7 @@
     drawio: { icon: 'shapes', cls: 'kind-drawio' },
     board: { icon: 'kanban', cls: 'kind-board' },
     start: { icon: 'layout-grid', cls: 'kind-start' },
+    xmind: { icon: 'mind-map', cls: 'kind-xmind' },
     doc: { icon: 'file-pen', cls: 'kind-doc' },
     sec: { icon: 'shield', cls: 'kind-sec' },
     perf: { icon: 'chart', cls: 'kind-perf' },

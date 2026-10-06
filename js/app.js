@@ -73,6 +73,7 @@
     if (note.meta && note.meta.drawio) return 'shapes';
     if (note.meta && note.meta.board) return 'kanban';
     if (note.meta && note.meta.startpage) return 'layout-grid';
+    if (note.meta && note.meta.xmind) return 'mind-map';
     if (note.meta && note.meta.doc) return 'file-pen';
     if (note.area === 'quick') return 'pin';
     if (note.meta && note.meta.perfReport) return 'chart';
@@ -136,6 +137,8 @@
         openBoards();
       } else if (location.hash === '#start') {
         openStart();
+      } else if (location.hash === '#xmind') {
+        openXmind();
       } else if (areaFromHash() && areaFromHash().area === 'novel') {
         // 一定要先問過密碼才能進去，重新整理也一樣——openArea('novel') 本身就會擋下來彈窗。
         // 還沒解鎖時小說的資料夾不在 state.folders 裡，所以資料夾 id 直接從網址拿
@@ -200,7 +203,7 @@
       selectedFolders.clear();
     }
     // 樹顯示哪個區域，側邊欄那一列就亮著——包括正在編輯那個區域裡的一篇筆記的時候
-    ['course', 'knowledge', 'novel', 'quick', 'board', 'start'].forEach(function (a) { setNavActive(a + '-open-btn', a === area); });
+    ['course', 'knowledge', 'novel', 'quick', 'board', 'start', 'xmind'].forEach(function (a) { setNavActive(a + '-open-btn', a === area); });
     renderTree();
   }
   // 新東西要建在哪個區域：有目標資料夾就跟資料夾（伺服器的 resolveArea 也是這樣要求的），
@@ -210,7 +213,7 @@
       const f = state.folders.find(function (x) { return x.id === folderId; });
       return f ? (f.area || null) : null;
     }
-    return treeArea && treeArea !== 'quick' && treeArea !== 'board' && treeArea !== 'start' ? treeArea : null;   // 看板、起始頁只從自己的頁面建立
+    return treeArea && treeArea !== 'quick' && treeArea !== 'board' && treeArea !== 'start' && treeArea !== 'xmind' ? treeArea : null;   // 看板、起始頁、心智圖只從自己的頁面建立
   }
   function withArea(folderId, opts) {
     const a = areaForNew(folderId);
@@ -233,7 +236,7 @@
     treeEl.innerHTML = '';
     // 在某個區域裡：樹的最上面標出這是哪個區域的內容，免得跟「所有筆記」的樹搞混
     if (treeArea) {
-      const info = treeArea === 'quick' ? { title: '隨筆', icon: 'pin' } : treeArea === 'board' ? { title: 'trello', icon: 'kanban' } : treeArea === 'start' ? { title: 'start.me', icon: 'layout-grid' } : AREA_INFO[treeArea];
+      const info = treeArea === 'quick' ? { title: '隨筆', icon: 'pin' } : treeArea === 'board' ? { title: 'trello', icon: 'kanban' } : treeArea === 'start' ? { title: 'start.me', icon: 'layout-grid' } : treeArea === 'xmind' ? { title: 'xmind', icon: 'mind-map' } : AREA_INFO[treeArea];
       const head = document.createElement('div');
       head.className = 'tree-section tree-area-head';
       head.innerHTML = Icons.svg(info.icon) + '<span>' + MD.escapeHtml(info.title) + '</span>';
@@ -246,6 +249,7 @@
       hint.textContent = treeArea === 'quick' ? '還沒有隨筆。'
         : treeArea === 'board' ? '還沒有看板。'
         : treeArea === 'start' ? '還沒有起始頁。'
+        : treeArea === 'xmind' ? '還沒有心智圖。'
         : treeArea ? '這個區域還沒有資料夾或筆記。'
         : '尚無筆記，點上方「＋ 筆記」開始。';
       treeEl.appendChild(hint);
@@ -673,6 +677,7 @@
     if (novelWrapEl && !novelWrapEl.hidden && window.AreaBrowser) AreaBrowser.refresh(areaOpts('novel'));
     if (quickWrapEl && !quickWrapEl.hidden && window.QuickNotes) QuickNotes.refresh(quickOpts());
     if (boardsWrapEl && !boardsWrapEl.hidden && window.Board) Board.renderIndex(boardsPageEl, boardsOpts());
+    if (xmindWrapEl && !xmindWrapEl.hidden && window.XMind) XMind.renderIndex(xmindPageEl, xmindOpts());
     renderStart();
   }
   // 儀表板需要的資料與回呼，集中一處，render / refresh 共用
@@ -1027,6 +1032,8 @@
     setNavActive('board-open-btn', false);
     if (startWrapEl) { startWrapEl.hidden = true; if (window.StartPage) StartPage.closePop(); }
     setNavActive('start-open-btn', false);
+    if (xmindWrapEl) xmindWrapEl.hidden = true;
+    setNavActive('xmind-open-btn', false);
   }
 
   // 進入一個區域頁面前的共用收尾：跟 openTrash／openBook 同一套「收起其他檢視」。
@@ -1049,6 +1056,7 @@
     closeDrawioView();
     closeKanbanView();
     closeDocView();
+    closeXmindView();
     closeGraphView();
   }
 
@@ -1210,6 +1218,175 @@
     setHash('start');
     setTreeArea('start');
     renderStart();
+  }
+  // ---- 心智圖（js/xmind.js）：#xmind 是所有心智圖的列表頁（#xmind-wrap），一張圖開在 #xmind-edit-wrap 整頁 ----
+  // 心智圖是 area 'xmind' 的筆記（meta.xmind），沒有資料夾，只從列表頁建立。開一張圖跟文件／看板同一套：
+  // 最上面那一列是它的標題列（toolBar kind 'xmind'），標題與內容共用一條寫入路徑。
+  const xmindWrapEl = $('#xmind-wrap'), xmindPageEl = $('#xmind-page');
+  const xmindEditWrapEl = $('#xmind-edit-wrap');
+  let xmindView = null, xmindNoteId = null;
+  function closeXmindView() {
+    if (xmindNoteId) { const id = xmindNoteId; xmindNoteId = null; setTimeout(function () { flushPublish(id); }, 0); }
+    dropToolBar('xmind');
+    if (xmindView) { const v = xmindView; xmindView = null; v.close(); }
+    if (xmindEditWrapEl) xmindEditWrapEl.hidden = true;
+  }
+  function xmindOpts() {
+    return {
+      maps: state.notes.filter(function (n) { return n.area === 'xmind' && isMine(n) && window.XMind && XMind.isNote(n); }),
+      onOpen: function (id) { openNote(id); },
+      onCreate: function (d) {
+        return Store.createNote(d.title, null, { area: 'xmind', content: XMind.generate(d.title), meta: { xmind: true } }).then(function (n) {
+          state.notes.push(n);
+          openNote(n.id);
+        }, function (e) { toast('建立失敗：' + (e && e.message || e)); });
+      },
+      onTags: editTags,
+      onRename: function (n) {
+        showPrompt({ title: '重新命名心智圖', placeholder: '標題', value: n.title, ok: '確定' }).then(function (t) {
+          t = String(t || '').trim();
+          if (!t || t === n.title) return;
+          Store.updateNote(Object.assign({}, n, { title: t })).then(function (r) {
+            Object.assign(n, { title: r.title, rev: r.rev, updatedAt: r.updatedAt });
+            refreshViews();
+          }, function (e) { toast('儲存失敗：' + (e && e.message || e)); });
+        });
+      },
+      onDelete: function (n) {
+        showConfirm({ title: '移到垃圾桶', message: '把心智圖「' + n.title + '」移到垃圾桶？可以從垃圾桶還原。', ok: '移到垃圾桶', danger: true }).then(function (yes) {
+          if (!yes) return;
+          Store.deleteNote(n.id).then(function () {
+            state.notes = state.notes.filter(function (x) { return x.id !== n.id; });
+            refreshViews();
+            toast('已移到垃圾桶');
+          }, function (e) { toast('刪除失敗：' + (e && e.message || e)); });
+        });
+      }
+    };
+  }
+  function openXmind() {
+    if (!xmindWrapEl || !window.XMind) return;
+    leaveOtherViews();
+    closeAreaViews();
+    xmindWrapEl.hidden = false;
+    xmindWrapEl.scrollTop = 0;
+    setNavActive('xmind-open-btn', true);
+    autoOpenSidebar();
+    setHash('xmind');
+    XMind.renderIndex(xmindPageEl, xmindOpts());
+    setTreeArea('xmind');
+  }
+  function openXmindNote(note) {
+    if (!xmindEditWrapEl || !window.XMind) return;
+    leaveOtherViews();
+    closeAreaViews();
+    xmindEditWrapEl.hidden = false;
+    setSidebarOpen(false);
+    xmindNoteId = note.id;
+    setTreeArea(isMine(note) ? (note.area || null) : null);
+    LS.set('lastNote', note.id);
+    setHash('note/' + note.id);
+    function syncState(n) {
+      const idx = state.notes.findIndex(function (x) { return x.id === n.id; });
+      if (idx >= 0) { state.notes[idx].rev = n.rev; state.notes[idx].updatedAt = n.updatedAt; }
+      note.rev = n.rev; note.updatedAt = n.updatedAt;
+    }
+    function live() { return state.notes.find(function (x) { return x.id === note.id; }) || note; }
+    let saving = null, again = false;
+    function flushSave() {
+      if (saving) { again = true; return saving; }
+      const run = function () {
+        const n = live();
+        return Store.updateNote({ id: n.id, title: n.title, content: n.content, folderId: n.folderId, meta: n.meta })
+          .then(function (r) { syncState(r); noteSaved(live()); })
+          .then(function () { if (again) { again = false; return run(); } });
+      };
+      saving = run().then(function () { saving = null; }, function (e) {
+        saving = null; again = false;
+        toast('儲存失敗：' + (e && e.message || e));
+        throw e;
+      });
+      return saving;
+    }
+    function setLocal(patch) {
+      const n = live();
+      Object.assign(n, patch);
+      if (n !== note) Object.assign(note, patch);
+      return flushSave();
+    }
+    const readOnly = note.perm === 'read';
+    const title = (note.title === '未命名筆記' || note.title === '未命名心智圖') ? '' : (note.title || '');
+    const view = XMind.open(note.content || '', {
+      container: xmindEditWrapEl,
+      readOnly: readOnly,
+      banner: readOnly ? '唯讀 — 由 ' + (note.sharedBy || '其他使用者') + ' 分享給你' : '',
+      getTitle: function () { return live().title; },
+      onChange: function (text) { return setLocal({ content: text }); },
+      onOpenLink: function (u) { const m = /^#note\/(.+)$/.exec(u); if (m) openNote(decodeURIComponent(m[1])); }
+    });
+    xmindView = view;
+    let titleTimer = null, pendingTitle = null;
+    function commitTitle() {
+      clearTimeout(titleTimer); titleTimer = null;
+      if (pendingTitle === null) return;
+      const t = pendingTitle.trim();
+      pendingTitle = null;
+      if ((t || '未命名心智圖') === live().title) return;
+      setLocal({ title: t || '未命名心智圖' }).catch(function () {});
+      renderTree();
+    }
+    toolBar = {
+      kind: 'xmind',
+      id: note.id,
+      readOnly: readOnly,
+      note: live,
+      titleInput: function (v) {
+        if (readOnly) return;
+        pendingTitle = v;
+        clearTimeout(titleTimer);
+        titleTimer = setTimeout(commitTitle, SAVE_DELAY);
+      },
+      commitTitle: commitTitle,
+      history: function () {
+        if (!window.Versions) return;
+        commitTitle();
+        view.flush().then(function () {
+          if (xmindView !== view) return;
+          Versions.openNote(live(), {
+            onRestored: function (fresh) {
+              const i = state.notes.findIndex(function (n) { return n.id === fresh.id; });
+              if (i >= 0) state.notes[i] = Object.assign(state.notes[i], fresh);
+              renderTree();
+              if (xmindView === view) view.setContent(fresh.content || '');
+            }
+          });
+        });
+      },
+      // PDF：內容是一段 ```xmind 圍欄，照一般筆記的路（MD.render → XMind.blockHTML 的靜態 SVG）交給 PDF
+      pdf: function () {
+        commitTitle();
+        view.flush().then(function () {
+          const n = live();
+          const box = document.createElement('div');
+          box.className = 'markdown-body';
+          box.innerHTML = MD.render(n.content || '');
+          return PDF.showPreview(n, box, {
+            meta: n.meta,
+            onMeta: function (meta) {
+              if (readOnly) return;
+              setLocal({ meta: Object.assign({}, live().meta, meta, { xmind: true }) }).catch(function () {});
+            }
+          });
+        }).catch(function (err) { alert('產生列印預覽失敗：' + (err && err.message || err)); });
+      }
+    };
+    noteBar(true);
+    document.getElementById('app').classList.add('tool-open');
+    titleEl.placeholder = '未命名心智圖';
+    titleEl.value = title;
+    titleEl.readOnly = readOnly;
+    if (shareBtn) shareBtn.hidden = !isMine(note);
+    updateNotePath(note);
   }
   // ---- 文件（js/doc.js）：所見即所得的編輯器，整頁；內容是 HTML。最上面那一列是它的標題列（toolBar，
   // 跟 drawio／看板同一套），單一寫入路徑同上。----
@@ -1524,7 +1701,7 @@
   // 進關聯圖的那份筆記清單。
   function graphNotes() {
     return state.notes.filter(function (n) {
-      return n.area !== 'quick' && n.area !== 'novel' && n.area !== 'board' && n.area !== 'start' && !isFileNote(n) && !isStickyNote(n);
+      return n.area !== 'quick' && n.area !== 'novel' && n.area !== 'board' && n.area !== 'start' && n.area !== 'xmind' && !isFileNote(n) && !isStickyNote(n);
     });
   }
 
@@ -2026,6 +2203,7 @@
     closeDrawioView();
     closeKanbanView();
     closeDocView();
+    closeXmindView();
     closeGraphView();
     setTreeArea(null);    // 首頁＝所有筆記，側邊欄的樹也回到一般區域
     if (window.Dashboard) {
@@ -2093,6 +2271,7 @@
     closeDrawioView();
     closeKanbanView();
     closeDocView();
+    closeXmindView();
     closeGraphView();
     closeFilesView();
     filesWrapEl.hidden = false;
@@ -2127,6 +2306,7 @@
     closeDrawioView();
     closeKanbanView();
     closeDocView();
+    closeXmindView();
     closeGraphView();
     closeFilesView();
     trashWrapEl.hidden = false;
@@ -2157,6 +2337,7 @@
     closeDrawioView();
     closeKanbanView();
     closeDocView();
+    closeXmindView();
     closeGraphView();
     setTreeArea(null);
     bookWrapEl.hidden = false;
@@ -2269,6 +2450,8 @@
       if (window.StartPage && StartPage.isNote(note)) { openStart({ pageId: note.id }); return; }
       // 文件（meta.doc）：所見即所得的整頁編輯器
       if (window.Doc && Doc.isNote(note)) { anchorBackToFolder(fromArea, note); openDocNote(note); return; }
+      // 心智圖（meta.xmind）：整頁的 XMind 式編輯器（js/xmind.js）
+      if (window.XMind && XMind.isNote(note)) { openXmindNote(note); return; }
       // 不在 state.notes 裡的檔案筆記（理論上不會發生）：同樣只疊檢視器，背景沒東西就回首頁
       if (isFileNote(note)) { if (!state.currentId) showEmpty(); openFileViewer(note); return; }
       state.currentId = id;
@@ -2289,6 +2472,7 @@
       closeDrawioView();
       closeKanbanView();
       closeDocView();
+      closeXmindView();
       closeGraphView();
       // 區域裡的筆記：側邊欄留在那個區域的樹（別人分享來的不屬於我的任何區域）
       setTreeArea(isMine(note) ? (note.area || null) : null);
@@ -5262,7 +5446,7 @@
       if (!emptyEl.hidden || (trashWrapEl && !trashWrapEl.hidden) || (filesWrapEl && !filesWrapEl.hidden) ||
         (courseWrapEl && !courseWrapEl.hidden) || (knowledgeWrapEl && !knowledgeWrapEl.hidden) ||
         (quickWrapEl && !quickWrapEl.hidden) || (novelWrapEl && !novelWrapEl.hidden) ||
-        (boardsWrapEl && !boardsWrapEl.hidden) || (startWrapEl && !startWrapEl.hidden)) return;
+        (boardsWrapEl && !boardsWrapEl.hidden) || (startWrapEl && !startWrapEl.hidden) || (xmindWrapEl && !xmindWrapEl.hidden)) return;
       const main = $('#main'), top = $('#topbar');
       if ((main && main.contains(e.target)) || (top && top.contains(e.target))) setSidebarOpen(false);
     });
@@ -5510,6 +5694,7 @@
       if (location.hash === '#quick') { if (quickWrapEl && quickWrapEl.hidden) openQuick(); return; }
       if (location.hash === '#board') { if (boardsWrapEl && boardsWrapEl.hidden) openBoards(); return; }
       if (location.hash === '#start') { if (startWrapEl && startWrapEl.hidden) openStart(); return; }
+      if (location.hash === '#xmind') { if (xmindWrapEl && xmindWrapEl.hidden) openXmind(); return; }
       const bid = bookIdFromHash();
       if (bid) {
         if (state.folders.some(function (f) { return f.id === bid; })) openBook(bid);
@@ -5567,6 +5752,7 @@
     const quickBtn = $('#quick-open-btn'); if (quickBtn) quickBtn.addEventListener('click', openQuick);
     const boardBtn = $('#board-open-btn'); if (boardBtn) boardBtn.addEventListener('click', openBoards);
     const startBtn = $('#start-open-btn'); if (startBtn) startBtn.addEventListener('click', function () { openStart(); });
+    const xmindBtn = $('#xmind-open-btn'); if (xmindBtn) xmindBtn.addEventListener('click', openXmind);
 
     editorEl.addEventListener('input', function () {
       renderPreview();

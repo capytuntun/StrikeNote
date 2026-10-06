@@ -4953,6 +4953,127 @@ select.kb-input { cursor: pointer; }
   .kb-archive { width: min(340px, 100vw); }
 }
 
+/* ---------- 心智圖（js/xmind.js）：照 XMind 的版面 ----------
+   列表頁（#xmind-wrap > .xmind-page，沿用 trello 列表頁的 .boards-page 間距）：一格一張圖、格子裡是縮圖；
+   編輯頁（#xmind-edit-wrap > .xm-page）：上面工具列、中間畫布（左邊可開大綱、右邊格式面板）、下面工作表分頁。
+   畫布永遠是該主題（配色）的底色，面板用 app 的色票（它們是 chrome，不是畫布）。 */
+.xmi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; max-width: 1200px; }
+.xmi-tile {
+  position: relative; display: flex; flex-direction: column; align-items: stretch; padding: 0; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-2); color: var(--text); text-align: left; cursor: pointer; font: inherit; overflow: hidden; box-shadow: var(--shadow-sm);
+  transition: transform var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+.xmi-tile:hover { transform: translateY(-2px); box-shadow: 0 8px 16px rgba(9, 30, 66, .18); border-color: var(--border-strong); }
+.xmi-thumb { display: block; height: 120px; overflow: hidden; border-bottom: 1px solid var(--border); padding: 8px; }
+.xmi-thumb svg { display: block; width: 100%; height: 100%; }
+.xmi-body { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px 12px; }
+.xmi-t { font-weight: 700; font-size: 14px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.xmi-m { font-size: var(--fs-xs); color: var(--text-dim); }
+.xmi-more { position: absolute; right: 6px; top: 6px; display: none; width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: 4px; background: rgba(0, 0, 0, .45); color: #fff; }
+.xmi-tile:hover .xmi-more { display: inline-flex; }
+.xmi-more .ic-svg { width: 14px; height: 14px; }
+.xmi-tile-new { min-height: 196px; align-items: center; justify-content: center; gap: 8px; flex-direction: row; background: transparent; color: var(--text-dim); font-weight: 600; border: 2px dashed var(--border-strong); box-shadow: none; }
+.xmi-tile-new:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-weak); transform: none; box-shadow: none; }
+.xmi-tile-new .ic-svg { width: 18px; height: 18px; }
+.dash-row-ic.kind-xmind, .dash-row-kind.kind-xmind { background: rgba(217, 48, 37, .13); color: #c5221f; }
+:root[data-theme="dark"] .dash-row-ic.kind-xmind, :root[data-theme="dark"] .dash-row-kind.kind-xmind { color: #f28b82; }
+
+/* 編輯頁 */
+.xmind-edit-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.xm-page { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--bg); color: var(--text); }
+.xm-ro { display: flex; align-items: center; gap: 8px; padding: 6px 14px; background: var(--accent-weak); color: var(--text); font-size: var(--fs-sm); border-bottom: 1px solid var(--border); }
+.xm-ro .ic-svg { width: 14px; height: 14px; }
+.xm-toolbar { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; height: 44px; padding: 0 10px; border-bottom: 1px solid var(--border); background: var(--bg-2); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.xm-tb { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-sm); cursor: pointer; white-space: nowrap; }
+.xm-tb .ic-svg { width: 16px; height: 16px; }
+.xm-tb:hover:not(:disabled) { background: var(--bg-3); }
+.xm-tb.on { background: var(--accent-weak); color: var(--accent); border-color: var(--accent); }
+.xm-tb:disabled { opacity: .4; cursor: default; }
+.xm-zoom { min-width: 48px; justify-content: center; font-variant-numeric: tabular-nums; }
+.xm-tb-sep { width: 1px; height: 22px; margin: 0 4px; background: var(--border); flex: 0 0 auto; }
+.xm-tb-sp { flex: 1 1 auto; }
+.xm-sel { height: 30px; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: var(--fs-sm); }
+.xm-status { font-size: var(--fs-xs); color: var(--text-dim); white-space: nowrap; padding: 0 6px; }
+.xm-status.is-ok { color: var(--ok, #27ae60); }
+.xm-status.is-err { color: var(--danger, #e74c3c); }
+.xm-main { display: flex; flex: 1; min-height: 0; }
+.xm-canvas { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; outline: none; cursor: default; }
+.xm-canvas.is-panning { cursor: grabbing; }
+.xm-stage { display: block; width: 100%; height: 100%; user-select: none; }
+.xm-stage text { user-select: none; }
+.xm-topic { cursor: pointer; }
+.xm-hit { pointer-events: all; }
+.xm-fold, .xm-link-ic, .xm-note-ic { cursor: pointer; }
+.xm-selbox { stroke: var(--accent); }
+.xm-target { stroke: #27ae60; stroke-dasharray: 6 4; }
+.xm-ghost { fill: rgba(41, 128, 185, .18); stroke: #2980b9; stroke-width: 1; }
+.xm-edit { position: fixed; z-index: 60; margin: 0; padding: 4px 8px; border: 2px solid var(--accent); border-radius: 6px; background: #fff; color: #222; font-family: inherit; line-height: 1.35; resize: none; outline: none; overflow: hidden; box-shadow: var(--shadow-md); }
+.xm-format { flex: 0 0 270px; border-left: 1px solid var(--border); background: var(--bg-2); overflow: auto; font-size: var(--fs-sm); }
+.xm-outline { flex: 0 0 240px; border-right: 1px solid var(--border); background: var(--bg-2); overflow: auto; font-size: var(--fs-sm); }
+.xm-outline[hidden] { display: none; }
+.xm-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.xm-tab { padding: 10px 14px; font-weight: 600; }
+.xm-tab.on { border-bottom: 2px solid var(--accent); color: var(--accent); }
+.xm-panel { padding: 8px 12px 20px; }
+.xm-grp { margin: 14px 0 6px; font-size: var(--fs-xs); font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
+.xm-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; min-height: 28px; }
+.xm-row > label { flex: 0 0 72px; color: var(--text-dim); }
+.xm-input { flex: 1 1 auto; min-width: 0; width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: var(--fs-sm); }
+.xm-num { flex: 0 0 72px; width: 72px; }
+.xm-notes { height: auto; padding: 6px 8px; resize: vertical; line-height: 1.45; }
+.xm-color { width: 36px; height: 28px; padding: 0 2px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.xm-btn { height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.xm-btn:hover { background: var(--bg-3); }
+.xm-dim { color: var(--text-dim); }
+.xm-help { color: var(--text-dim); line-height: 1.7; font-size: var(--fs-xs); }
+.xm-mkrow { flex-wrap: wrap; }
+.xm-themes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.xm-theme { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 6px; border: 2px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.xm-theme.on { border-color: var(--accent); }
+.xm-theme > span { display: flex; align-items: center; gap: 3px; height: 34px; padding: 6px; border-radius: 6px; border: 1px solid; }
+.xm-theme i { display: block; width: 16px; height: 16px; border-radius: 4px; margin-right: 4px; }
+.xm-theme b { display: block; width: 10px; height: 10px; border-radius: 50%; }
+.xm-ol-t { padding: 10px 12px 6px; font-weight: 700; }
+.xm-ol-sec { padding: 10px 12px 4px; font-size: var(--fs-xs); color: var(--text-dim); }
+.xm-ol-row { display: flex; align-items: center; gap: 4px; padding: 4px 8px 4px 0; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.xm-ol-row:hover { background: var(--bg-3); }
+.xm-ol-row.on { background: var(--accent-weak); color: var(--accent); }
+.xm-ol-tw { display: inline-block; width: 14px; flex: 0 0 14px; color: var(--text-dim); font-size: 10px; text-align: center; }
+.xm-sheets { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; height: 34px; padding: 0 8px; border-top: 1px solid var(--border); background: var(--bg-2); }
+.xm-stabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: thin; }
+.xm-stab { height: 26px; padding: 0 12px; border: 1px solid transparent; border-radius: 6px 6px 0 0; background: transparent; color: var(--text-dim); font: inherit; font-size: var(--fs-sm); cursor: pointer; white-space: nowrap; }
+.xm-stab.on { background: var(--bg); color: var(--text); border-color: var(--border); border-bottom-color: var(--bg); font-weight: 600; }
+.xm-sadd { width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--text-dim); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.xm-sadd:hover { background: var(--bg-3); color: var(--text); }
+.xm-sadd .ic-svg { width: 14px; height: 14px; }
+.xm-menu { position: fixed; z-index: 70; min-width: 160px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-2); color: var(--text); box-shadow: var(--shadow-md); }
+.xm-menu-item { display: block; width: 100%; padding: 7px 12px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
+.xm-menu-item:hover:not(:disabled) { background: var(--bg-3); }
+.xm-menu-item:disabled { opacity: .4; cursor: default; }
+.xm-menu-item.is-danger { color: var(--danger, #e74c3c); }
+.xm-menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+.xm-markers { width: 300px; padding: 8px; }
+.xm-mk-group { margin-bottom: 8px; }
+.xm-mk-t { font-size: var(--fs-xs); color: var(--text-dim); margin: 0 0 4px 2px; }
+.xm-mk-grid { display: flex; flex-wrap: wrap; gap: 3px; }
+.xm-mk { width: 28px; height: 28px; border: 1px solid transparent; border-radius: 6px; background: transparent; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.xm-mk:hover { background: var(--bg-3); }
+.xm-mk.on { border-color: var(--accent); background: var(--accent-weak); }
+
+/* 靜態的心智圖（```xmind 圍欄：預覽、電子書；PDF 的在 pdf.js） */
+.xmind-block { margin: 0 0 14px; }
+.xmind-block svg { display: block; max-width: 100%; height: auto; border-radius: 8px; }
+.xm-fig { margin: 0 0 14px; }
+.xm-fig-t { font-size: var(--fs-sm); font-weight: 600; color: var(--text-dim); margin: 0 0 4px; }
+@media (max-width: 900px) {
+  .xm-format { flex-basis: 220px; }
+  .xm-tb-text span { display: none; }
+}
+@media (max-width: 640px) {
+  .xm-format, .xm-outline { display: none; }
+}
+
+
 /* ---------- 起始頁（js/startpage.js）：照 start.me 的樣子 ----------
    #start-wrap > #start-page.sp-page：最上面一列（分頁、搜尋框、頁面選單），底下幾欄小工具。
    淺色底色上是白色小工具卡；深色底色（slate／navy／black）時整頁加 .is-dark，卡片換深色。 */

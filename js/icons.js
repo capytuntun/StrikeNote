@@ -142,6 +142,7 @@
     'check-square':    '<path d="M20 12v8H4V4h12"/><path d="m9 11 3 3 8-8"/>',
     'square-empty':    '<rect x="4" y="4" width="16" height="16"/>',
     'file-page':       '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/><path d="m10 12 3 3-3 3"/>',
+    star:              '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
     'mind-map':        '<rect x="2" y="10" width="6" height="4"/><rect x="16" y="3" width="6" height="4"/><rect x="16" y="10" width="6" height="4"/><rect x="16" y="17" width="6" height="4"/><path d="M8 12h4M12 5v14M12 5h4M12 12h4M12 19h4"/>',
     history:           '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 8v4l3 2"/>',
     server:            '<rect x="3" y="4" width="18" height="6"/><rect x="3" y="14" width="18" height="6"/><path d="M7 7h.01M7 17h.01"/>',

@@ -531,6 +531,19 @@ async function main() {
       await call(admin, 'POST', '/api/notes/' + sp + '/restore');
     }
 
+    // 心智圖（js/xmind.js）：area 'xmind'，同一套；內文是 ```xmind 圍欄的 JSON
+    r = await call(admin, 'POST', '/api/notes', { title: '心智圖一', content: '```xmind\n{"sheets":[{"id":"s1","name":"工作表 1","theme":"classic","structure":"map","root":{"id":"r","title":"中心","children":[]}}]}\n```\n', area: 'xmind', meta: { xmind: true } });
+    ok(r.status === 200 && r.data.note && r.data.note.area === 'xmind', 'an xmind note is created in area xmind', r.status);
+    if (r.data.note) {
+      const xm = r.data.note.id;
+      r = await call(admin, 'PUT', '/api/notes/' + xm + '/area', { area: null });
+      ok(r.status === 400, 'a mind map cannot be moved out of its area', r.status);
+      await call(admin, 'DELETE', '/api/notes/' + xm);
+      r = await call(admin, 'GET', '/api/trash');
+      ok(r.data.notes.some(n => n.id === xm && n.kind === 'xmind'), 'the trash lists it as kind xmind');
+      await call(admin, 'POST', '/api/notes/' + xm + '/restore');
+    }
+
     // 垃圾桶：連結跟著筆記的狀態
     r = await call(admin, 'DELETE', '/api/notes/' + pub);
     r = await call(anon, 'GET', '/s/' + ntok);

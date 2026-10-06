@@ -260,12 +260,13 @@
         }
         // drawio 圖表的內容是圖的 DSL（一行一個圖形或連線，滿滿的座標），逐行比對看不出
         // 圖哪裡變了；對人有意義的是兩張圖長什麼樣，所以並排放圖。
-        if (global.DrawIO && DrawIO.isNote(note)) {
+        const picTool = (global.DrawIO && DrawIO.isNote(note)) ? global.DrawIO : (global.XMind && XMind.isNote(note)) ? global.XMind : null;   // 心智圖同理：JSON 的逐行比對沒有意義
+        if (picTool) {
           pane.appendChild(el('div', 'ver-diffhead', '左邊是這個版本的圖，右邊是目前的圖'));
           const pics = el('div', 'ver-pics');
           [res.version.content, res.current.content].forEach(function (c) {
             const box = el('div', 'ver-pic');
-            box.innerHTML = DrawIO.blockHTML(DrawIO.payloadOf(c) || '');
+            box.innerHTML = picTool.blockHTML(picTool.payloadOf(c) || '');
             pics.appendChild(box);
           });
           pane.appendChild(pics);

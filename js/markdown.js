@@ -618,6 +618,8 @@
       if (info === 'board' && global.Board) return Board.blockHTML(code);
       // ```startpage 是起始頁（js/startpage.js）：圍欄裡是那一頁的 JSON，畫成靜態的欄位與書籤
       if (info === 'startpage' && global.StartPage) return StartPage.blockHTML(code);
+      // ```xmind 是心智圖（js/xmind.js）：圍欄裡是 JSON，畫成靜態的 SVG（多張工作表就一張一張）
+      if (info === 'xmind' && global.XMind) return XMind.blockHTML(code);
       let requested = info, lineNumbers = false, startLine = 1;
       const opt = info.match(/^([^\s=]*)=(\d*)$/);
       if (opt) {

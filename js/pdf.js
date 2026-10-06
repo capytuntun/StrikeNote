@@ -475,6 +475,11 @@
       '.pdf-content .kbs-check li { display: flex; align-items: center; gap: 1mm; } .pdf-content .kbs-check li.is-done { color: #626f86; text-decoration: line-through; }',
       '.pdf-content .kbs-check .ic-svg { width: 3mm; height: 3mm; }',
       '.pdf-content .kbs-board.is-empty { background: #f6f8fa; color: #626f86; justify-content: center; font-size: 9pt; }',
+      /* 心智圖（```xmind，js/xmind.js 的 blockHTML）：一張 SVG，太高就縮到一頁內；多張工作表各自一塊 */
+      '.pdf-content .xmind-block { margin: 0 0 5mm; }',
+      '.pdf-content .xmind-block svg { display: block; max-width: 100%; height: auto; max-height: 225mm; border-radius: 2mm; }',
+      '.pdf-content .xm-fig { break-inside: avoid; margin: 0 0 5mm; }',
+      '.pdf-content .xm-fig-t { margin: 0 0 2mm; font-size: 9pt; font-weight: 600; color: #57606a; text-align: left; }',
       /* 起始頁（```startpage，js/startpage.js 的 blockHTML）：幾欄小工具與書籤 */
       '.pdf-content .sps-page { display: grid; gap: 3mm; padding: 3mm; border-radius: 2mm; }',
       '.pdf-content .sps-page.is-dark { color: #e6e9ef; }',

@@ -12,7 +12,7 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=193">
+  <link rel="stylesheet" href="app.css?v=194">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
@@ -162,6 +162,7 @@
         <button id="knowledge-open-btn" class="sidebar-nav-item" type="button" title="自己整理彙整出來的筆記" data-icon="book-open">知識區</button>
         <button id="board-open-btn" class="sidebar-nav-item" type="button" title="像 Trello 一樣的看板：列表與卡片" data-icon="kanban">trello</button>
         <button id="start-open-btn" class="sidebar-nav-item" type="button" title="像 start.me 一樣的書籤起始頁" data-icon="layout-grid">start.me</button>
+        <button id="xmind-open-btn" class="sidebar-nav-item" type="button" title="像 XMind 一樣的心智圖" data-icon="mind-map">xmind</button>
         <button id="novel-open-btn" class="sidebar-nav-item" type="button" title="需要再輸入一次密碼才能進入" data-icon="lock">小說</button>
       </nav>
       <div class="search-row">
@@ -346,6 +347,11 @@
       <div id="start-wrap" class="trash-wrap area-wrap" hidden>
         <div id="start-page"></div>
       </div>
+      <!-- 心智圖（js/xmind.js）：#xmind 是所有心智圖的列表頁；一張圖（meta.xmind 的筆記）開在 #xmind-edit-wrap 整頁 -->
+      <div id="xmind-wrap" class="trash-wrap area-wrap" hidden>
+        <div id="xmind-page" class="boards-page xmind-page"></div>
+      </div>
+      <div id="xmind-edit-wrap" class="xmind-edit-wrap" hidden></div>
       <!-- 關聯分析（js/relmap.js）：整頁的畫布編輯器，不是浮在上面的視窗。一篇 meta.relMap
            的筆記直接開在這裡；一般筆記裡的 ```relmap 區塊按「全螢幕」也是開到這裡，完成後回筆記。 -->
       <div id="relmap-wrap" class="relmap-wrap" hidden></div>
@@ -370,7 +376,7 @@
   <script src="vendor/hljs-dos.min.js"></script>
 
   <!-- App -->
-  <script src="js/icons.js?v=16"></script>
+  <script src="js/icons.js?v=17"></script>
   <script src="js/merge.js?v=4"></script>
   <script src="js/mdimport.js?v=1"></script>
   <script src="js/mindmap.js?v=3"></script>
@@ -383,7 +389,7 @@
   <script src="js/admin.js?v=51"></script>
   <script src="js/backup.js?v=2"></script>
   <script src="js/search.js?v=41"></script>
-  <script src="js/markdown.js?v=69"></script>
+  <script src="js/markdown.js?v=70"></script>
   <script src="js/editor.js?v=54"></script>
   <script src="js/multicursor.js?v=3"></script>
   <script src="js/templates.js?v=1"></script>
@@ -394,20 +400,21 @@
   <script src="js/seceditor.js?v=43"></script>
   <script src="js/perfreport.js?v=43"></script>
   <script src="js/sorting.js?v=1"></script>
-  <script src="js/dashboard.js?v=75"></script>
-  <script src="js/areabrowser.js?v=22"></script>
+  <script src="js/dashboard.js?v=76"></script>
+  <script src="js/areabrowser.js?v=23"></script>
   <script src="js/quicknotes.js?v=14"></script>
   <script src="js/board.js?v=4"></script>
   <script src="js/startpage.js?v=3"></script>
+  <script src="js/xmind.js?v=1"></script>
   <script src="js/doc.js?v=4"></script>
   <script src="js/annotate.js?v=42"></script>
-  <script src="js/pdf.js?v=59"></script>
+  <script src="js/pdf.js?v=60"></script>
   <script src="js/book.js?v=11"></script>
-  <script src="js/versions.js?v=6"></script>
-  <script src="js/trash.js?v=6"></script>
+  <script src="js/versions.js?v=7"></script>
+  <script src="js/trash.js?v=7"></script>
   <script src="js/imagelib.js?v=7"></script>
   <script src="js/linesync.js?v=8"></script>
   <script src="js/embedswitch.js?v=2"></script>
-  <script src="js/app.js?v=140"></script>
+  <script src="js/app.js?v=141"></script>
 </body>
 </html>
