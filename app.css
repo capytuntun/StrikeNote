@@ -4471,9 +4471,27 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 .qn-item-add:hover { color: var(--kp-text); }
 .qn-item-add .ic-svg { width: 14px; height: 14px; }
 .qn-done-head { margin: 6px 4px 2px; padding-top: 6px; border-top: 1px solid rgba(0, 0, 0, .1); font-size: 12px; color: var(--kp-text-2); }
-.qn-composer-list { padding: 4px 8px 0; border-top: 1px solid rgba(0, 0, 0, .08); }
-.qn-modal-bodybox .qn-list-editor { margin: 0 12px 6px; border-top: 1px solid rgba(0, 0, 0, .08); padding-top: 6px; }
-:root[data-theme="dark"] .qn-composer-list, :root[data-theme="dark"] .qn-modal-bodybox .qn-list-editor { border-top-color: rgba(255, 255, 255, .12); }
+/* 行編輯器：文字列與勾選列混在一起，一行一列 */
+.qn-lines { padding: 8px 12px 6px; }
+.qn-row { position: relative; display: flex; align-items: flex-start; gap: 8px; padding: 1px 56px 1px 4px; border-radius: 6px; }
+.qn-row:hover { background: rgba(0, 0, 0, .04); }
+.qn-row .qn-item-cb { width: 16px; height: 16px; margin: 6px 0 0; flex: 0 0 auto; accent-color: var(--kp-text-2); cursor: pointer; }
+.qn-row-text { padding-left: 4px; }
+.qn-row-input {
+  flex: 1 1 auto; min-width: 0; display: block; width: 100%; padding: 4px 2px; border: 0; background: transparent; color: var(--kp-text);
+  font: inherit; font-size: 14px; line-height: 1.5; resize: none; outline: none; overflow: hidden;
+}
+.qn-row-input::placeholder { color: var(--kp-text-2); }
+.qn-row.is-done .qn-row-input { color: var(--kp-text-2); text-decoration: line-through; }
+.qn-row-tools { position: absolute; right: 2px; top: 2px; display: none; gap: 2px; }
+.qn-row:hover .qn-row-tools, .qn-row:focus-within .qn-row-tools { display: inline-flex; }
+.qn-row-btn { width: 24px; height: 24px; border: 0; border-radius: 50%; background: transparent; color: var(--kp-text-2); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.qn-row-btn:hover { background: rgba(0, 0, 0, .08); color: var(--kp-text); }
+.qn-row-btn .ic-svg { width: 14px; height: 14px; }
+.qn-composer-lines { padding: 2px 4px 0; }
+.qn-composer-lines .qn-lines { padding: 4px 8px 2px; }
+:root[data-theme="dark"] .qn-row:hover { background: rgba(255, 255, 255, .06); }
+:root[data-theme="dark"] .qn-row-btn:hover { background: rgba(255, 255, 255, .12); }
 .qn-composer-list .qn-list-editor { padding: 0; }
 :root[data-theme="dark"] .qn-item:hover { background: rgba(255, 255, 255, .06); }
 :root[data-theme="dark"] .qn-done-head { border-top-color: rgba(255, 255, 255, .15); }
