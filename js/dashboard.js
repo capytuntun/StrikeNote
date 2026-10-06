@@ -47,6 +47,7 @@
     if (n.meta && n.meta.board) return { icon: 'kanban', label: 'trello', cls: 'kind-board' };
     if (n.meta && n.meta.startpage) return { icon: 'layout-grid', label: 'start.me', cls: 'kind-start' };
     if (n.meta && n.meta.xmind) return { icon: 'mind-map', label: 'xmind', cls: 'kind-xmind' };
+    if (n.meta && n.meta.timetree) return { icon: 'calendar', label: 'timetree', cls: 'kind-timetree' };
     if (n.meta && n.meta.doc) return { icon: 'file-pen', label: '文件', cls: 'kind-doc' };
     return { icon: 'file-text', label: '', cls: '' };
   }

@@ -478,6 +478,20 @@
       /* 文件（js/doc.js）的分頁符號、目錄、程式碼區塊，筆記裡若貼了這些 HTML 也照樣印 */
       '.pdf-content .gd-pagebreak { break-after: page; height: 0; margin: 0; border: 0; visibility: hidden; }',
       '.pdf-content pre.gd-code { font-family: "Courier New", Consolas, monospace; font-size: 9pt; background: #f1f3f4; border: 1px solid #dadce0; padding: 2mm 3mm; white-space: pre-wrap; }',
+      /* 行事曆（```timetree，js/timetree.js 的 blockHTML）：月曆格線加行程清單 */
+      '.pdf-content .tts { border: 1px solid #d0d7de; border-radius: 2mm; margin: 0 0 5mm; break-inside: avoid; font-size: 8.5pt; }',
+      '.pdf-content .tts-head { display: flex; align-items: center; gap: 2mm; padding: 2mm 3mm; border-bottom: 1px solid #d0d7de; } .pdf-content .tts-head i { width: 3mm; height: 3mm; border-radius: 50%; display: inline-block; } .pdf-content .tts-head span { color: #57606a; font-size: 7.5pt; }',
+      '.pdf-content .tts-wd { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 7.5pt; color: #57606a; padding: 1mm 0; border-bottom: 1px solid #d0d7de; }',
+      '.pdf-content .tts-week { position: relative; display: grid; grid-template-columns: repeat(7, 1fr); min-height: 22mm; border-bottom: 1px solid #e1e4e8; }',
+      '.pdf-content .tts-day { border-right: 1px solid #e1e4e8; padding: 1mm; } .pdf-content .tts-day:last-child { border-right: 0; } .pdf-content .tts-day.is-other { background: #f6f8fa; color: #8c959f; }',
+      '.pdf-content .tts-num { font-weight: 600; } .pdf-content .tts-day.is-sun .tts-num { color: #e5493a; } .pdf-content .tts-day.is-sat .tts-num { color: #3b7ddd; }',
+      '.pdf-content .tts-more { position: absolute; left: 1mm; bottom: 0; font-size: 7pt; color: #57606a; }',
+      '.pdf-content .tts-bar { position: absolute; height: 4.6mm; line-height: 4.6mm; margin: 0 .5mm; padding: 0 1.5mm; border-radius: 1mm; font-size: 7.5pt; color: #fff; background: var(--c); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }',
+      '.pdf-content .tts-bar:not(.is-allday) { background: transparent; color: #24292f; } .pdf-content .tts-bar:not(.is-allday) i { display: inline-block; width: 2mm; height: 2mm; border-radius: 50%; background: var(--c); margin-right: 1mm; } .pdf-content .tts-bar-t { color: #57606a; margin-right: 1mm; }',
+      '.pdf-content .tts-agenda { padding: 2mm 3mm 3mm; } .pdf-content .tts-agenda-t { font-size: 7.5pt; font-weight: 700; color: #57606a; margin: 1mm 0; }',
+      '.pdf-content .tts-agenda-day { display: flex; align-items: center; gap: 2mm; margin: 2mm 0 1mm; } .pdf-content .tts-agenda-day b { font-size: 10pt; } .pdf-content .tts-agenda-day span { font-size: 7.5pt; color: #57606a; }',
+      '.pdf-content .tts-agenda-row { display: flex; align-items: center; gap: 2mm; padding: .8mm 1mm; } .pdf-content .tts-agenda-row i { width: 2.2mm; height: 2.2mm; border-radius: 50%; flex: 0 0 auto; } .pdf-content .tts-agenda-time { flex: 0 0 22mm; color: #57606a; font-size: 7.5pt; } .pdf-content .tts-agenda-loc { color: #57606a; font-size: 7.5pt; } .pdf-content .tts-agenda-loc .ic-svg { width: 2.5mm; height: 2.5mm; }',
+      '.pdf-content .tts-empty { padding: 3mm; text-align: center; color: #8c959f; }',
       /* 心智圖（```xmind，js/xmind.js 的 blockHTML）：一張 SVG，太高就縮到一頁內；多張工作表各自一塊 */
       '.pdf-content .xmind-block { margin: 0 0 5mm; }',
       '.pdf-content .xmind-block svg { display: block; max-width: 100%; height: auto; max-height: 225mm; border-radius: 2mm; }',

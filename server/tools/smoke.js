@@ -544,6 +544,19 @@ async function main() {
       await call(admin, 'POST', '/api/notes/' + xm + '/restore');
     }
 
+    // 行事曆（js/timetree.js）：area 'timetree'，同一套；內文是 ```timetree 圍欄的 JSON
+    r = await call(admin, 'POST', '/api/notes', { title: '行事曆一', content: '```timetree\n{"color":"#2ec4a6","labels":[],"events":[{"id":"e1","title":"考試","allDay":true,"start":"2026-10-20","end":"2026-10-20"}]}\n```\n', area: 'timetree', meta: { timetree: true } });
+    ok(r.status === 200 && r.data.note && r.data.note.area === 'timetree', 'a timetree note is created in area timetree', r.status);
+    if (r.data.note) {
+      const tt = r.data.note.id;
+      r = await call(admin, 'PUT', '/api/notes/' + tt + '/area', { area: null });
+      ok(r.status === 400, 'a calendar cannot be moved out of its area', r.status);
+      await call(admin, 'DELETE', '/api/notes/' + tt);
+      r = await call(admin, 'GET', '/api/trash');
+      ok(r.data.notes.some(n => n.id === tt && n.kind === 'timetree'), 'the trash lists it as kind timetree');
+      await call(admin, 'POST', '/api/notes/' + tt + '/restore');
+    }
+
     // 垃圾桶：連結跟著筆記的狀態
     r = await call(admin, 'DELETE', '/api/notes/' + pub);
     r = await call(anon, 'GET', '/s/' + ntok);

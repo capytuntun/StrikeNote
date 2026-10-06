@@ -620,6 +620,8 @@
       if (info === 'startpage' && global.StartPage) return StartPage.blockHTML(code);
       // ```xmind 是心智圖（js/xmind.js）：圍欄裡是 JSON，畫成靜態的 SVG（多張工作表就一張一張）
       if (info === 'xmind' && global.XMind) return XMind.blockHTML(code);
+      // ```timetree 是行事曆（js/timetree.js）：圍欄裡是 JSON，畫成這個月的月曆加接下來兩週
+      if (info === 'timetree' && global.TimeTree) return TimeTree.blockHTML(code);
       let requested = info, lineNumbers = false, startLine = 1;
       const opt = info.match(/^([^\s=]*)=(\d*)$/);
       if (opt) {
