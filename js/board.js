@@ -247,12 +247,13 @@
 
     function tileMenu(anchor, n) {
       const body = popupAt(anchor, '看板', 'kb-pop-menu');
-      [['rename', '重新命名'], ['bg', '變更背景'], null, ['del', '移到垃圾桶']].forEach(function (it) {
+      [['rename', '重新命名'], ['bg', '變更背景'], ['tags', '標籤…'], null, ['del', '移到垃圾桶']].forEach(function (it) {
         if (!it) { body.appendChild(el('div', 'kb-pop-sep')); return; }
         const b = el('button', 'kb-pop-item' + (it[0] === 'del' ? ' is-danger' : ''), esc(it[1]));
         b.type = 'button';
         b.addEventListener('click', function () {
           if (it[0] === 'rename') { closePop(); if (opts.onRename) opts.onRename(n); }
+          else if (it[0] === 'tags') { closePop(); if (opts.onTags) opts.onTags(n); }
           else if (it[0] === 'bg') {
             const bb = popupAt(anchor, '變更背景');
             bgPicker(bb, boardOf(n).bg, function (key) {

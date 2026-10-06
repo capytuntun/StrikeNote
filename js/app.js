@@ -680,6 +680,8 @@
     return {
       // 一般區域專用：跟側邊欄樹同一條規則，過濾掉四個獨立區域的筆記／資料夾。
       notes: state.notes.filter(function (n) { return !n.area; }),
+      // 標籤區與 #tag 篩選看所有區域（小說除外；便條紙沒標題不列）：看板、起始頁、文件的標籤才有地方看
+      allNotes: state.notes.filter(function (n) { return n.area !== 'novel' && !isStickyNote(n); }),
       folders: state.folders.filter(function (f) { return !f.area; }),
       onOpen: openNote, onBook: openBook, onBookRemove: unmarkBook, onBookUpdate: updateBook,
       onPin: pinNote, onRename: renameNoteTo, onMenu: showNoteMenu,
@@ -856,6 +858,7 @@
       title: info.title, icon: info.icon,
       notes: areaNotes(area), folders: areaFolders(area),
       onOpen: openNote,
+      onTag: function (tag) { browseTag(tag); },
       // 資料夾方框的「⋮」、筆記列的釘選／「⋯」、勾選、排序：跟首頁（dashOpts）是同一套函式，
       // 兩邊長得一樣、選單內容也一樣（showFolderMenu/showNoteMenu 自己依區域增減幾項）
       onFolderMenu: showFolderMenu, onMenu: showNoteMenu, onPin: pinNote,
@@ -1094,6 +1097,7 @@
           openNote(n.id);
         }, function (e) { toast('建立失敗：' + (e && e.message || e)); });
       },
+      onTags: editTags,
       onRename: function (n) {
         showPrompt({ title: '重新命名看板', placeholder: '看板標題', value: n.title, ok: '確定' }).then(function (t) {
           t = String(t || '').trim();
@@ -1159,6 +1163,7 @@
       current: startCurrent,
       readOnly: function (n) { return n.perm === 'read'; },
       onSelect: function (id) { startCurrent = id; LS.set('startPage', id); renderStart(); },
+      onTags: editTags,
       onCreate: function (d) {
         Store.createNote(d.title, null, { area: 'start', content: StartPage.generate(d.bg), meta: { startpage: true } }).then(function (n) {
           state.notes.push(n);
@@ -2537,6 +2542,9 @@
     const title = a.getAttribute('data-note-title');
     if (!title) return;
     saveNow();
+    // 沒帶 id 的連結（隨筆對話框的籤片這類自己拼的）：先用標題找，找得到就開，不要另建一篇
+    const hit = state.notes.find(function (n) { return isMine(n) && normTitle(n.title) === normTitle(title); });
+    if (hit) { openNote(hit.id); return; }
     // 跟目前這篇同一個資料夾、同一個區域：少了 area，伺服器會因為資料夾的區域對不上而拒絕
     const here = state.current && isMine(state.current) ? state.current : null;
     Store.createNote(title, here ? here.folderId : null, here && here.area ? { area: here.area } : undefined).then(function (n) {
@@ -4051,9 +4059,41 @@
     toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2400);
   }
   // 儀表板筆記列的「⋯」：貼著按鈕右下角打開
+  // 「標籤…」：任何種類的筆記都能加標籤（存在 meta.tags，跟內文裡的 #標籤一起算，見 MD.noteTags）。
+  // 一個輸入框，空白或逗號分開；寫回去的是 meta（伺服器當成 bookkeeping，不動 rev、不廣播）。
+  function parseTags(text) {
+    const out = [], seen = {};
+    String(text || '').split(/[\s,，、;；]+/).forEach(function (t) {
+      t = t.replace(/^#+/, '').trim().slice(0, 40);
+      if (!t) return;
+      const k = t.toLowerCase();
+      if (!seen[k]) { seen[k] = true; out.push(t); }
+    });
+    return out.slice(0, 20);
+  }
+  function editTags(note) {
+    const live = state.notes.find(function (x) { return x.id === note.id; }) || note;
+    const cur = (live.meta && Array.isArray(live.meta.tags)) ? live.meta.tags : [];
+    showPrompt({ title: '標籤', placeholder: '例如：OSCP AD 待辦（空白或逗號分開）', value: cur.join(' '), ok: '儲存' }).then(function (v) {
+      if (v === null || v === undefined) return;
+      const tags = parseTags(v);
+      const meta = Object.assign({}, live.meta || {});
+      if (tags.length) meta.tags = tags; else delete meta.tags;
+      // 正開在編輯器裡的那一篇：內容用畫面上的，不然會把還沒存的字洗掉
+      const src = (state.current && state.current.id === live.id) ? state.current : live;
+      Store.updateNote({ id: live.id, title: src.title, content: src.content, folderId: src.folderId, meta: meta }).then(function (r) {
+        live.meta = meta; live.rev = r.rev; live.updatedAt = r.updatedAt;
+        if (state.current && state.current.id === live.id) state.current.meta = meta;
+        if (live !== note) note.meta = meta;
+        refreshViews();
+        toast(tags.length ? '標籤：' + tags.map(function (t) { return '#' + t; }).join(' ') : '已清除標籤');
+      }, function (e) { toast('儲存失敗：' + (e && e.message || e)); });
+    });
+  }
   function showNoteMenu(note, anchor) {
     const r = anchor.getBoundingClientRect();
     const actions = [];
+    if (isMine(note)) actions.push({ icon: 'tag', label: '標籤…', fn: function () { editTags(note); } });
     // 小說不能分享（伺服器也擋），連結給別人也打不開
     if (note.area !== 'novel') {
       actions.push({ icon: 'link', label: '複製連結', fn: function () { copyNoteLink(note); } });
@@ -4203,6 +4243,7 @@
       actions.push({ icon: 'link', label: '複製連結', fn: function () { copyNoteLink(item); } });
       actions.push({ icon: 'users', label: '分享…', fn: function () { showShareDialog(item); } });
       actions.push({ icon: 'pencil', label: '重新命名', fn: function () { renameNote(item); } });
+      actions.push({ icon: 'tag', label: '標籤…', fn: function () { editTags(item); } });
       actions.push({ icon: 'copy', label: '複製', fn: function () { duplicateNote(item); } });
       if (MOVABLE_AREAS.indexOf(item.area || null) >= 0) {
         actions.push({ icon: 'layout-grid', label: '換區域…', fn: function () { moveNoteToArea(item, e.clientX, e.clientY); } });
@@ -5465,6 +5506,13 @@
       const bid = bookIdFromHash();
       if (bid) {
         if (state.folders.some(function (f) { return f.id === bid; })) openBook(bid);
+        return;
+      }
+      // #tag/<name>：首頁依標籤篩選（中鍵開新分頁、從別頁改網址進來都走這裡）
+      const tg = tagFromHash();
+      if (tg) {
+        if (emptyEl.hidden) { saveNow(); LS.set('lastNote', ''); showEmpty(true); }
+        if (window.Dashboard && Dashboard.setTag) Dashboard.setTag(tg);
         return;
       }
       // #folder/<id>：上一頁／下一頁走到首頁的某個資料夾。只切畫面，不再 pushState。

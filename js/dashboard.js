@@ -124,7 +124,7 @@
   function collectTags(notes) {
     const map = {};
     notes.filter(isMine).forEach(function (n) {
-      const tags = (global.MD && MD.extractTags) ? MD.extractTags(n.content || '') : [];
+      const tags = (global.MD && MD.noteTags) ? MD.noteTags(n) : [];
       tags.forEach(function (t) {
         const k = t.toLowerCase();
         if (!map[k]) map[k] = { tag: t, count: 0 };
@@ -254,6 +254,19 @@
   }
 
   // ---- #標籤 ---------------------------------------------------------------
+  // 列上的小籤片：筆記選單「標籤…」加的 meta.tags（內文裡的 #標籤本來就在內文裡看得到）。點一下就篩選。
+  function rowTags(note, onPick) {
+    const box = el('span', 'dash-row-tags');
+    const tags = (note.meta && Array.isArray(note.meta.tags)) ? note.meta.tags.slice(0, 4) : [];
+    tags.forEach(function (t) {
+      const b = el('button', 'dash-row-tag', '#' + esc(t));
+      b.type = 'button'; b.title = '篩選「#' + t + '」';
+      b.addEventListener('click', function (e) { e.stopPropagation(); if (onPick) onPick(t); });
+      box.appendChild(b);
+    });
+    if (note.meta && Array.isArray(note.meta.tags) && note.meta.tags.length > 4) box.appendChild(el('span', 'dash-row-tag is-more', '+' + (note.meta.tags.length - 4)));
+    return box;
+  }
   function renderTagCloud(notes) {
     const tags = collectTags(notes);
     if (!tags.length) return null;
@@ -575,6 +588,7 @@
     const titleEl = el('span', 'dash-row-title', esc(note.title || '未命名筆記'));
     row.appendChild(titleEl);
     if (pinned) row.appendChild(el('span', 'dash-row-pin', ic('pin')));
+    row.appendChild(rowTags(note, function (t) { setTag(t); }));
     // 開放給網站內所有人的筆記要看得出來：設定完就把對話框關掉了，清單上沒有任何標記
     // 的話，等於沒辦法知道自己到底開放了哪幾篇（不小心開的那幾篇尤其重要）。
     if ((note.access || 'restricted') === 'site') {
@@ -630,9 +644,9 @@
     const frag = document.createDocumentFragment();
     if (tagFilter) {
       const key = tagFilter.toLowerCase();
-      const matches = sortNotes(o.notes.filter(function (n) {
+      const matches = sortNotes((o.allNotes || o.notes).filter(function (n) {
         if (!isMine(n)) return false;
-        const tags = (global.MD && MD.extractTags) ? MD.extractTags(n.content || '') : [];
+        const tags = (global.MD && MD.noteTags) ? MD.noteTags(n) : [];
         return tags.some(function (t) { return t.toLowerCase() === key; });
       }));
       const sec = el('section', 'dash-section');
@@ -749,7 +763,7 @@
     root.innerHTML = '';
     root.appendChild(renderHead(lastOpts));
     if (!tagFilter) {
-      const cloud = renderTagCloud(lastOpts.notes);
+      const cloud = renderTagCloud(lastOpts.allNotes || lastOpts.notes);
       if (cloud) root.appendChild(cloud);
     }
     root.appendChild(renderBody(lastOpts));
@@ -757,7 +771,7 @@
   function normalize(opts) {
     const o = opts || {};
     return {
-      notes: o.notes || [], folders: o.folders || [],
+      notes: o.notes || [], folders: o.folders || [], allNotes: o.allNotes || null,
       onOpen: o.onOpen || function () {},
       onBook: o.onBook, onBookRemove: o.onBookRemove, onBookUpdate: o.onBookUpdate,
       onPin: o.onPin, onRename: o.onRename, onMenu: o.onMenu,
@@ -792,6 +806,7 @@
   // currentFolder：app.js 用它決定「新增」要把東西放進哪個資料夾
   function currentFolder() { return curFolderId; }
   global.Dashboard = {
+    rowTags: rowTags,
     render: render, refresh: refresh, setTag: setTag, openFolder: navigate,
     currentFolder: currentFolder, renameFolderTile: renameFolderTile
   };

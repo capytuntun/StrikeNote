@@ -247,8 +247,9 @@
     function pageMenu(anchor, n) {
       if (opts.readOnly && opts.readOnly(n)) return;
       const cur = n.id === note.id;
-      menu(anchor, '頁面', [['rename', '重新命名'], ['bg', '背景顏色', !cur], ['cols', '欄數', !cur], ['search', p && p.search === 'none' ? '顯示搜尋框' : '隱藏搜尋框', !cur], null, ['del', '移到垃圾桶', 'danger']], function (a) {
+      menu(anchor, '頁面', [['rename', '重新命名'], ['bg', '背景顏色', !cur], ['cols', '欄數', !cur], ['search', p && p.search === 'none' ? '顯示搜尋框' : '隱藏搜尋框', !cur], ['tags', '標籤…'], null, ['del', '移到垃圾桶', 'danger']], function (a) {
         if (a === 'rename') rename(n);
+        else if (a === 'tags') { if (opts.onTags) opts.onTags(n); }
         else if (a === 'bg') {
           const body = popupAt(anchor, '背景顏色');
           const grid = el('div', 'sp-bg-grid');

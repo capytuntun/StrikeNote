@@ -81,7 +81,7 @@
         const hit = byTitle[normTitle(target)];
         if (hit) addEdge(aId, 'note:' + hit.id, 'link');
       });
-      const tags = (global.MD && MD.extractTags) ? MD.extractTags(n.content || '') : [];
+      const tags = (global.MD && MD.noteTags) ? MD.noteTags(n) : [];
       tags.forEach(function (tag) {
         const tid = 'tag:' + tag.toLowerCase();
         if (!byId[tid]) { byId[tid] = { id: tid, kind: 'tag', label: '#' + tag, deg: 0 }; nodes.push(byId[tid]); }

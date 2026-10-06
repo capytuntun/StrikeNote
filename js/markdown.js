@@ -275,6 +275,15 @@
 
   // Collect every #tag in a markdown source (deduped, in first-seen order).
   // Requires a boundary before '#' so mid-word '#' (URLs, C#) is ignored.
+  // 一篇筆記的全部標籤：內文裡的 #標籤，加上 meta.tags（筆記選單的「標籤…」存的；看板、起始頁、
+  // 文件、drawio 這些沒有 Markdown 內文的種類只能靠它）。大小寫不同的算同一個，保留先看到的寫法。
+  function noteTags(note) {
+    const out = [], seen = {};
+    const add = function (t) { t = String(t || '').replace(/^#/, '').trim(); if (!t) return; const k = t.toLowerCase(); if (!seen[k]) { seen[k] = true; out.push(t); } };
+    extractTags(note && note.content || '').forEach(add);
+    if (note && note.meta && Array.isArray(note.meta.tags)) note.meta.tags.forEach(add);
+    return out;
+  }
   function extractTags(md) {
     const stripped = String(md || '')
       .replace(/```[\s\S]*?(?:```|$)/g, '')
@@ -1111,6 +1120,7 @@
     setNoteLookup: setNoteLookup,
     extractLinks: extractLinks,
     extractTags: extractTags,
+    noteTags: noteTags,
     invalidateImage: invalidateImage,
     resolveLinkCards: resolveLinkCards,
     resolveRelMaps: resolveRelMaps,

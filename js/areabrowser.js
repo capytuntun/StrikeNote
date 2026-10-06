@@ -597,6 +597,7 @@
     const titleEl = el('span', 'dash-row-title', esc(note.title || '未命名筆記'));
     row.appendChild(titleEl);
     if (pinned) row.appendChild(el('span', 'dash-row-pin', ic('pin')));
+    row.appendChild((global.Dashboard && Dashboard.rowTags) ? Dashboard.rowTags(note, o.onTag) : el('span', 'dash-row-tags'));
     // 跟首頁一樣標出「開放給網站內所有人」的筆記（小說區永遠不會有，伺服器擋著）
     if ((note.access || 'restricted') === 'site') {
       const g = el('span', 'dash-row-shared', ic('globe'));

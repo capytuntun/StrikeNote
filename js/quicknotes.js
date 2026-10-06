@@ -235,6 +235,40 @@
     const ta = el('textarea', 'qn-modal-body');
     ta.placeholder = '記點什麼…'; ta.value = note.content || '';
     modal.appendChild(ta);
+    // 內文是原始 Markdown 的輸入框，連結在裡面只是字；把內文裡的網址、[[筆記]]、#標籤列在下面，點得到
+    const linksBox = el('div', 'qn-modal-links');
+    modal.appendChild(linksBox);
+    function renderLinks() {
+      linksBox.innerHTML = '';
+      const text = ta.value || '';
+      const seen = {};
+      const add = function (a) { linksBox.appendChild(a); };
+      const urlRe = /https?:\/\/[^\s<>()\[\]"']+/g;
+      let m;
+      while ((m = urlRe.exec(text))) {
+        const u = m[0].replace(/[.,;:!?）」』]+$/, '');
+        if (seen[u]) continue; seen[u] = 1;
+        const a = el('a', 'qn-link-chip', ic('link') + '<span>' + esc(u.replace(/^https?:\/\//, '').slice(0, 60)) + '</span>');
+        a.href = u; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.title = u;
+        add(a);
+      }
+      const wikiRe = /\[\[([^\]\n]+)\]\]/g;
+      while ((m = wikiRe.exec(text))) {
+        const t = m[1].split('|')[0].trim();
+        if (!t || seen['[[' + t]) continue; seen['[[' + t] = 1;
+        const a = el('a', 'qn-link-chip note-link', ic('file-text') + '<span>' + esc(t) + '</span>');
+        a.href = '#'; a.setAttribute('data-note-title', t);
+        a.addEventListener('click', function (e) { e.preventDefault(); if (o.onOpenNote) { close(); o.onOpenNote(a); } });
+        add(a);
+      }
+      ((global.MD && MD.extractTags) ? MD.extractTags(text) : []).forEach(function (t) {
+        const a = el('a', 'qn-link-chip hashtag', '<span>#' + esc(t) + '</span>');
+        a.href = '#'; a.setAttribute('data-tag', t);
+        a.addEventListener('click', function (e) { e.preventDefault(); if (o.onTag) { close(); o.onTag(t); } });
+        add(a);
+      });
+      linksBox.hidden = !linksBox.children.length;
+    }
     const meta = el('div', 'qn-modal-meta', esc(timeLabel(note.updatedAt)));
     modal.appendChild(meta);
 
@@ -260,7 +294,8 @@
       o.onClosed && o.onClosed();
     }
     title.addEventListener('input', scheduleSave);
-    ta.addEventListener('input', function () { autosize(ta); scheduleSave(); });
+    let linkTimer = null;
+    ta.addEventListener('input', function () { autosize(ta); scheduleSave(); clearTimeout(linkTimer); linkTimer = setTimeout(renderLinks, 300); });
 
     const foot = el('div', 'qn-modal-foot');
     foot.appendChild(makeToolbar({
@@ -295,6 +330,7 @@
     });
     document.body.appendChild(overlay);
     autosize(ta);
+    renderLinks();
     setTimeout(function () { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 0);
   }
 
