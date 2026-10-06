@@ -214,7 +214,7 @@
     container.innerHTML = '';
     const page = el('div', 'boards-inner');
     const head = el('div', 'boards-head');
-    head.appendChild(el('div', 'boards-title', ic('kanban') + '<span>看板</span>'));
+    head.appendChild(el('div', 'boards-title', ic('kanban') + '<span>trello</span>'));
     head.appendChild(el('div', 'boards-sub', '像 Trello 一樣的列表與卡片。點一個看板打開，或建立新的。'));
     page.appendChild(head);
     const grid = el('div', 'boards-grid');

@@ -44,8 +44,8 @@
     // 跟區域頁倒是有分）。圖示跟「新增 → 關聯分析」、側邊欄用的是同一個。
     if (n.meta && n.meta.relMap) return { icon: 'network', label: '關聯分析', cls: 'kind-relmap' };
     if (n.meta && n.meta.drawio) return { icon: 'shapes', label: 'drawio', cls: 'kind-drawio' };
-    if (n.meta && n.meta.board) return { icon: 'kanban', label: '看板', cls: 'kind-board' };
-    if (n.meta && n.meta.startpage) return { icon: 'layout-grid', label: '起始頁', cls: 'kind-start' };
+    if (n.meta && n.meta.board) return { icon: 'kanban', label: 'trello', cls: 'kind-board' };
+    if (n.meta && n.meta.startpage) return { icon: 'layout-grid', label: 'start.me', cls: 'kind-start' };
     if (n.meta && n.meta.doc) return { icon: 'file-pen', label: '文件', cls: 'kind-doc' };
     return { icon: 'file-text', label: '', cls: '' };
   }

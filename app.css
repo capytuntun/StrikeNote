@@ -4406,7 +4406,7 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 .qn-pin-corner.on { color: var(--kp-text); }
 .qn-pin-corner .ic-svg { width: 18px; height: 18px; }
 .qn-title { padding: 12px 44px 0 16px; font-size: 16px; font-weight: 500; line-height: 1.5; word-break: break-word; }
-.qn-body { padding: 12px 16px; font-size: 14px; line-height: 1.5; word-break: break-word; max-height: 360px; overflow: hidden; color: var(--kp-text); }
+.qn-body { padding: 12px 16px; font-size: 14px; line-height: 1.5; word-break: break-word; max-height: 360px; overflow-y: auto; scrollbar-width: thin; color: var(--kp-text); }
 .qn-pin-corner + .qn-body { padding-right: 44px; }
 .qn-title + .qn-body { padding-top: 4px; }
 .qn-body:empty::before { content: '空白的隨筆'; color: var(--kp-text-2); font-style: italic; }
@@ -4857,6 +4857,7 @@ select.kb-input { cursor: pointer; }
 
 @media (max-width: 900px) {
   #app.sidebar-open .boards-page { padding-left: 16px; }
+  #app.sidebar-open .sp-page { padding-left: 0; }
   .boards-page { padding: 14px 16px 30vh; }
   .kb-m-body { flex-direction: column; }
   .kb-m-side { flex: 0 0 auto; }
@@ -4866,7 +4867,8 @@ select.kb-input { cursor: pointer; }
 /* ---------- 起始頁（js/startpage.js）：照 start.me 的樣子 ----------
    #start-wrap > #start-page.sp-page：最上面一列（分頁、搜尋框、頁面選單），底下幾欄小工具。
    淺色底色上是白色小工具卡；深色底色（slate／navy／black）時整頁加 .is-dark，卡片換深色。 */
-.sp-page { min-height: 100%; padding: 0 0 40vh; background: #eef1f5; color: #172b4d; }
+.sp-page { min-height: 100%; padding: 0 0 40vh; background: #eef1f5; color: #172b4d; transition: padding-left .2s cubic-bezier(.2, .7, .2, 1); }
+#app.sidebar-open .sp-page { padding-left: var(--sidebar-w); }
 .sp-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
 .sp-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; flex: 0 1 auto; }
 .sp-tab {

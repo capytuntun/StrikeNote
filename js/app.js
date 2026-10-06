@@ -233,7 +233,7 @@
     treeEl.innerHTML = '';
     // 在某個區域裡：樹的最上面標出這是哪個區域的內容，免得跟「所有筆記」的樹搞混
     if (treeArea) {
-      const info = treeArea === 'quick' ? { title: '隨筆', icon: 'pin' } : treeArea === 'board' ? { title: '看板', icon: 'kanban' } : treeArea === 'start' ? { title: '起始頁', icon: 'layout-grid' } : AREA_INFO[treeArea];
+      const info = treeArea === 'quick' ? { title: '隨筆', icon: 'pin' } : treeArea === 'board' ? { title: 'trello', icon: 'kanban' } : treeArea === 'start' ? { title: 'start.me', icon: 'layout-grid' } : AREA_INFO[treeArea];
       const head = document.createElement('div');
       head.className = 'tree-section tree-area-head';
       head.innerHTML = Icons.svg(info.icon) + '<span>' + MD.escapeHtml(info.title) + '</span>';
@@ -1197,7 +1197,7 @@
     startWrapEl.hidden = false;
     startWrapEl.scrollTop = 0;
     setNavActive('start-open-btn', true);
-    setSidebarOpen(false);   // 起始頁要整個寬度（像 start.me）
+    autoOpenSidebar();   // 使用者要抽屜留著；只有打開某個 trello 看板或文件才收
     setHash('start');
     setTreeArea('start');
     renderStart();
@@ -1217,6 +1217,7 @@
     leaveOtherViews();
     closeAreaViews();
     docWrapEl.hidden = false;
+    setSidebarOpen(false);   // 使用者要的：點開文件就收起左邊
     docNoteId = note.id;
     setTreeArea(isMine(note) ? (note.area || null) : null);
     LS.set('lastNote', note.id);
@@ -5212,7 +5213,8 @@
       // 只有 ☰、Esc 或開啟筆記才會收
       if (!emptyEl.hidden || (trashWrapEl && !trashWrapEl.hidden) || (filesWrapEl && !filesWrapEl.hidden) ||
         (courseWrapEl && !courseWrapEl.hidden) || (knowledgeWrapEl && !knowledgeWrapEl.hidden) ||
-        (quickWrapEl && !quickWrapEl.hidden) || (novelWrapEl && !novelWrapEl.hidden)) return;
+        (quickWrapEl && !quickWrapEl.hidden) || (novelWrapEl && !novelWrapEl.hidden) ||
+        (boardsWrapEl && !boardsWrapEl.hidden) || (startWrapEl && !startWrapEl.hidden)) return;
       const main = $('#main'), top = $('#topbar');
       if ((main && main.contains(e.target)) || (top && top.contains(e.target))) setSidebarOpen(false);
     });
