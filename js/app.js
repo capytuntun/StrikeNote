@@ -859,6 +859,10 @@
       notes: areaNotes(area), folders: areaFolders(area),
       onOpen: openNote,
       onTag: function (tag) { browseTag(tag); },
+      // 電子書區住在知識區（從首頁搬過來）：列出所有 is_book 的資料夾，不限區域；磚的章數用全站算
+      books: area === 'knowledge' ? state.folders.filter(function (f) { return f.isBook; }) : null,
+      booksCtx: area === 'knowledge' ? { notes: state.notes, folders: state.folders, onBook: openBook, onBookRemove: unmarkBook } : null,
+      onBookUpdate: area === 'knowledge' ? updateBook : null,
       // 資料夾方框的「⋮」、筆記列的釘選／「⋯」、勾選、排序：跟首頁（dashOpts）是同一套函式，
       // 兩邊長得一樣、選單內容也一樣（showFolderMenu/showNoteMenu 自己依區域增減幾項）
       onFolderMenu: showFolderMenu, onMenu: showNoteMenu, onPin: pinNote,
@@ -4153,7 +4157,7 @@
     const r = anchor.getBoundingClientRect();
     const actions = [];
     // 電子書是首頁那一區的功能（folders.is_book 會把資料夾列進首頁的「電子書」），區域的資料夾不給
-    if (!folder.area) actions.push({ icon: 'book-open', label: '以電子書閱讀', fn: function () { openBook(folder.id); } });
+    if (!folder.area || folder.area === 'knowledge') actions.push({ icon: 'book-open', label: '以電子書閱讀', fn: function () { openBook(folder.id); } });
     actions.push({ icon: 'file-plus', label: '在此新增筆記', fn: function () { newNote(folder.id); } });
     actions.push({ icon: 'folder-plus', label: '在此新增子資料夾', fn: function () { newFolder(folder.id); } });
     actions.push({ icon: 'pencil', label: '重新命名', fn: function () { startFolderRename(folder); } });
@@ -4181,7 +4185,7 @@
   // 首頁最上層的「電子書」區（folders.is_book），直到用方塊上的 ✕ 移出。
   function pickBookFolder() {
     if (!state.folders.length) { toast('先建立一個資料夾並放入筆記，再把它做成電子書'); return; }
-    showFolderPicker('選擇要做成電子書的資料夾', { ok: '開啟', noRoot: true }).then(function (res) {
+    showFolderPicker('選擇要做成電子書的資料夾', { ok: '開啟', noRoot: true, folders: state.folders.filter(function (f) { return !f.area || f.area === 'knowledge'; }) }).then(function (res) {
       if (res && res.folderId) openBook(res.folderId);
     });
   }
@@ -4230,7 +4234,7 @@
     e.stopPropagation();
     const actions = [];
     if (type === 'folder') {
-      if (!item.area) actions.push({ icon: 'book-open', label: '以電子書閱讀', fn: function () { openBook(item.id); } });
+      if (!item.area || item.area === 'knowledge') actions.push({ icon: 'book-open', label: '以電子書閱讀', fn: function () { openBook(item.id); } });
       actions.push({ icon: 'file-plus', label: '在此新增筆記', fn: function () { newNote(item.id); } });
       actions.push({ icon: 'folder-plus', label: '在此新增子資料夾', fn: function () { newFolder(item.id); } });
       actions.push({ icon: 'pencil', label: '重新命名', fn: function () { renameFolder(item); } });

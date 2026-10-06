@@ -47,6 +47,7 @@
     kanban:            '<path d="M6 5v11"/><path d="M12 5v6"/><path d="M18 5v14"/>',
     underline:         '<path d="M6 4v6a6 6 0 0 0 12 0V4"/><line x1="4" x2="20" y1="20" y2="20"/>',
     'align-justify':   '<line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/>',
+    'align-distribute': '<line x1="3" x2="3" y1="4" y2="20"/><line x1="21" x2="21" y1="4" y2="20"/><line x1="6" x2="18" y1="8" y2="8"/><line x1="6" x2="18" y1="12" y2="12"/><line x1="6" x2="18" y1="16" y2="16"/>',
     indent:            '<polyline points="3 8 7 12 3 16"/><line x1="21" x2="11" y1="12" y2="12"/><line x1="21" x2="11" y1="6" y2="6"/><line x1="21" x2="11" y1="18" y2="18"/>',
     outdent:           '<polyline points="7 8 3 12 7 16"/><line x1="21" x2="11" y1="12" y2="12"/><line x1="21" x2="11" y1="6" y2="6"/><line x1="21" x2="11" y1="18" y2="18"/>',
     highlighter:       '<path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>',

@@ -19,8 +19,9 @@
  *     順序照卡片本身的順序左右流動；不是 CSS column-width 那種先排滿一欄再換欄。
  *
  * 顏色（meta.color）、釘選（meta.pinned，沿用既有欄位）、封存（meta.archived）都
- * 存在筆記的 meta 裡；內文仍是 Markdown，用 MD.render() 顯示——圖片是
- * `![…](img:id)`（透過 app.js 既有的上傳流程），清單是「- [ ]」。
+ * 存在筆記的 meta 裡；內文是純文字（不走 Markdown，打什麼就是什麼，見 renderPlain）——圖片是
+ * `![…](img:id)`（透過 app.js 既有的上傳流程，顯示時抽到卡片最上面），清單是「- [ ]」（編輯時是
+ * 一列一個勾選框，使用者看不到記號）。
  */
 (function (global) {
   'use strict';
@@ -170,6 +171,138 @@
   }
   function autosize(ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
 
+  // ---- 純文字：隨筆不走 Markdown，打什麼就是什麼（使用者的話：「隨筆不要走 md 要可以直接寫」）----
+  // 內文照原樣顯示：換行就是換行，# 不是標題、* 不是清單。只認三樣會變成連結的東西——網址、
+  // [[筆記]]、#標籤——還有 Keep 的勾選清單（每行一個 `- [ ]` 項目，編輯時是一列一個勾選框＋輸入框，
+  // 使用者看不到那個記號）。圖片／附件存成 `![名稱](img:id)` 這種行（伺服器靠它判斷誰看得到圖），
+  // 但顯示時抽出來放卡片最上面、編輯時放在一條可以 ✕ 掉的圖片列，不會出現在輸入框裡。
+  const MEDIA_LINE = /^(!?)\[([^\]]*)\]\((img|pdf|file):([A-Za-z0-9_][\w.-]*)\)\s*$/;
+  function splitMedia(text) {
+    const media = [], lines = [];
+    String(text || '').split('\n').forEach(function (l) {
+      const m = MEDIA_LINE.exec(l.trim());
+      if (m) media.push({ alt: m[2], kind: m[3], id: m[4], bang: m[1] === '!' }); else lines.push(l);
+    });
+    while (lines.length && !lines[0].trim()) lines.shift();
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    return { media: media, text: lines.join('\n') };
+  }
+  function joinMedia(media, text) {
+    const head = media.map(function (m) { return (m.kind === 'file' ? '' : '!') + '[' + m.alt + '](' + m.kind + ':' + m.id + ')'; }).join('\n');
+    if (!head) return text;
+    return head + '\n' + (text ? '\n' + text : '');
+  }
+  function mediaFromMarkdown(mds) {
+    return (mds || []).map(function (md) { const m = MEDIA_LINE.exec(String(md || '').trim()); return m ? { alt: m[2], kind: m[3], id: m[4] } : null; }).filter(Boolean);
+  }
+  // 一行文字裡的網址、[[筆記]]、#標籤 變成連結，其餘逐段跳脫
+  function inlineHTML(s) {
+    let out = '', i = 0, m;
+    const re = /(https?:\/\/[^\s<>()\[\]"']+)|\[\[([^\]\n]+)\]\]|(^|[\s(（「\[])#([^\s#,，。、;；:：!！?？()（）\[\]]+)/g;
+    while ((m = re.exec(s))) {
+      out += esc(s.slice(i, m.index));
+      if (m[1]) {
+        const u = m[1].replace(/[.,;:!?）」』]+$/, ''), tail = m[1].slice(u.length);
+        out += '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + esc(u) + '</a>' + esc(tail);
+      } else if (m[2]) {
+        const t = m[2].split('|')[0].trim();
+        out += '<a class="note-link" href="#" data-note-title="' + esc(t) + '">' + esc(m[2]) + '</a>';
+      } else {
+        out += esc(m[3]) + '<a class="hashtag" href="#" data-tag="' + esc(m[4]) + '">#' + esc(m[4]) + '</a>';
+      }
+      i = m.index + m[0].length;
+    }
+    return out + esc(s.slice(i));
+  }
+  function mediaHTML(media) {
+    if (!media.length) return '';
+    return '<div class="qn-media">' + media.map(function (m) {
+      if (m.kind === 'img') return '<img data-img-id="' + esc(m.id) + '" alt="' + esc(m.alt) + '">';
+      return '<a class="qn-file" href="/api/images/' + esc(m.id) + '" target="_blank" rel="noopener noreferrer">' + ic('paperclip') + '<span>' + esc(m.alt || (m.kind === 'pdf' ? 'PDF' : '附件')) + '</span></a>';
+    }).join('') + '</div>';
+  }
+  function renderPlain(text) {
+    const sp = splitMedia(text);
+    let h = mediaHTML(sp.media), k = 0;
+    const lines = sp.text ? sp.text.split('\n') : [];
+    h += '<div class="qn-text">' + lines.map(function (l) {
+      const m = TASK_RE.exec(l);
+      if (m) {
+        const done = m[2] !== ' ', t = l.replace(TASK_RE, '').replace(/^\s/, '');
+        return '<label class="qn-check' + (done ? ' is-done' : '') + '"><input type="checkbox" class="task-check" data-task="' + (k++) + '"' + (done ? ' checked' : '') + '><span>' + inlineHTML(t) + '</span></label>';
+      }
+      if (!l.trim()) return '<div class="qn-line qn-line-empty"><br></div>';
+      return '<div class="qn-line">' + inlineHTML(l) + '</div>';
+    }).join('') + '</div>';
+    return h;
+  }
+  // 清單模式：項目陣列 ↔ `- [ ] 文字` 行
+  function parseItems(text) {
+    return String(text || '').split('\n').filter(function (l) { return l.trim(); }).map(function (l) {
+      const m = TASK_RE.exec(l);
+      return { done: !!(m && m[2] !== ' '), text: m ? l.replace(TASK_RE, '').replace(/^\s/, '') : l.replace(/^\s*[-*+]\s+/, '') };
+    });
+  }
+  function itemsToText(items) { return items.map(function (it) { return '- [' + (it.done ? 'x' : ' ') + '] ' + it.text; }).join('\n'); }
+  // Keep 的清單編輯：一列一個項目（勾選框＋輸入框），Enter 新增下一個，空的按 Backspace 刪掉，
+  // 勾完的集中在下面「N 個已完成項目」
+  function makeListEditor(items, onChange) {
+    const box = el('div', 'qn-list-editor');
+    let focusItem = null;
+    function row(it) {
+      const r = el('div', 'qn-item' + (it.done ? ' is-done' : ''));
+      const cb = el('input', 'qn-item-cb'); cb.type = 'checkbox'; cb.checked = it.done;
+      cb.addEventListener('change', function () { it.done = cb.checked; onChange(); draw(); });
+      const inp = el('input', 'qn-item-text'); inp.type = 'text'; inp.value = it.text; inp.placeholder = '清單項目';
+      inp.addEventListener('input', function () { it.text = inp.value; onChange(); });
+      inp.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); const at = items.indexOf(it); const n = { done: false, text: '' }; items.splice(at + 1, 0, n); focusItem = n; onChange(); draw(); }
+        else if (e.key === 'Backspace' && !inp.value && items.length > 1) { e.preventDefault(); const at = items.indexOf(it); items.splice(at, 1); focusItem = items[Math.max(0, at - 1)]; onChange(); draw(); }
+        else if (e.key === 'Escape') { e.stopPropagation(); inp.blur(); }
+      });
+      const del = iconBtn('qn-item-del', 'x', '刪除');
+      del.addEventListener('click', function () { items.splice(items.indexOf(it), 1); onChange(); draw(); });
+      r.appendChild(cb); r.appendChild(inp); r.appendChild(del);
+      return r;
+    }
+    function draw() {
+      box.innerHTML = '';
+      const open = items.filter(function (it) { return !it.done; }), done = items.filter(function (it) { return it.done; });
+      open.forEach(function (it) { box.appendChild(row(it)); });
+      const add = el('button', 'qn-item-add', ic('plus') + '<span>清單項目</span>'); add.type = 'button';
+      add.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      add.addEventListener('click', function () { const n = { done: false, text: '' }; items.push(n); focusItem = n; onChange(); draw(); });
+      box.appendChild(add);
+      if (done.length) {
+        box.appendChild(el('div', 'qn-done-head', done.length + ' 個已完成項目'));
+        done.forEach(function (it) { box.appendChild(row(it)); });
+      }
+      if (focusItem) {
+        const all = open.concat(done), i = all.indexOf(focusItem), inputs = box.querySelectorAll('.qn-item-text');
+        if (inputs[i]) { inputs[i].focus(); inputs[i].setSelectionRange(inputs[i].value.length, inputs[i].value.length); }
+        focusItem = null;
+      }
+    }
+    draw();
+    box.focusLast = function () { const inputs = box.querySelectorAll('.qn-item-text'); if (inputs.length) inputs[inputs.length - 1].focus(); };
+    return box;
+  }
+  // 編輯中的圖片列：每張可以 ✕ 掉
+  function makeMediaStrip(media, onChange) {
+    const strip = el('div', 'qn-media qn-media-edit');
+    media.forEach(function (m) {
+      const w = el('span', 'qn-media-item');
+      if (m.kind === 'img') { const img = document.createElement('img'); img.setAttribute('data-img-id', m.id); img.alt = m.alt; w.appendChild(img); }
+      else w.appendChild(el('span', 'qn-file', ic('paperclip') + '<span>' + esc(m.alt || (m.kind === 'pdf' ? 'PDF' : '附件')) + '</span>'));
+      const x = iconBtn('qn-media-del', 'x', '移除');
+      x.addEventListener('click', function () { media.splice(media.indexOf(m), 1); onChange(); });
+      w.appendChild(x); strip.appendChild(w);
+    });
+    if (global.MD && MD.resolveImages) MD.resolveImages(strip);
+    strip.hidden = !media.length;
+    return strip;
+  }
+
   // ---- 一張卡片（牆上唯讀）----------------------------------------------------
   function makeCard(note, o) {
     const card = el('div', 'qn-card' + (colorOf(note) ? ' qn-c-' + colorOf(note) : ''));
@@ -177,11 +310,10 @@
 
     card.appendChild(makePin(isPinned(note), function () { o.onPatch(note, { pinned: !isPinned(note) }); }));
     if (realTitle(note)) card.appendChild(el('div', 'qn-title', esc(note.title)));
-    const body = el('div', 'qn-body markdown-body');
-    body.innerHTML = (global.MD ? MD.render(note.content || '') : esc(note.content || ''));
+    const body = el('div', 'qn-body');
+    body.innerHTML = renderPlain(note.content || '');
     // 勾選框直接可以勾（Keep 卡片上就能勾）：第 N 個框對應內文第 N 個「- [ ]」
     body.querySelectorAll('input.task-check').forEach(function (cb, k) {
-      cb.disabled = false;
       cb.addEventListener('click', function (e) {
         e.stopPropagation();
         o.onEdit(note, { content: toggleTaskLine(note.content, k) });
@@ -205,21 +337,21 @@
     }));
 
     card.addEventListener('click', function (e) {
-      // 卡片裡的連結要能點：外部網址開新分頁（markdown.js 已經加了 target=_blank，讓它走），
-      // [[wiki 連結]] 開那篇筆記，#標籤 回首頁篩選——這些在預覽裡是 app.js 接的，卡片上沒有人接
+      // 卡片裡的連結要能點：外部網址開新分頁，[[筆記]] 開那篇，#標籤 回首頁篩選
       const a = e.target.closest('a');
       if (a) {
         if (a.classList.contains('note-link')) { e.preventDefault(); if (o.onOpenNote) o.onOpenNote(a); return; }
         if (a.classList.contains('hashtag')) { e.preventDefault(); if (o.onTag) o.onTag(a.getAttribute('data-tag')); return; }
         return;   // 一般網址：瀏覽器自己開（新分頁）
       }
-      if (e.target.closest('.qn-toolbar, .qn-pin-corner, .task-check, button')) return;
+      if (e.target.closest('.qn-toolbar, .qn-pin-corner, .task-check, .qn-check, button')) return;
       openModal(note, o);
     });
     return card;
   }
 
   // ---- 點卡片：放大成對話框編輯（Keep 的開啟方式）-------------------------------
+  // 內文是純文字的輸入框（不是 Markdown）；勾選清單是一列一個項目；圖片在上面一條可以 ✕ 的列
   function openModal(note, o) {
     document.querySelectorAll('.qn-modal-overlay').forEach(function (m) { m.remove(); });
     const overlay = el('div', 'qn-modal-overlay');
@@ -229,20 +361,49 @@
     let pinned = isPinned(note);
     let pin = makePin(pinned, function () { pinned = !pinned; o.onPatch(note, { pinned: pinned }); pin.classList.toggle('on', pinned); pin.title = pinned ? '取消釘選' : '釘選'; });
     modal.appendChild(pin);
+    const mediaBox = el('div', 'qn-modal-media');
+    modal.appendChild(mediaBox);
     const title = el('input', 'qn-modal-title');
     title.type = 'text'; title.placeholder = '標題'; title.value = realTitle(note);
     modal.appendChild(title);
-    const ta = el('textarea', 'qn-modal-body');
-    ta.placeholder = '記點什麼…'; ta.value = note.content || '';
-    modal.appendChild(ta);
-    // 內文是原始 Markdown 的輸入框，連結在裡面只是字；把內文裡的網址、[[筆記]]、#標籤列在下面，點得到
+    const bodyBox = el('div', 'qn-modal-bodybox');
+    modal.appendChild(bodyBox);
+
+    const sp0 = splitMedia(note.content || '');
+    const media = sp0.media.slice();
+    let listMode = hasTasks(sp0.text);
+    let items = listMode ? parseItems(sp0.text) : null;
+    let plain = listMode ? '' : sp0.text;
+    let ta = null;
+    function bodyText() { return listMode ? itemsToText(items) : plain; }
+    function currentContent() { return joinMedia(media, bodyText()); }
+    function drawMedia() { mediaBox.innerHTML = ''; mediaBox.appendChild(makeMediaStrip(media, function () { drawMedia(); scheduleSave(); })); }
+    function drawBody(focus) {
+      bodyBox.innerHTML = '';
+      if (listMode) {
+        if (!items.length) items.push({ done: false, text: '' });
+        const ed = makeListEditor(items, function () { scheduleSave(); linksSoon(); });
+        bodyBox.appendChild(ed); ta = null;
+        if (focus) ed.focusLast();
+      } else {
+        ta = el('textarea', 'qn-modal-body');
+        ta.placeholder = '記點什麼…'; ta.value = plain;
+        ta.addEventListener('input', function () { plain = ta.value; autosize(ta); scheduleSave(); linksSoon(); });
+        bodyBox.appendChild(ta);
+        autosize(ta);
+        if (focus) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+      }
+    }
+
+    // 內文裡的網址、[[筆記]]、#標籤 列在下面，點得到
     const linksBox = el('div', 'qn-modal-links');
     modal.appendChild(linksBox);
+    let linkTimer = null;
+    function linksSoon() { clearTimeout(linkTimer); linkTimer = setTimeout(renderLinks, 300); }
     function renderLinks() {
       linksBox.innerHTML = '';
-      const text = ta.value || '';
+      const text = listMode ? items.map(function (it) { return it.text; }).join('\n') : plain;
       const seen = {};
-      const add = function (a) { linksBox.appendChild(a); };
       const urlRe = /https?:\/\/[^\s<>()\[\]"']+/g;
       let m;
       while ((m = urlRe.exec(text))) {
@@ -250,7 +411,7 @@
         if (seen[u]) continue; seen[u] = 1;
         const a = el('a', 'qn-link-chip', ic('link') + '<span>' + esc(u.replace(/^https?:\/\//, '').slice(0, 60)) + '</span>');
         a.href = u; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.title = u;
-        add(a);
+        linksBox.appendChild(a);
       }
       const wikiRe = /\[\[([^\]\n]+)\]\]/g;
       while ((m = wikiRe.exec(text))) {
@@ -259,13 +420,13 @@
         const a = el('a', 'qn-link-chip note-link', ic('file-text') + '<span>' + esc(t) + '</span>');
         a.href = '#'; a.setAttribute('data-note-title', t);
         a.addEventListener('click', function (e) { e.preventDefault(); if (o.onOpenNote) { close(); o.onOpenNote(a); } });
-        add(a);
+        linksBox.appendChild(a);
       }
       ((global.MD && MD.extractTags) ? MD.extractTags(text) : []).forEach(function (t) {
         const a = el('a', 'qn-link-chip hashtag', '<span>#' + esc(t) + '</span>');
         a.href = '#'; a.setAttribute('data-tag', t);
         a.addEventListener('click', function (e) { e.preventDefault(); if (o.onTag) { close(); o.onTag(t); } });
-        add(a);
+        linksBox.appendChild(a);
       });
       linksBox.hidden = !linksBox.children.length;
     }
@@ -276,7 +437,8 @@
     function fields() {
       const f = {};
       if (title.value !== realTitle(note)) f.title = title.value;
-      if (ta.value !== (note.content || '')) f.content = ta.value;
+      const c = currentContent();
+      if (c !== (note.content || '')) f.content = c;
       return f;
     }
     function flush() {
@@ -294,8 +456,6 @@
       o.onClosed && o.onClosed();
     }
     title.addEventListener('input', scheduleSave);
-    let linkTimer = null;
-    ta.addEventListener('input', function () { autosize(ta); scheduleSave(); clearTimeout(linkTimer); linkTimer = setTimeout(renderLinks, 300); });
 
     const foot = el('div', 'qn-modal-foot');
     foot.appendChild(makeToolbar({
@@ -307,12 +467,16 @@
       archived: function () { return isArchived(note); },
       toggleArchive: function () { o.onPatch(note, { archived: !isArchived(note) }); close(); },
       addMedia: o.onUpload ? function (files) {
-        o.onUpload(files).then(function (mds) { ta.value = prependMedia(ta.value, mds); autosize(ta); scheduleSave(); });
+        o.onUpload(files).then(function (mds) { mediaFromMarkdown(mds).forEach(function (m) { media.push(m); }); drawMedia(); scheduleSave(); });
       } : null,
       more: [
         { icon: 'trash', label: '刪除筆記', danger: true, fn: function () { closed = true; overlay.remove(); document.removeEventListener('keydown', onKey, true); o.onDelete(note); } },
-        { icon: 'copy', label: '建立副本', fn: function () { flush(); o.onDuplicate(Object.assign({}, note, { title: title.value, content: ta.value })); } },
-        { icon: 'list-checks', label: hasTasks(ta.value) ? '隱藏勾選框' : '顯示勾選框', fn: function () { ta.value = toggleChecklist(ta.value); autosize(ta); scheduleSave(); } }
+        { icon: 'copy', label: '建立副本', fn: function () { flush(); o.onDuplicate(Object.assign({}, note, { title: title.value, content: currentContent() })); } },
+        { icon: 'list-checks', label: listMode ? '隱藏勾選框' : '顯示勾選框', fn: function () {
+          if (listMode) { plain = items.map(function (it) { return it.text; }).join('\n'); listMode = false; }
+          else { items = parseItems(plain); listMode = true; }
+          drawBody(true); scheduleSave(); renderLinks();
+        } }
       ]
     }));
     const closeBtn = el('button', 'qn-close-btn', '關閉');
@@ -329,9 +493,10 @@
       if (e.target === overlay) { e.preventDefault(); close(); }
     });
     document.body.appendChild(overlay);
-    autosize(ta);
+    drawMedia();
+    drawBody(false);
     renderLinks();
-    setTimeout(function () { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 0);
+    setTimeout(function () { if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } else { const ed = bodyBox.firstChild; if (ed && ed.focusLast) ed.focusLast(); } }, 0);
   }
 
   // ---- 新增列：Keep 的「記點什麼…」——聚焦就展開成一張卡片 --------------------
@@ -339,12 +504,16 @@
     const box = el('div', 'qn-composer');
     let open = false;
     let color = '', pinned = false, archived = false;
+    const media = [];
+    let listMode = false, items = null, listEd = null;
 
     // 收合狀態：一行輸入 + 「新清單」「新增圖片」兩顆捷徑
+    const mediaBox = el('div', 'qn-modal-media');
     const bar = el('div', 'qn-composer-bar');
     const ta = el('textarea', 'qn-composer-input');
     ta.rows = 1; ta.placeholder = '記點什麼…';
-    bar.appendChild(ta);
+    const listBox = el('div', 'qn-composer-list'); listBox.hidden = true;
+    bar.appendChild(ta); bar.appendChild(listBox);
     const quick = el('div', 'qn-composer-quick');
     const listBtn = iconBtn('qn-tbtn', 'list-checks', '新清單');
     const imgBtn = iconBtn('qn-tbtn', 'image', '新增圖片');
@@ -356,16 +525,30 @@
     const title = el('input', 'qn-composer-title');
     title.type = 'text'; title.placeholder = '標題';
     const foot = el('div', 'qn-composer-foot');
+    function drawMedia() { mediaBox.innerHTML = ''; mediaBox.appendChild(makeMediaStrip(media, drawMedia)); }
+    function setList(on) {
+      listMode = on;
+      if (on) {
+        items = parseItems(ta.value);
+        if (!items.length) items.push({ done: false, text: '' });
+        listBox.innerHTML = ''; listEd = makeListEditor(items, function () {}); listBox.appendChild(listEd);
+        listBox.hidden = false; ta.hidden = true;
+        listEd.focusLast();
+      } else {
+        ta.value = (items || []).map(function (it) { return it.text; }).join('\n'); items = null; listEd = null;
+        listBox.hidden = true; ta.hidden = false; autosize(ta); ta.focus();
+      }
+    }
     const tools = makeToolbar({
       color: function () { return color; },
       setColor: function (k) { color = k || ''; box.className = 'qn-composer is-open' + (color ? ' qn-c-' + color : ''); },
       archived: function () { return archived; },
       toggleArchive: function () { archived = true; commit(); },   // Keep：展開中按封存＝存起來並封存
       addMedia: o.onUpload ? function (files) {
-        o.onUpload(files).then(function (mds) { expand(); ta.value = prependMedia(ta.value, mds); autosize(ta); });
+        o.onUpload(files).then(function (mds) { expand(); mediaFromMarkdown(mds).forEach(function (m) { media.push(m); }); drawMedia(); });
       } : null,
       more: [
-        { icon: 'list-checks', label: '顯示勾選框', fn: function () { ta.value = toggleChecklist(ta.value); autosize(ta); } }
+        { icon: 'list-checks', label: '顯示或隱藏勾選框', fn: function () { expand(); setList(!listMode); } }
       ]
     });
     foot.appendChild(tools);
@@ -375,7 +558,7 @@
     closeBtn.addEventListener('click', commit);
     foot.appendChild(closeBtn);
 
-    box.appendChild(pin); box.appendChild(title); box.appendChild(bar); box.appendChild(foot);
+    box.appendChild(pin); box.appendChild(mediaBox); box.appendChild(title); box.appendChild(bar); box.appendChild(foot);
 
     function expand() {
       if (open) return;
@@ -385,6 +568,8 @@
     }
     function reset() {
       open = false; color = ''; pinned = false; archived = false;
+      media.length = 0; drawMedia();
+      if (listMode) { listMode = false; items = null; listEd = null; listBox.hidden = true; listBox.innerHTML = ''; ta.hidden = false; }
       ta.value = ''; title.value = ''; autosize(ta);
       pin.classList.remove('on'); pin.title = '釘選';
       box.className = 'qn-composer';
@@ -392,7 +577,8 @@
     }
     // 關閉＝存檔（有內容才建立），空的直接收合——Keep 沒有「新增」鈕
     function commit() {
-      const content = ta.value.trim(), t = title.value.trim();
+      const body = listMode ? itemsToText(items.filter(function (it) { return it.text.trim(); })) : ta.value.trim();
+      const content = joinMedia(media, body), t = title.value.trim();
       const meta = {};
       if (color) meta.color = color;
       if (pinned) meta.pinned = true;
@@ -407,16 +593,18 @@
     }
     ta.addEventListener('focus', expand);
     title.addEventListener('focus', expand);
+    listBox.addEventListener('focusin', expand);
     ta.addEventListener('input', function () { autosize(ta); });
     ta.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') { e.preventDefault(); commit(); }
     });
     title.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') { e.preventDefault(); commit(); }
-      if (e.key === 'Enter') { e.preventDefault(); ta.focus(); }
+      if (e.key === 'Enter') { e.preventDefault(); if (listMode && listEd) listEd.focusLast(); else ta.focus(); }
     });
-    listBtn.addEventListener('click', function () { expand(); ta.value = ta.value || '- [ ] '; autosize(ta); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); });
-    imgBtn.addEventListener('click', function () { if (o.onUpload) pickFiles(function (fs) { o.onUpload(fs).then(function (mds) { expand(); ta.value = prependMedia(ta.value, mds); autosize(ta); ta.focus(); }); }); });
+    listBtn.addEventListener('click', function () { expand(); if (!listMode) setList(true); else if (listEd) listEd.focusLast(); });
+    imgBtn.addEventListener('click', function () { if (o.onUpload) pickFiles(function (fs) { o.onUpload(fs).then(function (mds) { expand(); mediaFromMarkdown(mds).forEach(function (m) { media.push(m); }); drawMedia(); ta.focus(); }); }); });
+    drawMedia();
     return box;
   }
 

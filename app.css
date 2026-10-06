@@ -4438,7 +4438,44 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 .qn-body p:last-child { margin-bottom: 0; }
 .qn-body img { border-radius: 8px 8px 0 0; }
 .qn-body .task-check { cursor: pointer; }
-.qn-body li.task-item.task-done > *:not(.task-check) { color: var(--kp-text-2); }
+/* 純文字的內文：一行一個 .qn-line；勾選清單一列一個 .qn-check */
+.qn-line { min-height: 1.5em; white-space: pre-wrap; }
+.qn-line a, .qn-item-text a { color: var(--accent); }
+.qn-check { display: flex; align-items: flex-start; gap: 8px; padding: 2px 0; cursor: pointer; }
+.qn-check input { width: 16px; height: 16px; margin: 3px 0 0; flex: 0 0 auto; accent-color: var(--kp-text-2); cursor: pointer; }
+.qn-check.is-done span { color: var(--kp-text-2); text-decoration: line-through; }
+.qn-media { display: flex; flex-wrap: wrap; gap: 4px; }
+.qn-media img { display: block; max-width: 100%; max-height: 240px; object-fit: cover; border-radius: 8px 8px 0 0; flex: 1 1 100%; }
+.qn-media .qn-file { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; margin: 8px 8px 0; border-radius: 8px; background: rgba(0, 0, 0, .06); color: var(--kp-text); font-size: 13px; text-decoration: none; }
+.qn-media .qn-file .ic-svg { width: 14px; height: 14px; }
+.qn-body .qn-media + .qn-text { padding-top: 8px; }
+/* 編輯時的圖片列：每張可以 ✕ 掉 */
+.qn-modal-media:empty { display: none; }
+.qn-media-edit { padding: 0; }
+.qn-media-edit .qn-media-item { position: relative; display: inline-block; max-width: 100%; }
+.qn-media-edit img { max-height: 200px; }
+.qn-media-del { position: absolute; right: 6px; top: 6px; width: 26px; height: 26px; border: 0; border-radius: 50%; background: rgba(0, 0, 0, .55); color: #fff; cursor: pointer; display: none; align-items: center; justify-content: center; }
+.qn-media-item:hover .qn-media-del { display: inline-flex; }
+.qn-media-del .ic-svg { width: 14px; height: 14px; }
+/* Keep 的清單編輯 */
+.qn-list-editor { padding: 6px 8px 4px; }
+.qn-item { display: flex; align-items: center; gap: 8px; padding: 2px 4px; border-radius: 6px; }
+.qn-item:hover { background: rgba(0, 0, 0, .04); }
+.qn-item-cb { width: 16px; height: 16px; flex: 0 0 auto; accent-color: var(--kp-text-2); cursor: pointer; }
+.qn-item-text { flex: 1 1 auto; min-width: 0; padding: 4px 2px; border: 0; background: transparent; color: var(--kp-text); font: inherit; font-size: 14px; outline: none; }
+.qn-item.is-done .qn-item-text { color: var(--kp-text-2); text-decoration: line-through; }
+.qn-item-del { width: 24px; height: 24px; border: 0; border-radius: 50%; background: transparent; color: var(--kp-text-2); cursor: pointer; display: none; align-items: center; justify-content: center; flex: 0 0 auto; }
+.qn-item:hover .qn-item-del { display: inline-flex; }
+.qn-item-del .ic-svg { width: 14px; height: 14px; }
+.qn-item-add { display: inline-flex; align-items: center; gap: 6px; padding: 6px 4px; border: 0; background: transparent; color: var(--kp-text-2); font: inherit; font-size: 13px; cursor: pointer; }
+.qn-item-add:hover { color: var(--kp-text); }
+.qn-item-add .ic-svg { width: 14px; height: 14px; }
+.qn-done-head { margin: 6px 4px 2px; padding-top: 6px; border-top: 1px solid rgba(0, 0, 0, .1); font-size: 12px; color: var(--kp-text-2); }
+.qn-composer-list { padding: 4px 8px 0; }
+.qn-composer-list .qn-list-editor { padding: 0; }
+:root[data-theme="dark"] .qn-item:hover { background: rgba(255, 255, 255, .06); }
+:root[data-theme="dark"] .qn-done-head { border-top-color: rgba(255, 255, 255, .15); }
+:root[data-theme="dark"] .qn-media .qn-file { background: rgba(255, 255, 255, .1); }
 /* Keep 的顏色：底色跟邊框同色（看起來沒有邊框），字色不變 */
 .qn-card.qn-c-red, .qn-composer.qn-c-red { background: var(--kp-red); border-color: var(--kp-red); }
 .qn-card.qn-c-orange, .qn-composer.qn-c-orange { background: var(--kp-orange); border-color: var(--kp-orange); }

@@ -463,6 +463,13 @@
       });
       right.appendChild(bs);
     }
+    if (curFolderId && o.onBookUpdate && (o.folders.find(function (f) { return f.id === curFolderId; }) || {}).isBook) {
+      const bb = el('button', 'btn btn-primary dash-book-btn', ic('book-open') + '<span>更新到電子書</span>');
+      bb.type = 'button';
+      bb.title = '用這個資料夾目前的內容重新打包公開分享連結，然後打開電子書';
+      bb.addEventListener('click', function () { o.onBookUpdate(curFolderId); });
+      right.appendChild(bb);
+    }
     if (o.onUploadFile) {
       const bu = el('button', 'btn', ic('upload') + '<span>上傳檔案</span>');
       bu.type = 'button';
@@ -911,6 +918,23 @@
       stickies.forEach(function (n) { wall.appendChild(makeSticky(n, o)); });
       sec0.appendChild(wall);
       frag.appendChild(sec0);
+    }
+
+    // 電子書（知識區專屬，o.books）：所有做成電子書的資料夾，不限哪個區域——首頁那一區搬過來的。
+    // 磚是首頁那一種（Dashboard.makeBookTile），章數要用全站的 notes／folders 算（o.booksCtx），
+    // 不然一般區那本在這裡會變成 0 章。
+    if (!curFolderId && o.books && global.Dashboard && Dashboard.makeBookTile) {
+      const books = o.books.slice().sort(function (a, b) { return (a.name || '').localeCompare(b.name || '', 'zh-Hant'); });
+      const secB = el('section', 'dash-section');
+      secB.appendChild(sectionHead('book-open', '電子書', books.length));
+      if (books.length) {
+        const gridB = el('div', 'dash-folder-grid');
+        books.forEach(function (f) { gridB.appendChild(Dashboard.makeBookTile(f, o.booksCtx || o)); });
+        secB.appendChild(gridB);
+      } else {
+        secB.appendChild(emptyState('book-open', '還沒有電子書。資料夾的「⋮ → 以電子書閱讀」或左側「新增 → 電子書」把一個資料夾做成電子書，它就會放在這裡。'));
+      }
+      frag.appendChild(secB);
     }
 
     if (subs.length) {

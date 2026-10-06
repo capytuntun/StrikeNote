@@ -116,7 +116,7 @@
       '<button class="gd-tb gd-color-btn" type="button" data-act="color" title="文字顏色">' + ic('type') + '<span class="gd-color-bar" style="background:#000"></span></button>' +
       '<button class="gd-tb gd-color-btn" type="button" data-act="hilite" title="螢光筆顏色">' + ic('highlighter') + '<span class="gd-color-bar" style="background:#ffff00"></span></button>' + sep() +
       tb('link', 'link', '插入連結 (Ctrl+K)') + tb('image', 'image', '插入圖片') + sep() +
-      tb('justifyLeft', 'align-left', '靠左對齊') + tb('justifyCenter', 'align-center', '置中對齊') + tb('justifyRight', 'align-right', '靠右對齊') + tb('justifyFull', 'align-justify', '左右對齊') + tb('distribute', 'align-justify', '分散對齊（最後一行也撐滿）') + sep() +
+      tb('justifyLeft', 'align-left', '靠左對齊') + tb('justifyCenter', 'align-center', '置中對齊') + tb('justifyRight', 'align-right', '靠右對齊') + tb('justifyFull', 'align-justify', '左右對齊') + tb('distribute', 'align-distribute', '分散對齊（字與字拉開撐滿整行，最後一行也是）') + sep() +
       tb('insertUnorderedList', 'list', '項目符號清單') + tb('insertOrderedList', 'list-ordered', '編號清單') + tb('outdent', 'outdent', '減少縮排') + tb('indent', 'indent', '增加縮排') + sep() +
       tb('table', 'table', '插入表格') + tb('hr', 'minus', '分隔線') + tb('removeFormat', 'eraser', '清除格式') +
       '<span class="gd-tb-sp"></span><span class="gd-count"></span><span class="gd-status" aria-live="polite"></span>' +
@@ -249,7 +249,7 @@
       restoreRange();
       const bs = blocksInSelection();
       if (!bs.length) return;
-      bs.forEach(function (b) { b.style.textAlign = 'justify'; b.style.textAlignLast = 'justify'; });
+      bs.forEach(function (b) { b.style.textAlign = 'justify'; b.style.textAlignLast = 'justify'; b.style.textJustify = 'inter-character'; });
       saveRange(); changed(); refresh();
     }
 
@@ -412,7 +412,7 @@
         else if (a === 'hr') exec('insertHorizontalRule');
         else if (a === 'removeFormat') { exec('removeFormat'); exec('formatBlock', 'p'); }
         else if (a === 'distribute') distribute();
-        else if (a.indexOf('justify') === 0) { restoreRange(); blocksInSelection().forEach(function (b) { b.style.textAlignLast = ''; }); exec(a); }
+        else if (a.indexOf('justify') === 0) { restoreRange(); blocksInSelection().forEach(function (b) { b.style.textAlignLast = ''; b.style.textJustify = ''; }); exec(a); }
         else exec(a);
       });
       styleSel.addEventListener('mousedown', saveRange);

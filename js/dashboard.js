@@ -668,9 +668,9 @@
     const subs = foldersIn(o.folders, curFolderId);
     const ns = notesIn(o.notes, curFolderId);
 
-    // 電子書：做過的電子書（is_book 的資料夾）在最上層獨立一區，跟資料夾、
-    // 未歸類筆記並列；沒有的時候也留著這一區，提示要從哪裡做一本。
-    if (!curFolderId) {
+    // 電子書區搬到知識區了（使用者要的：「首頁的電子書拿掉，放到知識區」）；這段留著給 o.showBooks，
+    // 首頁的 dashOpts 沒有開它。知識區那邊是 areabrowser.js 用 Dashboard.makeBookTile 畫同一種磚。
+    if (!curFolderId && o.showBooks) {
       const books = o.folders.filter(function (f) { return f.isBook; }).sort(function (a, b) {
         return (a.name || '').localeCompare(b.name || '', 'zh-Hant');
       });
@@ -806,6 +806,7 @@
   // currentFolder：app.js 用它決定「新增」要把東西放進哪個資料夾
   function currentFolder() { return curFolderId; }
   global.Dashboard = {
+    makeBookTile: makeBookTile,
     rowTags: rowTags,
     render: render, refresh: refresh, setTag: setTag, openFolder: navigate,
     currentFolder: currentFolder, renameFolderTile: renameFolderTile
