@@ -118,6 +118,8 @@
       const last = wantNote || LS.get('lastNote', null);
       if (location.hash === '#trash') {
         openTrash();
+      } else if (location.hash === '#files') {
+        openFiles();
       } else if (tagFromHash()) {
         const wantTag = tagFromHash();   // showEmpty 會把 hash 清掉，先記下來
         showEmpty();
@@ -1020,6 +1022,7 @@
     if (perfWrapEl) perfWrapEl.hidden = true;
     closeBookView();
     closeTrashView();
+    closeFilesView();
     closeRelMapView();
     closeDrawioView();
     closeGraphView();
@@ -1610,6 +1613,7 @@
     if (perfWrapEl) perfWrapEl.hidden = true;
     closeBookView();
     closeTrashView();
+    closeFilesView();
     closeAreaViews();
     closeRelMapView();
     closeDrawioView();
@@ -1651,6 +1655,48 @@
     trashWrapEl.hidden = true;
     setNavActive('trash-open-btn', false);
   }
+  // ---- 檔案管理頁（#files-wrap）：整頁，跟垃圾桶同一套。ImageLib.open 回傳把手，切走時 close() 拆 DOM ----
+  const filesWrapEl = $('#files-wrap');
+  let filesView = null;
+  function closeFilesView() {
+    if (filesView) { const v = filesView; filesView = null; v.close(); }
+    if (filesWrapEl) filesWrapEl.hidden = true;
+    setNavActive('images-open-btn', false);
+  }
+  function openFiles() {
+    if (!window.ImageLib || !filesWrapEl) return;
+    if (filesView && !filesWrapEl.hidden) return;   // 已經開著
+    saveNow();
+    closeStream();
+    LS.set('lastNote', '');
+    noteBar(false);
+    if (notePathEl) notePathEl.textContent = '';
+    state.currentId = null; state.current = null;
+    editorNoteId = null;
+    emptyEl.hidden = true;
+    wrapEl.hidden = true;
+    if (secWrapEl) secWrapEl.hidden = true;
+    if (perfWrapEl) perfWrapEl.hidden = true;
+    closeBookView();
+    closeTrashView();
+    closeAreaViews();
+    closeRelMapView();
+    closeDrawioView();
+    closeGraphView();
+    closeFilesView();
+    filesWrapEl.hidden = false;
+    setNavActive('images-open-btn', true);
+    autoOpenSidebar();
+    setHash('files');
+    setTreeArea(null);
+    const view = ImageLib.open({
+      container: filesWrapEl,
+      folders: state.folders,
+      onOpenNote: function (id) { openNote(id); },
+      onClose: function () { if (filesView === view) { filesView = null; showEmpty(); } }
+    });
+    filesView = view;
+  }
   function openTrash() {
     if (!window.Trash || !trashWrapEl) return;
     saveNow();
@@ -1669,6 +1715,7 @@
     closeRelMapView();
     closeDrawioView();
     closeGraphView();
+    closeFilesView();
     trashWrapEl.hidden = false;
     trashWrapEl.scrollTop = 0;
     setNavActive('trash-open-btn', true);
@@ -1815,6 +1862,7 @@
       emptyEl.hidden = true;
       closeBookView();
       closeTrashView();
+      closeFilesView();
       closeAreaViews();
       closeRelMapView();
       closeDrawioView();
@@ -4751,7 +4799,7 @@
       }
       // 首頁、垃圾桶頁跟四個獨立區域頁面預設開著抽屜：點頁面內容不收回，
       // 只有 ☰、Esc 或開啟筆記才會收
-      if (!emptyEl.hidden || (trashWrapEl && !trashWrapEl.hidden) ||
+      if (!emptyEl.hidden || (trashWrapEl && !trashWrapEl.hidden) || (filesWrapEl && !filesWrapEl.hidden) ||
         (courseWrapEl && !courseWrapEl.hidden) || (knowledgeWrapEl && !knowledgeWrapEl.hidden) ||
         (quickWrapEl && !quickWrapEl.hidden) || (novelWrapEl && !novelWrapEl.hidden)) return;
       const main = $('#main'), top = $('#topbar');
@@ -4974,6 +5022,10 @@
         if (trashWrapEl && trashWrapEl.hidden) openTrash();
         return;
       }
+      if (location.hash === '#files') {
+        if (filesWrapEl && filesWrapEl.hidden) openFiles();
+        return;
+      }
       // #course、#course/<資料夾>（知識區、小說同理）：只切畫面，不再 pushState
       const am = location.hash.match(AREA_HASH);
       if (am) {
@@ -5024,13 +5076,7 @@
 
     // 檔案管理：上傳過的圖片／PDF／其他檔案，每個用在哪些筆記、哪些沒有筆記在用
     const imagesBtn = $('#images-open-btn');
-    if (imagesBtn) imagesBtn.addEventListener('click', function () {
-      if (!window.ImageLib) return;
-      ImageLib.open({
-        folders: state.folders,
-        onOpenNote: function (id) { openNote(id); }
-      });
-    });
+    if (imagesBtn) imagesBtn.addEventListener('click', openFiles);
 
     // 四個獨立區域：課程筆記、隨筆、知識區、小說（見 openArea / openQuick）
     initAreaInfo();

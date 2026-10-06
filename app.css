@@ -4246,8 +4246,9 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 .dash-sort-btn { flex: 0 0 auto; font-size: var(--fs-sm); padding: 7px 12px; }
 .dash-sort-btn .dash-sort-mode { font-weight: 600; color: var(--text); }
 
-/* 檔案管理：標題列的上傳鈕 */
-.imglib-upload { flex: 0 0 auto; padding: 5px 10px; margin-right: 6px; font-size: var(--fs-sm); }
+/* 檔案管理：標題列的上傳鈕與新增資料夾。.btn 預設 flex:1（為了 .modal-actions 等寬），這裡要收回來，
+   不然在整頁裡「新增資料夾」會拉成整列寬 */
+.imglib-upload, .imglib-newfolder { flex: 0 0 auto; padding: 5px 10px; margin-right: 6px; font-size: var(--fs-sm); }
 
 /* ---------- 四個獨立區域：課程筆記、知識區、小說（js/areabrowser.js）用
    跟首頁一樣的 .dash-* class，不需要另外的 CSS；隨筆（js/quicknotes.js）是照著
@@ -4274,6 +4275,17 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
 }
 /* scrollbar-gutter stable：捲軸出現與否不改變內容寬，js 量牆寬才不會前後不一 */
 #quick-wrap { background: var(--kp-page); color: var(--kp-text); scrollbar-gutter: stable; }
+/* 檔案管理整頁（#files-wrap；內容是 js/imagelib.js 原本畫在對話框裡的那一套，換成 .imglib-page 的殼）。
+   跟 .dashboard／.trash-page 一樣：抽屜浮在上面，開著時自己讓出左邊。 */
+.files-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-2); }
+.imglib-page {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+  padding: 22px 32px 20px; background: var(--bg); transition: padding-left var(--dur-2, .2s) var(--ease-out, ease);
+}
+#app.sidebar-open .imglib-page { padding-left: calc(var(--sidebar-w) + 32px); }
+.imglib-page > .modal-title { margin-bottom: 14px; }
+@media (max-width: 900px) { #app.sidebar-open .imglib-page { padding-left: 16px; } .imglib-page { padding: 14px 16px 12px; } }
+
 /* 跟 .dashboard／.trash-page 同一條規則：抽屜是浮動的、不擠壓版面，這裡要自己讓出左邊
    的寬度；「記點什麼…」跟卡片牆都在剩下的寬度裡置中，抽屜開合時會跟著重新置中。 */
 .quick-page { margin: 0; padding: 20px 32px 40vh; transition: padding-left .2s cubic-bezier(.2, .7, .2, 1); }

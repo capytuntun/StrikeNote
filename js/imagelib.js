@@ -194,10 +194,12 @@
     function groupRank(n) { return n.trashed ? 3 : n.sharedBy ? 2 : n.folderId ? 1 : 0; }
 
     // ---- 外框 ----
-    const overlay = el('div', 'modal-overlay');
-    const modal = el('div', 'modal imglib-modal');
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-modal', 'true');
+    // 整頁（o.container，app.js 的 #files-wrap）：直接畫進那個容器，沒有罩一層的 overlay；
+    // 關掉是 o.onClose（回首頁）。沒給容器就照舊開成對話框（別的地方還可能這樣叫）。
+    const page = !!o.container;
+    const overlay = page ? o.container : el('div', 'modal-overlay');
+    const modal = el('div', page ? 'imglib-page' : 'modal imglib-modal');
+    if (!page) { modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true'); }
     modal.setAttribute('aria-label', '檔案管理');
 
     const head = el('div', 'modal-title');
@@ -235,7 +237,7 @@
     });
     head.appendChild(upBtn);
     // 新增資料夾：整理雲端硬碟用的，跟筆記的資料夾無關。
-    const newFolderBtn = button('btn', 'folder-plus', '新增資料夾');
+    const newFolderBtn = button('btn imglib-newfolder', 'folder-plus', '新增資料夾');
     newFolderBtn.title = '在目前位置新增一個資料夾';
     newFolderBtn.addEventListener('click', function () {
       App.prompt({ title: '新增資料夾', placeholder: '資料夾名稱', value: '新資料夾', ok: '建立' }).then(function (name) {
@@ -392,19 +394,29 @@
     modal.appendChild(body);
     modal.appendChild(foot);
     overlay.appendChild(modal);
-    document.body.appendChild(overlay);
+    if (!page) document.body.appendChild(overlay);
 
-    function dismiss() {
+    let gone = false;
+    function teardown() {
+      if (gone) return;
+      gone = true;
       document.removeEventListener('keydown', onKey, true);
       closeFolderMenu();
       closeMovePop();
-      overlay.remove();
+      if (page) { if (modal.parentNode === overlay) overlay.removeChild(modal); }
+      else overlay.remove();
+    }
+    // 使用者自己關（×、Esc）：整頁時交給 app.js 回首頁；app.js 切到別的畫面時只拆 DOM（close）
+    function dismiss() {
+      if (gone) return;
+      teardown();
+      if (page && o.onClose) o.onClose();
     }
     // 掛在 capture 階段：App.confirm 的確認框也是在 capture 聽 Esc，而且它先關掉自己，
     // 掛在 bubble 的話同一個 Esc 接著會輪到這裡，把圖片管理也一起關掉。
     function onKey(e) {
       const layers = document.querySelectorAll('.modal-overlay');
-      if (layers[layers.length - 1] !== overlay) return;   // 確認框疊在上面，按鍵是它的
+      if (page ? layers.length > 0 : layers[layers.length - 1] !== overlay) return;   // 確認框疊在上面，按鍵是它的
       if (!pop.hidden) {
         if (e.key === 'Escape') { e.preventDefault(); closeNotePop(true); return; }
         if (!pop.contains(e.target)) return;
@@ -445,7 +457,8 @@
       cards.get(next).focus();
     }
     close.addEventListener('click', dismiss);
-    overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) dismiss(); });
+    if (page) { close.title = '回首頁（Esc）'; close.innerHTML = icon('x'); }
+    if (!page) overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) dismiss(); });
     modal.addEventListener('mousedown', function (e) {
       if (!pop.hidden && !notesel.contains(e.target)) closeNotePop(false);
     });
@@ -1283,6 +1296,7 @@
 
     load();
     setTimeout(function () { input.focus(); }, 30);
+    return { close: teardown, dismiss: dismiss };
   }
 
   global.ImageLib = { open: open };
