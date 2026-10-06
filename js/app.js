@@ -1261,6 +1261,9 @@
       container: docWrapEl,
       readOnly: readOnly,
       banner: readOnly ? '唯讀 — 由 ' + (note.sharedBy || '其他使用者') + ' 分享給你' : '',
+      margins: (note.meta && note.meta.docMargins) || null,
+      // 尺規上拖出來的左右邊界：存在 meta（bookkeeping，不動 rev）
+      onMargins: function (m) { setLocal({ meta: Object.assign({}, live().meta, { docMargins: m }) }).catch(function () {}); },
       onChange: function (html) { return setLocal({ content: html }); },
       // 圖片走跟編輯器同一條上傳路（uploadFiles），回來的是 Markdown 參照，這裡只要 id 與名稱
       onUpload: function (files) {

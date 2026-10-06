@@ -23,7 +23,16 @@
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function ic(name) { return (global.Icons && Icons.svg) ? Icons.svg(name) : ''; }
 
-  const FONTS = ['Arial', 'Times New Roman', 'Georgia', 'Verdana', 'Courier New', 'Noto Sans TC', 'Microsoft JhengHei'];
+  // 字型：v 是寫進 style 的 font-family，label 給人看。標楷體在 Windows 是 DFKai-SB，macOS 是 BiauKai，
+  // 都沒有時退到 serif（至少看得出是楷體那一類）
+  const FONTS = [
+    { v: 'Arial', label: 'Arial' }, { v: 'Times New Roman', label: 'Times New Roman' }, { v: 'Georgia', label: 'Georgia' },
+    { v: 'Verdana', label: 'Verdana' }, { v: 'Courier New', label: 'Courier New' },
+    { v: 'Noto Sans TC', label: 'Noto Sans TC' }, { v: 'Microsoft JhengHei', label: '微軟正黑體' },
+    { v: 'DFKai-SB, BiauKai, 標楷體, serif', label: '標楷體' }, { v: 'PMingLiU, 新細明體, serif', label: '新細明體' }
+  ];
+  const CM = 96 / 2.54;   // 一公分幾個像素（CSS 的 1in = 96px）
+  const PAPER_W = 816, MARGIN_DEF = 96;
   const SIZES = [8, 9, 10, 11, 12, 14, 18, 24, 30, 36];
   const STYLES = [['p', '一般文字'], ['h1', '標題 1'], ['h2', '標題 2'], ['h3', '標題 3'], ['h4', '標題 4'], ['blockquote', '引言']];
   // Google 文件調色盤的前兩排＋一排常用色
@@ -99,7 +108,7 @@
       '<div class="gd-toolbar">' +
       tb('undo', 'undo', '復原 (Ctrl+Z)') + tb('redo', 'redo', '重做 (Ctrl+Y)') + sep() +
       '<select class="gd-sel gd-sel-style" data-sel="style" title="樣式">' + STYLES.map(function (s) { return '<option value="' + s[0] + '">' + s[1] + '</option>'; }).join('') + '</select>' + sep() +
-      '<select class="gd-sel gd-sel-font" data-sel="font" title="字型">' + FONTS.map(function (f) { return '<option value="' + esc(f) + '" style="font-family:' + esc(f) + '">' + esc(f) + '</option>'; }).join('') + '</select>' + sep() +
+      '<select class="gd-sel gd-sel-font" data-sel="font" title="字型">' + FONTS.map(function (f) { return '<option value="' + esc(f.v) + '" style="font-family:' + esc(f.v) + '">' + esc(f.label) + '</option>'; }).join('') + '</select>' + sep() +
       '<button class="gd-tb gd-size-btn" type="button" data-act="size-" title="縮小字級">' + ic('minus') + '</button>' +
       '<input class="gd-size" type="text" inputmode="numeric" value="11" title="字級（pt）" aria-label="字級">' +
       '<button class="gd-tb gd-size-btn" type="button" data-act="size+" title="放大字級">' + ic('plus') + '</button>' + sep() +
@@ -107,12 +116,15 @@
       '<button class="gd-tb gd-color-btn" type="button" data-act="color" title="文字顏色">' + ic('type') + '<span class="gd-color-bar" style="background:#000"></span></button>' +
       '<button class="gd-tb gd-color-btn" type="button" data-act="hilite" title="螢光筆顏色">' + ic('highlighter') + '<span class="gd-color-bar" style="background:#ffff00"></span></button>' + sep() +
       tb('link', 'link', '插入連結 (Ctrl+K)') + tb('image', 'image', '插入圖片') + sep() +
-      tb('justifyLeft', 'align-left', '靠左對齊') + tb('justifyCenter', 'align-center', '置中對齊') + tb('justifyRight', 'align-right', '靠右對齊') + tb('justifyFull', 'align-justify', '左右對齊') + sep() +
+      tb('justifyLeft', 'align-left', '靠左對齊') + tb('justifyCenter', 'align-center', '置中對齊') + tb('justifyRight', 'align-right', '靠右對齊') + tb('justifyFull', 'align-justify', '左右對齊') + tb('distribute', 'align-justify', '分散對齊（最後一行也撐滿）') + sep() +
       tb('insertUnorderedList', 'list', '項目符號清單') + tb('insertOrderedList', 'list-ordered', '編號清單') + tb('outdent', 'outdent', '減少縮排') + tb('indent', 'indent', '增加縮排') + sep() +
       tb('table', 'table', '插入表格') + tb('hr', 'minus', '分隔線') + tb('removeFormat', 'eraser', '清除格式') +
       '<span class="gd-tb-sp"></span><span class="gd-count"></span><span class="gd-status" aria-live="polite"></span>' +
       '</div>') +
-      '<div class="gd-scroll"><div class="gd-paper markdown-body"' + (ro ? '' : ' contenteditable="true" spellcheck="true"') + '></div></div>';
+      '<div class="gd-scroll">' + (ro ? '' : '<div class="gd-ruler" aria-hidden="true"><div class="gd-ruler-in"><div class="gd-ruler-shade gd-ruler-shade-l"></div><div class="gd-ruler-shade gd-ruler-shade-r"></div><div class="gd-ruler-scale"></div>' +
+      '<div class="gd-rm gd-rm-margin-l" data-rm="ml" title="左邊界"></div><div class="gd-rm gd-rm-margin-r" data-rm="mr" title="右邊界"></div>' +
+      '<div class="gd-rm gd-rm-first" data-rm="first" title="首行縮排"></div><div class="gd-rm gd-rm-indent" data-rm="indent" title="左縮排"></div></div></div>') +
+      '<div class="gd-paper markdown-body"' + (ro ? '' : ' contenteditable="true" spellcheck="true"') + '></div></div>';
     function tb(act, icon, title) { return '<button class="gd-tb" type="button" data-act="' + act + '" title="' + title + '">' + ic(icon) + '</button>'; }
     function sep() { return '<span class="gd-tb-sep"></span>'; }
 
@@ -124,6 +136,14 @@
     const styleSel = host.querySelector('[data-sel="style"]');
     const fontSel = host.querySelector('[data-sel="font"]');
     paper.innerHTML = toLive(content) || '<p><br></p>';
+    // 邊界（meta.docMargins，px）：紙的左右 padding；尺規上的兩個灰色邊界標記拖它
+    let margins = Object.assign({ l: MARGIN_DEF, r: MARGIN_DEF }, opts.margins || {});
+    function applyMargins() {
+      margins.l = Math.max(24, Math.min(PAPER_W / 2 - 60, Math.round(margins.l)));
+      margins.r = Math.max(24, Math.min(PAPER_W / 2 - 60, Math.round(margins.r)));
+      paper.style.paddingLeft = margins.l + 'px'; paper.style.paddingRight = margins.r + 'px';
+      drawRuler();
+    }
     try { document.execCommand('defaultParagraphSeparator', false, 'p'); document.execCommand('styleWithCSS', false, true); } catch (e) { /* */ }
 
     function setStatus(t, cls) { if (statusEl) { statusEl.textContent = t || ''; statusEl.className = 'gd-status' + (cls ? ' ' + cls : ''); } }
@@ -200,20 +220,174 @@
       const t = b.tagName.toLowerCase();
       return STYLES.some(function (x) { return x[0] === t; }) ? t : 'p';
     }
+    // 選取範圍碰到的區塊元素（段落、標題、清單項目…）：對齊、縮排都是作用在它們上
+    function blockOf1(n) {
+      if (!n) return null;
+      if (n.nodeType === 3) n = n.parentNode;
+      const b = n.closest ? n.closest('h1,h2,h3,h4,h5,h6,blockquote,p,div,li,pre,td,th') : null;
+      return b && b !== paper && paper.contains(b) ? b : null;
+    }
+    function blocksInSelection() {
+      const s = window.getSelection();
+      if (!s || !s.rangeCount || !paper.contains(s.anchorNode)) return [];
+      const r = s.getRangeAt(0);
+      const a = blockOf1(r.startContainer), z = blockOf1(r.endContainer);
+      if (!a) return [];
+      if (a === z || !z) return [a];
+      const out = [];
+      const all = paper.querySelectorAll('h1,h2,h3,h4,h5,h6,blockquote,p,div,li,pre,td,th');
+      let on = false;
+      for (let i = 0; i < all.length; i++) {
+        if (all[i] === a) on = true;
+        if (on && r.intersectsNode(all[i]) && !all[i].querySelector('p,li,h1,h2,h3,h4,h5,h6')) out.push(all[i]);
+        if (all[i] === z) break;
+      }
+      return out.length ? out : [a];
+    }
+    // 分散對齊：Google 文件的「分散對齊」是連最後一行也撐滿（text-align-last），跟左右對齊不同
+    function distribute() {
+      restoreRange();
+      const bs = blocksInSelection();
+      if (!bs.length) return;
+      bs.forEach(function (b) { b.style.textAlign = 'justify'; b.style.textAlignLast = 'justify'; });
+      saveRange(); changed(); refresh();
+    }
+
+    // ---- 尺規：公分刻度、左右邊界（紙的 padding）、目前段落的左縮排與首行縮排 ----
+    let rulerListeners = null;
+    const ruler = host.querySelector('.gd-ruler'), rulerIn = host.querySelector('.gd-ruler-in');
+    function drawRuler() {
+      if (!rulerIn) return;
+      const scale = rulerIn.querySelector('.gd-ruler-scale');
+      if (!scale.children.length) {
+        // 刻度從左邊界的 0 往兩邊數；左邊界會動，所以刻度用 transform 整排平移
+        let h = '';
+        for (let cm = -6; cm <= 30; cm++) {
+          for (let q = 0; q < 2; q++) {
+            const x = (cm + q / 2) * CM;
+            h += '<i class="gd-tick' + (q ? ' is-half' : ' is-cm') + '" style="left:' + x.toFixed(1) + 'px">' + (q ? '' : '<b>' + Math.abs(cm) + '</b>') + '</i>';
+          }
+        }
+        scale.innerHTML = h;
+      }
+      scale.style.transform = 'translateX(' + margins.l + 'px)';
+      rulerIn.querySelector('.gd-ruler-shade-l').style.width = margins.l + 'px';
+      rulerIn.querySelector('.gd-ruler-shade-r').style.width = margins.r + 'px';
+      rulerIn.querySelector('[data-rm="ml"]').style.left = margins.l + 'px';
+      rulerIn.querySelector('[data-rm="mr"]').style.left = (PAPER_W - margins.r) + 'px';
+      // 段落縮排：看游標所在的那一個區塊
+      const bs = blocksInSelection();
+      const b = bs[0];
+      const ml = b ? (parseFloat(b.style.marginLeft) || 0) : 0, ti = b ? (parseFloat(b.style.textIndent) || 0) : 0;
+      rulerIn.querySelector('[data-rm="indent"]').style.left = (margins.l + ml) + 'px';
+      rulerIn.querySelector('[data-rm="first"]').style.left = (margins.l + ml + ti) + 'px';
+    }
+    if (ruler) {
+      let rdrag = null;
+      ruler.addEventListener('mousedown', function (e) {
+        const m = e.target.closest('[data-rm]');
+        if (!m) return;
+        e.preventDefault();
+        const rect = rulerIn.getBoundingClientRect();
+        const bs = blocksInSelection();
+        rdrag = { kind: m.getAttribute('data-rm'), x0: e.clientX, rect: rect, m0: Object.assign({}, margins), blocks: bs,
+          ml0: bs[0] ? (parseFloat(bs[0].style.marginLeft) || 0) : 0, ti0: bs[0] ? (parseFloat(bs[0].style.textIndent) || 0) : 0 };
+        ruler.classList.add('is-dragging');
+      });
+      const onRulerMove = function (e) {
+        if (!rdrag) return;
+        const dx = e.clientX - rdrag.x0;
+        if (rdrag.kind === 'ml') { margins.l = rdrag.m0.l + dx; applyMargins(); }
+        else if (rdrag.kind === 'mr') { margins.r = rdrag.m0.r - dx; applyMargins(); }
+        else if (rdrag.kind === 'indent') {
+          const v = Math.max(0, Math.min(PAPER_W - margins.l - margins.r - 40, rdrag.ml0 + dx));
+          rdrag.blocks.forEach(function (b) { b.style.marginLeft = Math.round(v) + 'px'; });
+          drawRuler();
+        } else if (rdrag.kind === 'first') {
+          const v = Math.max(-rdrag.ml0, Math.min(PAPER_W / 2, rdrag.ti0 + dx));
+          rdrag.blocks.forEach(function (b) { b.style.textIndent = Math.round(v) + 'px'; });
+          drawRuler();
+        }
+      };
+      const onRulerUp = function () {
+        if (!rdrag) return;
+        const k = rdrag.kind; rdrag = null;
+        ruler.classList.remove('is-dragging');
+        if (k === 'ml' || k === 'mr') { if (opts.onMargins) opts.onMargins({ l: margins.l, r: margins.r }); }
+        else changed();
+      };
+      document.addEventListener('mousemove', onRulerMove);
+      document.addEventListener('mouseup', onRulerUp);
+      rulerListeners = function () { document.removeEventListener('mousemove', onRulerMove); document.removeEventListener('mouseup', onRulerUp); };
+    }
+
+    // ---- 表格：拖格線改欄寬（Google 文件的做法：游標靠近直的格線變成 ↔，拖了只動相鄰兩欄） ----
+    let colHit = null, colDrag = null;
+    function cellAt(e) {
+      const td = e.target.closest ? e.target.closest('td,th') : null;
+      if (!td || !paper.contains(td)) return null;
+      const r = td.getBoundingClientRect();
+      const row = td.parentNode;
+      let idx = Array.prototype.indexOf.call(row.children, td);
+      // 格線是兩格共用的：游標落在這格的右緣，或下一格的左緣（border-collapse 下那 1px 常常算在右邊那格）
+      if (Math.abs(e.clientX - r.right) <= 5) { if (idx >= row.children.length - 1) return null; }   // 最右邊那條是表格外框，不動
+      else if (Math.abs(e.clientX - r.left) <= 5 && idx > 0) idx -= 1;
+      else return null;
+      return { table: td.closest('table'), idx: idx };
+    }
+    paper.addEventListener('mousemove', function (e) {
+      if (ro || colDrag) return;
+      colHit = cellAt(e);
+      paper.classList.toggle('is-colresize', !!colHit);
+    });
+    paper.addEventListener('mousedown', function (e) {
+      if (ro || !colHit || e.button !== 0) return;
+      e.preventDefault();
+      const t = colHit.table, first = t.rows[0];
+      const widths = Array.prototype.map.call(first.children, function (c) { return c.getBoundingClientRect().width; });
+      colDrag = { table: t, idx: colHit.idx, x0: e.clientX, widths: widths };
+      t.style.tableLayout = 'fixed';
+      t.style.width = Math.round(widths.reduce(function (a, b) { return a + b; }, 0)) + 'px';
+      Array.prototype.forEach.call(first.children, function (c, i) { c.style.width = Math.round(widths[i]) + 'px'; });
+      paper.classList.add('is-colresize');
+    });
+    const onColMove = function (e) {
+      if (!colDrag) return;
+      const d = e.clientX - colDrag.x0, i = colDrag.idx, w = colDrag.widths;
+      const a = Math.max(24, Math.min(w[i] + w[i + 1] - 24, w[i] + d)), b = w[i] + w[i + 1] - a;
+      const first = colDrag.table.rows[0];
+      first.children[i].style.width = Math.round(a) + 'px';
+      first.children[i + 1].style.width = Math.round(b) + 'px';
+    };
+    const onColUp = function () {
+      if (!colDrag) return;
+      colDrag = null; colHit = null;
+      paper.classList.remove('is-colresize');
+      changed();
+    };
+    document.addEventListener('mousemove', onColMove);
+    document.addEventListener('mouseup', onColUp);
+
     function refresh() {
       if (!toolbar) return;
+      const cur = blocksInSelection()[0];
+      const dist = !!(cur && cur.style.textAlignLast === 'justify');
       ['bold', 'italic', 'underline', 'strikeThrough', 'justifyLeft', 'justifyCenter', 'justifyRight', 'justifyFull', 'insertUnorderedList', 'insertOrderedList'].forEach(function (c) {
         const b = toolbar.querySelector('[data-act="' + c + '"]');
         let on = false;
         try { on = document.queryCommandState(c); } catch (e) { on = false; }
+        if (c === 'justifyFull' && dist) on = false;
         if (b) b.classList.toggle('on', !!on);
       });
+      const db = toolbar.querySelector('[data-act="distribute"]');
+      if (db) db.classList.toggle('on', dist);
+      drawRuler();
       if (styleSel) styleSel.value = blockOf();
       if (fontSel) {
         let f = '';
         try { f = (document.queryCommandValue('fontName') || '').replace(/^["']|["']$/g, '').split(',')[0].trim(); } catch (e) { f = ''; }
-        const hit = FONTS.find(function (x) { return x.toLowerCase() === f.toLowerCase(); });
-        fontSel.value = hit || FONTS[0];
+        const hit = FONTS.find(function (x) { return x.v.split(',')[0].trim().toLowerCase() === f.toLowerCase(); });
+        fontSel.value = hit ? hit.v : FONTS[0].v;
       }
       if (sizeEl && document.activeElement !== sizeEl) sizeEl.value = String(currentSizePt());
       count();
@@ -237,6 +411,8 @@
         else if (a === 'table') tablePop(b);
         else if (a === 'hr') exec('insertHorizontalRule');
         else if (a === 'removeFormat') { exec('removeFormat'); exec('formatBlock', 'p'); }
+        else if (a === 'distribute') distribute();
+        else if (a.indexOf('justify') === 0) { restoreRange(); blocksInSelection().forEach(function (b) { b.style.textAlignLast = ''; }); exec(a); }
         else exec(a);
       });
       styleSel.addEventListener('mousedown', saveRange);
@@ -393,12 +569,16 @@
       clearTimeout(saveTimer);
       closePop();
       document.removeEventListener('selectionchange', onSel);
+      document.removeEventListener('mousemove', onColMove);
+      document.removeEventListener('mouseup', onColUp);
+      if (rulerListeners) rulerListeners();
       host.innerHTML = ''; host.classList.remove('gd-page');
     }
     function close() { if (closed) return; emit(); closed = true; teardown(); if (opts.onClose) opts.onClose(); }
     function discard() { if (closed) return; closed = true; dirty = false; teardown(); }
     function setContent(html) { paper.innerHTML = toLive(html) || '<p><br></p>'; dirty = false; setStatus('已儲存', 'is-ok'); count(); }
 
+    applyMargins();
     count(); refresh();
     if (content) setStatus('已儲存', 'is-ok');
     setTimeout(function () { if (!closed && !ro) paper.focus(); }, 30);

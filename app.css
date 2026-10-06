@@ -5068,6 +5068,24 @@ select.kb-input { cursor: pointer; }
 .gd-status.is-ok { color: var(--success); }
 .gd-status.is-err { color: var(--danger); font-weight: 600; }
 .gd-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 16px 40vh; }
+/* 尺規（Google 文件紙上面那條）：跟紙一樣寬、置中；刻度是公分，0 在左邊界 */
+.gd-ruler { position: sticky; top: -16px; z-index: 3; width: 816px; max-width: 100%; height: 22px; margin: -4px auto 6px; }
+.gd-ruler-in { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--bg); border: 1px solid var(--border); box-sizing: border-box; }
+.gd-ruler-shade { position: absolute; top: 0; bottom: 0; background: var(--bg-3); }
+.gd-ruler-shade-l { left: 0; }
+.gd-ruler-shade-r { right: 0; }
+.gd-ruler-scale { position: absolute; left: 0; top: 0; bottom: 0; width: 1px; }
+.gd-tick { position: absolute; bottom: 0; width: 1px; height: 4px; background: var(--text-faint); }
+.gd-tick.is-cm { height: 6px; }
+.gd-tick b { position: absolute; bottom: 7px; left: -8px; width: 16px; text-align: center; font-size: 9px; font-weight: 400; color: var(--text-dim); font-style: normal; }
+.gd-rm { position: absolute; z-index: 2; cursor: ew-resize; }
+.gd-rm-margin-l, .gd-rm-margin-r { top: 0; bottom: 0; width: 7px; margin-left: -3px; }
+.gd-rm-margin-l::after, .gd-rm-margin-r::after { content: ''; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px; background: var(--accent); opacity: .55; }
+.gd-rm-indent, .gd-rm-first { width: 0; height: 0; margin-left: -5px; border-left: 5px solid transparent; border-right: 5px solid transparent; }
+.gd-rm-indent { bottom: 1px; border-bottom: 7px solid var(--accent); }
+.gd-rm-first { top: 1px; border-top: 7px solid var(--accent); }
+.gd-rm:hover, .gd-ruler.is-dragging .gd-rm { filter: brightness(1.2); }
+.gd-paper.is-colresize, .gd-paper.is-colresize td, .gd-paper.is-colresize th { cursor: col-resize; }
 /* 側邊欄的抽屜是浮在上面的：開著時工具列與紙要讓出左邊（跟 .dashboard 同一條規則） */
 #app.sidebar-open .gd-toolbar { margin-left: calc(var(--sidebar-w) + 16px); }
 #app.sidebar-open .gd-scroll { padding-left: calc(var(--sidebar-w) + 16px); }
@@ -5115,5 +5133,5 @@ select.kb-input { cursor: pointer; }
   #app.sidebar-open .gd-scroll { padding-left: 8px; }
   .gd-scroll { padding: 8px 8px 30vh; }
   .gd-paper { padding: 32px 24px; min-height: 60vh; }
-  .gd-sel-font, .gd-count { display: none; }
+  .gd-sel-font, .gd-count, .gd-ruler { display: none; }
 }
