@@ -605,6 +605,8 @@
       // ```drawio 是自己做的繪圖工具（js/drawio.js）：圍欄裡是圖的 DSL（一行一個圖形或連線），
       // SVG 每次都重新畫，跟關聯分析、心智圖同一個做法。要編輯是打開那篇 meta.drawio 的筆記。
       if (info === 'drawio' && global.DrawIO) return DrawIO.blockHTML(code);
+      // ```board 是看板（js/board.js）：圍欄裡是看板的 JSON，畫成靜態的列表與卡片（預覽、PDF、電子書）
+      if (info === 'board' && global.Board) return Board.blockHTML(code);
       let requested = info, lineNumbers = false, startLine = 1;
       const opt = info.match(/^([^\s=]*)=(\d*)$/);
       if (opt) {

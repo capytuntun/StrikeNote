@@ -44,6 +44,8 @@
     shapes:            '<path d="M12 3l5 8H7z"/><rect x="3" y="14" width="7" height="7"/><circle cx="17.5" cy="17.5" r="3.5"/>',
     maximize:          '<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/>',
     clock:             '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    kanban:            '<path d="M6 5v11"/><path d="M12 5v6"/><path d="M18 5v14"/>',
+    archive:           '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
     'alert-triangle':  '<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/>',
     info:              '<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 12v5"/>',
     hash:              '<path d="M4 9h16M4 15h16M10 3l-2 18M16 3l-2 18"/>',

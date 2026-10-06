@@ -506,6 +506,20 @@ async function main() {
       r = await call(admin, 'POST', '/api/notes/' + novelNote + '/links', { html: page });
       ok(r.status === 400 || r.status === 404, 'a novel note can never have a public link', r.status);
     }
+    // 看板（js/board.js）是 area 'board' 的筆記：建得起來、列表帶著 area、垃圾桶認得它的 kind
+    r = await call(admin, 'POST', '/api/notes', { title: '看板一', content: '```board\n{"bg":"blue","labels":[],"lists":[]}\n```\n', area: 'board', meta: { board: true } });
+    ok(r.status === 200 && r.data.note && r.data.note.area === 'board', 'a board note is created in area board', r.status);
+    const boardNote = r.data.note && r.data.note.id;
+    if (boardNote) {
+      r = await call(admin, 'GET', '/api/notes');
+      ok(r.data.notes.some(n => n.id === boardNote && n.area === 'board'), 'the listing carries area board');
+      r = await call(admin, 'PUT', '/api/notes/' + boardNote + '/area', { area: null });
+      ok(r.status === 400, 'a board cannot be moved out of its area', r.status);
+      await call(admin, 'DELETE', '/api/notes/' + boardNote);
+      r = await call(admin, 'GET', '/api/trash');
+      ok(r.data.notes.some(n => n.id === boardNote && n.kind === 'board'), 'the trash lists it as kind board');
+      await call(admin, 'POST', '/api/notes/' + boardNote + '/restore');
+    }
 
     // 垃圾桶：連結跟著筆記的狀態
     r = await call(admin, 'DELETE', '/api/notes/' + pub);
