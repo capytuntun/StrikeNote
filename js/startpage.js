@@ -36,9 +36,14 @@
   const BG = [
     { key: 'grey', hex: '#eef1f5' }, { key: 'white', hex: '#ffffff' }, { key: 'blue', hex: '#dbe8f5' },
     { key: 'green', hex: '#dff0e3' }, { key: 'sand', hex: '#f3ecdc' }, { key: 'rose', hex: '#f5e1e6' },
-    { key: 'slate', hex: '#2b3440' }, { key: 'navy', hex: '#1c2b45' }, { key: 'black', hex: '#15171b' }
+    { key: 'slate', hex: '#2b3440' }, { key: 'navy', hex: '#1c2b45' }, { key: 'black', hex: '#15171b' },
+    // 漸層：hex 欄位是整個 CSS background 的值
+    { key: 'g-dawn', hex: 'linear-gradient(160deg, #fdf2f8 0%, #e0f2fe 100%)' },
+    { key: 'g-mint', hex: 'linear-gradient(160deg, #ecfdf5 0%, #e0e7ff 100%)' },
+    { key: 'g-dusk', hex: 'linear-gradient(160deg, #1e293b 0%, #4c1d95 100%)' },
+    { key: 'g-deep', hex: 'linear-gradient(160deg, #0f172a 0%, #164e63 100%)' }
   ];
-  const DARK_BG = ['slate', 'navy', 'black'];
+  const DARK_BG = ['slate', 'navy', 'black', 'g-dusk', 'g-deep'];
   const ENGINES = {
     google: { name: 'Google', url: 'https://www.google.com/search?q=' },
     bing: { name: 'Bing', url: 'https://www.bing.com/search?q=' },

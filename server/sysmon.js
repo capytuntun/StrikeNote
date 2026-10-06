@@ -11,8 +11,24 @@ const fs = require('fs');
 
 const SAMPLE_MS = 5000;
 const HISTORY = 120;          // 10 分鐘
-const history = [];           // [{ t, cpu, mem }] cpu/mem 是 0..100
+const history = [];           // [{ t, cpu, mem, rd, wr }] cpu/mem 是 0..100，rd/wr 是 bytes/s（讀不到就沒有）
 let lastTimes = null, lastProc = null, lastProcAt = 0, procCpu = 0;
+let lastDisk = null, diskIo = null;   // diskIo = { read, write } bytes/s，Linux 以外是 null
+
+// 磁碟讀寫：/proc/diskstats 每顆整顆硬碟（sda、nvme0n1、mmcblk0…，不算分割區，不然會重複算）
+// 的累計扇區數，一個扇區 512 bytes，兩次相減除以時間就是速度。沒有這個檔（Windows、macOS）就是 null。
+const DISK_RE = /^(sd[a-z]+|vd[a-z]+|xvd[a-z]+|nvme\d+n\d+|mmcblk\d+|hd[a-z]+)$/;
+function diskTotals() {
+  try {
+    let rd = 0, wr = 0, any = false;
+    fs.readFileSync('/proc/diskstats', 'utf8').split('\n').forEach(function (line) {
+      const f = line.trim().split(/\s+/);
+      if (f.length < 14 || !DISK_RE.test(f[2])) return;
+      rd += parseInt(f[5], 10) * 512; wr += parseInt(f[9], 10) * 512; any = true;
+    });
+    return any ? { rd: rd, wr: wr } : null;
+  } catch (e) { return null; }
+}
 let timer = null;
 
 function cpuTimes() {
@@ -39,8 +55,16 @@ function sample() {
   }
   lastProc = pu; lastProcAt = at;
   const mem = (1 - os.freemem() / os.totalmem()) * 100;
+  const disk = diskTotals();
+  if (disk && lastDisk && at > lastDisk.at) {
+    const dt = (at - lastDisk.at) / 1000;
+    diskIo = { read: Math.max(0, Math.round((disk.rd - lastDisk.rd) / dt)), write: Math.max(0, Math.round((disk.wr - lastDisk.wr) / dt)) };
+  }
+  if (disk) lastDisk = { rd: disk.rd, wr: disk.wr, at: at };
   if (cpu != null) {
-    history.push({ t: at, cpu: Math.round(cpu * 10) / 10, mem: Math.round(mem * 10) / 10 });
+    const pt = { t: at, cpu: Math.round(cpu * 10) / 10, mem: Math.round(mem * 10) / 10 };
+    if (diskIo) { pt.rd = diskIo.read; pt.wr = diskIo.write; }
+    history.push(pt);
     if (history.length > HISTORY) history.shift();
   }
 }
@@ -85,6 +109,7 @@ function snapshot(extra) {
       load: os.loadavg(), temp: temperature() },
     cpu: last ? last.cpu : null,
     mem: memInfo(),
+    io: diskIo,   // { read, write } bytes/s；Linux 以外 null
     history: history,
     proc: { pid: process.pid, node: process.version, uptime: process.uptime(), cpu: Math.round(procCpu * 10) / 10,
       rss: pm.rss, heapUsed: pm.heapUsed, heapTotal: pm.heapTotal, external: pm.external }

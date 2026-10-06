@@ -42,7 +42,14 @@
   const BG = [
     { key: 'blue', hex: '#0079bf' }, { key: 'orange', hex: '#d29034' }, { key: 'green', hex: '#519839' },
     { key: 'red', hex: '#b04632' }, { key: 'purple', hex: '#89609e' }, { key: 'pink', hex: '#cd5a91' },
-    { key: 'lime', hex: '#4bbf6b' }, { key: 'sky', hex: '#00aecc' }, { key: 'grey', hex: '#838c91' }
+    { key: 'lime', hex: '#4bbf6b' }, { key: 'sky', hex: '#00aecc' }, { key: 'grey', hex: '#838c91' },
+    // 漸層（Trello 也有一排漸層底色）：hex 欄位其實是整個 CSS background 的值
+    { key: 'g-ocean', hex: 'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)' },
+    { key: 'g-night', hex: 'linear-gradient(135deg, #1e3a8a 0%, #6d28d9 100%)' },
+    { key: 'g-sunset', hex: 'linear-gradient(135deg, #f97316 0%, #db2777 100%)' },
+    { key: 'g-forest', hex: 'linear-gradient(135deg, #059669 0%, #0ea5e9 100%)' },
+    { key: 'g-berry', hex: 'linear-gradient(135deg, #7c3aed 0%, #ec4899 100%)' },
+    { key: 'g-slate', hex: 'linear-gradient(135deg, #475569 0%, #0f172a 100%)' }
   ];
   const LABEL_COLORS = [
     { key: 'green', hex: '#61bd4f' }, { key: 'yellow', hex: '#f2d600' }, { key: 'orange', hex: '#ff9f1a' },

@@ -416,6 +416,18 @@
         ? gauge('磁碟', diskPct, diskPct.toFixed(0) + '%', '已用 ' + fmtBytes(diskUsed) + ' / ' + fmtBytes(st.disk.total) + '<br>剩餘 ' + fmtBytes(st.disk.free) +
             (st.low ? '' : ' · 門檻 ' + fmtBytes(st.thresholds.bytes) + ' 或 ' + st.thresholds.pct + '%'), st.low ? 'sys-disk is-hot' : 'sys-disk')
         : '<div class="sys-card"><div class="sys-card-head"><span class="sys-card-l">磁碟</span><span class="sys-card-n">—</span></div><div class="sys-card-sub">這個平台讀不到磁碟容量</div></div>') +
+      // 磁碟讀寫速度：走勢線的高度照這十分鐘裡最快的那一刻算（沒有固定的 100%）
+      (s.io
+        ? (function () {
+            const pts = (s.history || []).filter(function (q) { return q.rd != null; });
+            const peak = Math.max(1, pts.reduce(function (m, q) { return Math.max(m, q.rd + q.wr); }, 0));
+            const series = pts.map(function (q) { return { io: (q.rd + q.wr) / peak * 100 }; });
+            const now = s.io.read + s.io.write;
+            return gauge('磁碟讀寫', now / peak * 100, fmtBytes(now) + '/s',
+              '讀 ' + fmtBytes(s.io.read) + '/s · 寫 ' + fmtBytes(s.io.write) + '/s<br>最近十分鐘最快 ' + fmtBytes(peak) + '/s',
+              'sys-io', sparkline(series, 'io', 'sys-spark-io'));
+          })()
+        : '<div class="sys-card"><div class="sys-card-head"><span class="sys-card-l">磁碟讀寫</span><span class="sys-card-n">—</span></div><div class="sys-card-sub">這個平台讀不到磁碟讀寫速度（只有 Linux 的 /proc/diskstats 有）</div></div>') +
       (host.temp != null
         ? gauge('溫度', host.temp / 85 * 100, host.temp.toFixed(1) + ' °C', host.temp >= 80 ? '太熱了，檢查散熱' : host.temp >= 65 ? '偏熱' : '正常', 'sys-temp' + (host.temp >= 80 ? ' is-hot' : host.temp >= 65 ? ' is-warm' : ''))
         : '') +
