@@ -431,7 +431,7 @@
       laid.forEach(function (x) {
         const s = x.inst.start < day ? day : x.inst.start, e = x.inst.end > dayEnd ? dayEnd : x.inst.end;
         const top = (s.getHours() * 60 + s.getMinutes()) / 60 * HOUR_H, hgt = Math.max(18, (e - s) / 3600000 * HOUR_H - 2);
-        h += '<div class="tt-wev" data-id="' + esc(x.inst.ev.id) + '" data-cal="' + esc(x.inst.calId) + '" data-key="' + x.inst.key + '" style="top:' + top + 'px;height:' + hgt + 'px;left:calc(' + (x.col / x.n * 100) + '% + 1px);width:calc(' + (100 / x.n) + '% - 3px);--c:' + colorOf(x.inst.cal, x.inst.ev) + '"><span class="tt-wev-t">' + fmtTime(x.inst.start) + ' – ' + fmtTime(x.inst.end) + '</span><span class="tt-wev-title">' + esc(x.inst.ev.title || '（無標題）') + '</span><span class="tt-wev-rs"></span></div>';
+        h += '<div class="tt-wev' + (hgt < 36 ? ' is-short' : '') + '" data-id="' + esc(x.inst.ev.id) + '" data-cal="' + esc(x.inst.calId) + '" data-key="' + x.inst.key + '" style="top:' + top + 'px;height:' + hgt + 'px;left:calc(' + (x.col / x.n * 100) + '% + 1px);width:calc(' + (100 / x.n) + '% - 3px);--c:' + colorOf(x.inst.cal, x.inst.ev) + '"><span class="tt-wev-title">' + esc(x.inst.ev.title || '（無標題）') + '</span><span class="tt-wev-t">' + fmtTime(x.inst.start) + ' – ' + fmtTime(x.inst.end) + '</span><span class="tt-wev-rs"></span></div>';
       });
       if (isToday(day)) { const now = new Date(); h += '<div class="tt-now" style="top:' + ((now.getHours() * 60 + now.getMinutes()) / 60 * HOUR_H) + 'px"></div>'; }
       h += '</div>';
@@ -452,10 +452,9 @@
   function bind() {
     host.addEventListener('click', onClick);
     host.addEventListener('contextmenu', function (e) { const bar = e.target.closest('[data-id][data-cal]'); if (bar) { e.preventDefault(); eventMenu(bar, e.clientX, e.clientY); } });
-    const search = host.querySelector('.tt-search input');
     let st = null;
-    search.addEventListener('input', function () { clearTimeout(st); st = setTimeout(function () { S.search = search.value; renderView(); renderDayPanel(); }, 200); });
-    search.addEventListener('keydown', function (e) { e.stopPropagation(); if (e.key === 'Escape') { search.value = ''; S.search = ''; renderView(); } });
+    host.addEventListener('input', function (e) { const search = e.target.closest('.tt-search input'); if (!search) return; clearTimeout(st); st = setTimeout(function () { S.search = search.value; renderView(); renderDayPanel(); }, 200); });
+    host.addEventListener('keydown', function (e) { const search = e.target.closest('.tt-search input'); if (!search) return; e.stopPropagation(); if (e.key === 'Escape') { search.value = ''; S.search = ''; renderView(); } });
     host.addEventListener('change', function (e) { const v = e.target.closest('[data-vis]'); if (v) { const id = v.getAttribute('data-vis'); if (v.checked) delete S.hidden[id]; else S.hidden[id] = 1; lsSet('ttHidden', JSON.stringify(S.hidden)); render(host, O); } });
     host.addEventListener('mousedown', onDown);
     host.addEventListener('dblclick', function (e) {
@@ -781,7 +780,7 @@
     if (!bar || !host.contains(bar)) return;
     const x = instFromEl(bar); if (!x || x.hit.c.ro) return;
     const resize = !!e.target.closest('.tt-wev-rs');
-    S.dragging = { bar: bar, x: x, sx: e.clientX, sy: e.clientY, moved: false, resize: resize, ghost: null };
+    S.dragging = { bar: bar, x: x, sx: e.clientX, sy: e.clientY, moved: false, resize: resize, ghost: null, grabY: e.clientY - bar.getBoundingClientRect().top };
     const move = function (ev2) {
       const d = S.dragging; if (!d) return;
       if (!d.moved && Math.abs(ev2.clientX - d.sx) + Math.abs(ev2.clientY - d.sy) < 5) return;
@@ -805,7 +804,8 @@
       let newStart, newEnd;
       if (cell.classList.contains('tt-time-col')) {
         const r = cell.getBoundingClientRect();
-        const mins = Math.max(0, Math.min(24 * 60 - 15, Math.round(((ev2.clientY - r.top) / HOUR_H * 60) / 15) * 15));
+        const yy = d.resize ? ev2.clientY : ev2.clientY - (bar.classList.contains('tt-wev') ? d.grabY : 0);
+        const mins = Math.max(0, Math.min(24 * 60 - 15, Math.round(((yy - r.top) / HOUR_H * 60) / 15) * 15));
         const t = parseLocal(key); t.setHours(Math.floor(mins / 60), mins % 60);
         if (d.resize) { if (inst.allDay) return; newStart = inst.start; newEnd = t > newStart ? t : new Date(newStart.getTime() + 15 * 60000); }
         else if (inst.allDay) { newStart = t; newEnd = new Date(t.getTime() + 3600000); }
