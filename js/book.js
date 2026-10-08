@@ -361,6 +361,8 @@
   function renderForExport(work, note, where) {
     work.innerHTML = MD.render(note.content || '');
     if (note.meta) MD.applyColWidths(work, note.meta.tableWidths);
+    // 影片播放器也打包不進去：換成一行連結
+    if (MD.replaceVideosForExport) MD.replaceVideosForExport(work, where);
     // 附件 PDF 無法打包進單檔：換成一行說明
     work.querySelectorAll('.pdf-embed').forEach(function (n) {
       const name = (n.querySelector('.pdf-embed-name') || {}).textContent || 'PDF';

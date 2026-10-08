@@ -439,6 +439,8 @@
     head.appendChild(main);
 
     const right = el('div', 'dash-head-right');
+    // 資料夾方格／清單：跟首頁同一顆（Dashboard.viewToggle，記在 localStorage）
+    if (global.Dashboard && Dashboard.viewToggle) right.appendChild(Dashboard.viewToggle(function () { if (lastOpts) render(lastOpts, true); }));
     // 排序：跟首頁同一顆（排序方式本身也是同一套，側邊欄、首頁、這裡一起變）
     if (o.onSortMenu && global.Sorting) {
       const s = el('button', 'btn dash-sort-btn', ic('arrow-up-down') + '<span>排序：</span>' +
@@ -931,7 +933,7 @@
       const secB = el('section', 'dash-section');
       secB.appendChild(sectionHead('book-open', '電子書', books.length));
       if (books.length) {
-        const gridB = el('div', 'dash-folder-grid');
+        const gridB = (global.Dashboard && Dashboard.folderGrid ? Dashboard.folderGrid() : el('div', 'dash-folder-grid'));
         books.forEach(function (f) { gridB.appendChild(Dashboard.makeBookTile(f, o.booksCtx || o)); });
         secB.appendChild(gridB);
       } else {
@@ -943,7 +945,7 @@
     if (subs.length) {
       const sec = el('section', 'dash-section');
       sec.appendChild(sectionHead('folder', '資料夾', subs.length));
-      const grid = el('div', 'dash-folder-grid');
+      const grid = (global.Dashboard && Dashboard.folderGrid ? Dashboard.folderGrid() : el('div', 'dash-folder-grid'));
       subs.forEach(function (f) { grid.appendChild(makeFolderTile(f, o)); });
       sec.appendChild(grid);
       frag.appendChild(sec);

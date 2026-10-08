@@ -766,6 +766,8 @@
       function (b) { b.disabled = true; });
     // An inline [toc] would only duplicate the TOC page (which also has page numbers).
     Array.prototype.forEach.call(clone.querySelectorAll('.md-toc'), function (n) { n.remove(); });
+    // 影片在紙上播不了：換成一行連結
+    if (MD.replaceVideosForExport) MD.replaceVideosForExport(clone, 'PDF');
     return MD.inlineImagesAsDataURL(clone).then(function () {
       // pull the cover logo out of the body and onto the cover page
       let logoSrc = null;

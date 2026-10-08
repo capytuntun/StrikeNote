@@ -228,6 +228,7 @@
     head.appendChild(main);
 
     const right = el('div', 'dash-head-right');
+    right.appendChild(viewToggle(function () { paint(); }));
     if (o.onSortMenu) {
       const s = el('button', 'btn dash-sort-btn', ic('arrow-up-down') + '<span>排序：</span>' +
         '<span class="dash-sort-mode">' + esc(Sorting.info().short) + '</span>');
@@ -680,7 +681,7 @@
       const sec = el('section', 'dash-section');
       sec.appendChild(sectionHead('book-open', '電子書', books.length));
       if (books.length) {
-        const grid = el('div', 'dash-folder-grid');
+        const grid = folderGrid();
         books.forEach(function (f) { grid.appendChild(makeBookTile(f, o)); });
         sec.appendChild(grid);
       } else {
@@ -692,7 +693,7 @@
     if (subs.length) {
       const sec = el('section', 'dash-section');
       sec.appendChild(sectionHead('folder', '資料夾', subs.length));
-      const grid = el('div', 'dash-folder-grid');
+      const grid = folderGrid();
       subs.forEach(function (f) { grid.appendChild(makeFolderTile(f, o)); });
       sec.appendChild(grid);
       frag.appendChild(sec);
@@ -759,6 +760,23 @@
   }
 
 
+  // ---- 資料夾的顯示方式：方格（預設）或清單（像筆記一樣一列一列、由上到下）。首頁與區域頁共用，記在
+  // localStorage folderView；切換只是把 .is-list 放到 .dash-folder-grid 上，方框的 DOM 不變，CSS 排成列。----
+  function folderView() { try { return localStorage.getItem('folderView') === 'list' ? 'list' : 'grid'; } catch (e) { return 'grid'; } }
+  function setFolderView(v) { try { localStorage.setItem('folderView', v === 'list' ? 'list' : 'grid'); } catch (e) { /* */ } }
+  function folderGrid() { return el('div', 'dash-folder-grid' + (folderView() === 'list' ? ' is-list' : '')); }
+  function viewToggle(onChange) {
+    const box = el('div', 'dash-viewtoggle');
+    box.setAttribute('role', 'group'); box.setAttribute('aria-label', '資料夾顯示方式');
+    [['grid', 'layout-grid', '方格'], ['list', 'list', '清單（由上到下）']].forEach(function (v) {
+      const b = el('button', 'dash-view-btn' + (folderView() === v[0] ? ' on' : ''), ic(v[1]));
+      b.type = 'button'; b.title = '資料夾顯示成' + v[2]; b.setAttribute('data-view', v[0]); b.setAttribute('aria-pressed', folderView() === v[0] ? 'true' : 'false');
+      b.addEventListener('click', function (e) { e.stopPropagation(); if (folderView() === v[0]) return; setFolderView(v[0]); if (onChange) onChange(v[0]); });
+      box.appendChild(b);
+    });
+    return box;
+  }
+
   // ---- 資料夾顏色：每個資料夾一個（用 id 雜湊），首頁與區域頁的方框都用 ----
   const FOLDER_COLORS = ['#d9962a', '#2f6bf0', '#17934f', '#8e44ad', '#e0564b', '#128a80', '#c9701c', '#5b7fa6'];
   function folderColor(id) { let h = 0; const s = String(id || ''); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return FOLDER_COLORS[h % FOLDER_COLORS.length]; }
@@ -824,7 +842,7 @@
   function currentFolder() { return curFolderId; }
   global.Dashboard = {
     makeBookTile: makeBookTile,
-    rowTags: rowTags, freshen: freshen, folderColor: folderColor,
+    rowTags: rowTags, freshen: freshen, folderColor: folderColor, folderGrid: folderGrid, viewToggle: viewToggle, folderView: folderView,
     render: render, refresh: refresh, setTag: setTag, openFolder: navigate,
     currentFolder: currentFolder, renameFolderTile: renameFolderTile
   };

@@ -53,9 +53,11 @@ const CSP = [
   "script-src 'self'",
   "connect-src 'self'",
   "object-src 'none'",
-  // Allow embedding same-origin PDFs (/api/images/:id) in an <iframe>; still blocks
-  // any cross-origin framing, in either direction.
-  "frame-src 'self'",
+  // Allow embedding same-origin PDFs (/api/images/:id) in an <iframe>, plus the two
+  // video hosts js/markdown.js's videoEmbed() rebuilds URLs for (YouTube's no-cookie
+  // player and Google Drive's file preview). Nothing else may be framed, and the
+  // sanitizer never lets a raw iframe src through, so these are the only frames possible.
+  "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://drive.google.com",
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'self'"

@@ -5727,3 +5727,33 @@ select.kb-input { cursor: pointer; }
 .lightbox-img { display: block; flex: 0 0 auto; max-width: none; margin: auto; box-shadow: 0 12px 40px rgba(0, 0, 0, .5); cursor: zoom-in; animation: modal-pop var(--dur-3) var(--ease-out); user-select: none; }
 .lightbox:not(.is-fit) .lightbox-img { cursor: zoom-out; }
 .markdown-body img[data-img-id] { cursor: zoom-in; }
+
+/* ---------- 影片嵌入（YouTube／Google Drive，markdown.js videoEmbed）：16:9 滿版的播放器 ---------- */
+.markdown-body .video-embed { margin: 0 0 14px; }
+.markdown-body iframe.video-frame { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; background: #000; box-shadow: var(--shadow-sm); }
+.markdown-body .video-embed.is-gdrive iframe.video-frame { background: #202124; }
+.markdown-body .video-note { font-size: .9em; color: var(--text-dim); }
+.sync-hit iframe.video-frame { box-shadow: 0 3px 0 0 var(--accent); }
+/* 預覽（#preview）的字全部小 1px（使用者：「預覽的所有文字大小都減 1 個 font」）：內文 18→17，標題用 em 跟著縮；
+   程式碼區塊、連結卡、附件籤片本來各自是固定 px，也各減 1。電子書與 PDF 不動。 */
+#preview.markdown-body { font-size: calc(var(--fs-lg) - 1px); }
+#preview .code-block { font-size: calc(var(--fs-md) - 1px); }
+#preview .link-card-title, #preview .file-chip-name { font-size: calc(var(--fs-base) - 1px); }
+#preview .link-card-url, #preview .link-card-desc { font-size: calc(var(--fs-xs) - 1px); }
+#preview .file-chip-type { font-size: calc(var(--fs-micro) - 1px); }
+
+/* ---------- 資料夾顯示方式：方格 ↔ 清單（Dashboard.viewToggle，.dash-folder-grid.is-list） ----------
+   清單模式只動 CSS：同一個 .dash-folder-tile 排成一列（圖示、名稱、數量靠右、⋯），像筆記列一樣由上到下。 */
+.dash-viewtoggle { display: inline-flex; flex: 0 0 auto; border: 1px solid var(--border-strong); background: var(--bg); }
+.dash-view-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 0; background: transparent; color: var(--text-dim); cursor: pointer; transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
+.dash-view-btn + .dash-view-btn { border-left: 1px solid var(--border-strong); }
+.dash-view-btn:hover { background: var(--row-hover); color: var(--text); }
+.dash-view-btn.on { background: var(--accent-weak); color: var(--accent); }
+.dash-view-btn .ic-svg { width: 15px; height: 15px; }
+.dash-folder-grid.is-list { display: flex; flex-direction: column; gap: 4px; }
+.dash-folder-grid.is-list .dash-folder-tile { flex-direction: row; align-items: center; gap: 12px; min-height: 0; padding: 8px 12px; }
+.dash-folder-grid.is-list .dash-folder-tile::after { display: none; }
+.dash-folder-grid.is-list .dash-folder-head { flex: 0 1 auto; min-width: 0; padding-right: 0; }
+.dash-folder-grid.is-list .dash-folder-meta { margin: 0 0 0 auto; padding: 0; white-space: nowrap; }
+.dash-folder-grid.is-list .dash-folder-acts { position: static; margin-left: 4px; }
+.dash-folder-grid.is-list .dash-folder-tile:hover { transform: translateX(2px); }

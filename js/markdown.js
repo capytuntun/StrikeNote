@@ -448,6 +448,45 @@
     }
   };
 
+  // ---- 影片嵌入：YouTube 與 Google Drive（使用者：「Google Drive、Youtube 的影片如果有嵌入，要可以在預覽裡面播放」）----
+  // 三種寫法都通：貼 YouTube／Drive「嵌入」給的 <iframe …>、HackMD 的 {%youtube ID %}／{%gdrive ID %}、
+  // 或影片網址自己一行。不管哪一種，最後進到頁面的 <iframe src> 都是這裡用 id 重新組出來的網址
+  // （youtube-nocookie.com/embed/<11 碼>、drive.google.com/file/d/<id>/preview），別人貼的原始 src 永遠不會原樣
+  // 落地——這是 CSP frame-src 之外的第二道：連同站的 src="/" 都進不來（會變成把整個 app 框進筆記裡）。
+  // 匯出（PDF、電子書、公開連結）播不了影片，換成一行連結（data-video-url 是給人看的網頁）。
+  function videoEmbed(url) {
+    const s = String(url || '').trim();
+    let m = /(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#\s]*&)?v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])/i.exec(s);
+    if (m) {
+      const t = /[?&](?:t|start)=(\d+)/.exec(s);
+      return { kind: 'youtube', src: 'https://www.youtube-nocookie.com/embed/' + m[1] + '?rel=0' + (t ? '&start=' + t[1] : ''), page: 'https://www.youtube.com/watch?v=' + m[1] + (t ? '&t=' + t[1] : '') };
+    }
+    m = /drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:[^#\s]*&)?id=)([A-Za-z0-9_-]{15,})/i.exec(s);
+    if (m) return { kind: 'gdrive', src: 'https://drive.google.com/file/d/' + m[1] + '/preview', page: 'https://drive.google.com/file/d/' + m[1] + '/view' };
+    return null;
+  }
+  function videoHTML(v) {
+    return '<div class="video-embed is-' + v.kind + '"><iframe data-video-src="' + escapeHtml(v.src) + '" data-video-url="' + escapeHtml(v.page) + '" title="' + (v.kind === 'youtube' ? 'YouTube 影片' : 'Google Drive 影片') + '"></iframe></div>\n';
+  }
+  const videoExtension = {
+    name: 'video',
+    level: 'block',
+    start: function (src) {
+      const m = src.match(/^ {0,3}(?:\{%\s*(?:youtube|gdrive|video)\s|https?:\/\/(?:www\.|m\.)?(?:youtube(?:-nocookie)?\.com|youtu\.be|drive\.google\.com)\/)/im);
+      return m ? m.index : undefined;
+    },
+    tokenizer: function (src) {
+      let m = /^ {0,3}\{%\s*youtube\s+([A-Za-z0-9_-]{11})\s*%\}[ \t]*(?:\n+|$)/i.exec(src);
+      if (m) return { type: 'video', raw: m[0], video: videoEmbed('https://www.youtube.com/watch?v=' + m[1]) };
+      m = /^ {0,3}\{%\s*gdrive\s+([A-Za-z0-9_-]{15,})\s*%\}[ \t]*(?:\n+|$)/i.exec(src);
+      if (m) return { type: 'video', raw: m[0], video: videoEmbed('https://drive.google.com/file/d/' + m[1] + '/view') };
+      m = /^ {0,3}(?:\{%\s*video\s+)?(https?:\/\/\S+?)\s*(?:%\})?[ \t]*(?:\n+|$)/i.exec(src);
+      if (m && /^ {0,3}(\{%|https?:\/\/)/.test(src)) { const v = videoEmbed(m[1]); if (v) return { type: 'video', raw: m[0], video: v }; }
+      return undefined;
+    },
+    renderer: function (token) { return videoHTML(token.video); }
+  };
+
   // Attachment link: [名稱](file:<id>) for any upload, [名稱](pdf:<id>) for a PDF
   // shown as a file rather than embedded. resolveImages() points the href at the
   // file; the server decides whether it opens (PDF) or downloads (anything else).
@@ -762,7 +801,7 @@
   // report as "the preview merged my lines".
   marked.use({
     gfm: true, breaks: true,
-    extensions: [tocExtension, riskExtension, calloutExtension, containerExtension, linkCardExtension, wikiLinkExtension, hashtagExtension],
+    extensions: [tocExtension, riskExtension, calloutExtension, containerExtension, linkCardExtension, videoExtension, wikiLinkExtension, hashtagExtension],
     renderer: renderer
   });
 
@@ -799,19 +838,49 @@
   if (global.DOMPurify) {
     DOMPurify.addHook('uponSanitizeElement', function (node, data) {
       if (data.tagName === 'iframe' && node.removeAttribute) {
+        // 例外只有一種：認得出是 YouTube／Google Drive 的影片。就算是，也不留原始 src——用 id 重組
+        // 一個我們自己的網址放在 data-video-src，下面的 afterSanitizeAttributes 再搬回 src。
+        const v = videoEmbed(node.getAttribute('src') || node.getAttribute('data-video-src') || '');
         node.removeAttribute('src');
         node.removeAttribute('srcdoc');
+        if (v) { node.setAttribute('data-video-src', v.src); node.setAttribute('data-video-url', v.page); }
+        else { node.removeAttribute('data-video-src'); node.removeAttribute('data-video-url'); }
       }
     });
     // 連到外面的網址一律開新分頁：在同一個分頁裡跟著連結走，等於把整個 app 換掉，
     // 回來還要重新載入。隨筆的卡片、預覽、電子書都是同一條渲染路，所以在這裡做一次就好。
     DOMPurify.addHook('afterSanitizeAttributes', function (node) {
+      if (node.tagName === 'IFRAME' && node.getAttribute('data-video-src')) {
+        // 屬性檢查已經過了，這裡放的值全是上面自己組的
+        node.setAttribute('src', node.getAttribute('data-video-src'));
+        node.setAttribute('class', 'video-frame');
+        node.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share');
+        node.setAttribute('allowfullscreen', '');
+        node.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+        node.setAttribute('loading', 'lazy');
+        if (!node.getAttribute('title')) node.setAttribute('title', '影片');
+        return;
+      }
       if (node.tagName !== 'A') return;
       const href = node.getAttribute('href') || '';
       if (/^(https?:)?\/\//i.test(href) || /^mailto:/i.test(href)) {
         node.setAttribute('target', '_blank');
         node.setAttribute('rel', 'noopener noreferrer');
       }
+    });
+  }
+
+  // 匯出（PDF、電子書、公開連結）播不了影片：把每個播放器換成一行連到影片網頁的字
+  function replaceVideosForExport(root, where) {
+    Array.prototype.forEach.call(root.querySelectorAll('iframe.video-frame, iframe[data-video-src]'), function (f) {
+      const url = f.getAttribute('data-video-url') || f.getAttribute('data-video-src') || '';
+      const p = document.createElement('p');
+      p.className = 'video-note';
+      const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = url;
+      p.appendChild(document.createTextNode('影片（' + (where || '匯出檔') + '中無法播放）：'));
+      p.appendChild(a);
+      const box = f.closest('.video-embed');
+      (box || f).replaceWith(p);
     });
   }
 
@@ -834,7 +903,8 @@
         'data-relmap',    // 關聯分析：原始 DSL 文字（js/relmap.js）
         'data-relmap-note', 'data-relmap-open', 'data-relmap-zoom',   // 嵌入別篇關聯分析
         'data-drawio-note', 'data-drawio-open',   // 嵌入 drawio 圖表（js/drawio.js）
-        'data-link-url', 'data-file-id', 'data-file-kind', 'rel'],   // 網址預覽卡片、附件連結
+        'data-link-url', 'data-file-id', 'data-file-kind', 'rel',   // 網址預覽卡片、附件連結
+        'data-video-src', 'data-video-url', 'title'],   // YouTube／Google Drive 影片（videoEmbed）
       ADD_TAGS: ['input', 'button', 'iframe'] // checkboxes, annotate button, PDF embed
     });
   }
@@ -1115,6 +1185,7 @@
   }
 
   global.MD = {
+    videoEmbed: videoEmbed, replaceVideosForExport: replaceVideosForExport,
     render: render,
     resolveImages: resolveImages,
     extractHeadings: extractHeadings,
