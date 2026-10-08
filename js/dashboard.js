@@ -491,6 +491,7 @@
 
     const tile = el('div', 'dash-folder-tile');
     tile.dataset.id = folder.id;
+    tile.style.setProperty('--fc', folderColor(folder.id));   // 每個資料夾自己的顏色（圖示、色條、光暈）
     tile.tabIndex = 0;
     tile.setAttribute('role', 'button');
     tile.title = '打開資料夾';
@@ -758,17 +759,115 @@
   }
 
 
+  // ---- 總覽（首頁最上層）：四張數字卡、最近 28 天的編輯長條圖、筆記種類的堆疊條 ----
+  // 使用者要的「美化、視覺化、要有動畫」：數字從 0 跑上來、長條由下往上長、進場一列一列浮起（.is-fresh）。
+  // 資料全在手上（o.allNotes 是小說以外的每一篇），純前端算，不多打 API。
+  const FOLDER_COLORS = ['#d9962a', '#2f6bf0', '#17934f', '#8e44ad', '#e0564b', '#128a80', '#c9701c', '#5b7fa6'];
+  function folderColor(id) { let h = 0; const s = String(id || ''); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return FOLDER_COLORS[h % FOLDER_COLORS.length]; }
+  const KIND_COLORS = { '筆記': '#2f6bf0', '文件': '#1a73e8', 'drawio': '#d07005', '關聯分析': '#6f4fd0', 'trello': '#0079bf', 'start.me': '#5b7fa6', 'xmind': '#c5221f', 'timetree': '#1a9a81', '資安院報告': '#17934f', '成效報告': '#128a80', '檔案': '#8a9499', '便條紙': '#d9962a', '隨筆': '#e0a458' };
+  function kindOf(n) {
+    const m = n.meta || {};
+    if (m.doc) return '文件'; if (m.drawio) return 'drawio'; if (m.relMap) return '關聯分析'; if (m.board) return 'trello'; if (m.startpage) return 'start.me';
+    if (m.xmind) return 'xmind'; if (m.timetree) return 'timetree'; if (m.secReport) return '資安院報告'; if (m.perfReport) return '成效報告'; if (m.file) return '檔案'; if (m.sticky) return '便條紙';
+    if (n.area === 'quick') return '隨筆';
+    return '筆記';
+  }
+  const reduceMotion = function () { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+  // 數字從 0 跑到 n（約 0.7 秒，先快後慢）；關掉動態時直接顯示
+  function countUp(node, n) {
+    if (reduceMotion() || n <= 0) { node.textContent = String(n); return; }
+    const t0 = performance.now(), dur = 700;
+    const step = function (t) {
+      const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+      node.textContent = String(Math.round(n * e));
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+  function dayKey(ts) { const d = new Date(ts); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+  function renderOverview(o, fresh) {
+    // 只算自己的：分享給我的筆記不是我的產出，數字和長條圖都不該算進去
+    const all = (o.allNotes || o.notes).filter(function (n) { return !n.perm || n.perm === 'owner'; });
+    const sec = el('section', 'dash-overview');
+    sec.setAttribute('aria-label', '總覽');
+    const now = Date.now(), week = now - 7 * 86400000;
+    const tagSet = {};
+    all.forEach(function (n) { ((global.MD && MD.noteTags) ? MD.noteTags(n) : []).forEach(function (t) { tagSet[t.toLowerCase()] = 1; }); });
+    const recent = all.filter(function (n) { return (n.updatedAt || 0) > week; }).length;
+    const general = all.filter(function (n) { return !n.area; }).length;
+    const cards = el('div', 'ov-cards');
+    [
+      { icon: 'file-text', n: all.length, label: '篇筆記', sub: general === all.length ? '全部在所有筆記' : general + ' 在所有筆記・' + (all.length - general) + ' 在其他區域', c: '#2f6bf0' },
+      { icon: 'folder', n: o.folders.length, label: '個資料夾', sub: o.folders.filter(function (f) { return !f.parentId; }).length + ' 個在最上層', c: '#d9962a' },
+      { icon: 'tag', n: Object.keys(tagSet).length, label: '個標籤', sub: '內文的 #標籤 加上標籤欄', c: '#8e44ad' },
+      { icon: 'clock', n: recent, label: '篇這 7 天改過', sub: recent ? '最近一次 ' + relTime(Math.max.apply(null, all.map(function (n) { return n.updatedAt || 0; }))) : '這週還沒動筆', c: '#17934f' }
+    ].forEach(function (c, i) {
+      const card = el('div', 'ov-card');
+      card.style.setProperty('--c', c.c); card.style.setProperty('--i', i);
+      card.innerHTML = '<span class="ov-ic">' + ic(c.icon) + '</span><div class="ov-body"><b class="ov-n">0</b><span class="ov-l">' + esc(c.label) + '</span><span class="ov-d">' + esc(c.sub) + '</span></div>';
+      cards.appendChild(card);
+      const numEl = card.querySelector('.ov-n');
+      if (fresh) countUp(numEl, c.n); else numEl.textContent = String(c.n);
+    });
+    sec.appendChild(cards);
+    // 最近 28 天：每天改過幾篇
+    const days = [], byDay = {};
+    for (let i = 27; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); const k = dayKey(d.getTime()); days.push({ k: k, d: d }); byDay[k] = 0; }
+    all.forEach(function (n) { const k = dayKey(n.updatedAt || 0); if (k in byDay) byDay[k]++; });
+    const max = Math.max(1, Math.max.apply(null, days.map(function (x) { return byDay[x.k]; })));
+    const act = el('div', 'ov-panel ov-activity');
+    act.style.setProperty('--i', 4);
+    act.innerHTML = '<div class="ov-panel-t">' + ic('trending-up') + '<span>最近 28 天的編輯</span><small>每天改過的筆記數</small></div><div class="ov-chart"></div><div class="ov-axis"><span>' + esc((days[0].d.getMonth() + 1) + '/' + days[0].d.getDate()) + '</span><span>' + esc((days[14].d.getMonth() + 1) + '/' + days[14].d.getDate()) + '</span><span>今天</span></div>';
+    const chart = act.querySelector('.ov-chart');
+    days.forEach(function (x, i) {
+      const bar = el('span', 'ov-bar' + (i === 27 ? ' is-today' : '') + (byDay[x.k] ? '' : ' is-zero'));
+      bar.style.setProperty('--h', Math.max(byDay[x.k] ? 8 : 3, Math.round(byDay[x.k] / max * 100)) + '%');
+      bar.style.setProperty('--i', i);
+      bar.title = (x.d.getMonth() + 1) + '/' + x.d.getDate() + '：' + byDay[x.k] + ' 篇';
+      chart.appendChild(bar);
+    });
+    sec.appendChild(act);
+    // 筆記種類
+    const counts = {};
+    all.forEach(function (n) { const k = kindOf(n); counts[k] = (counts[k] || 0) + 1; });
+    const kinds = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; });
+    const kp = el('div', 'ov-panel ov-kinds');
+    kp.style.setProperty('--i', 5);
+    kp.innerHTML = '<div class="ov-panel-t">' + ic('shapes') + '<span>筆記種類</span><small>' + kinds.length + ' 種</small></div><div class="ov-stack"></div><div class="ov-legend"></div>';
+    const stack = kp.querySelector('.ov-stack'), legend = kp.querySelector('.ov-legend');
+    if (!all.length) { stack.innerHTML = '<i class="ov-seg is-empty" style="--w:100%"></i>'; legend.innerHTML = '<span class="ov-lg"><i style="background:var(--border-strong)"></i>還沒有筆記</span>'; }
+    kinds.forEach(function (k, i) {
+      const seg = el('i', 'ov-seg'); seg.style.setProperty('--w', (counts[k] / all.length * 100).toFixed(2) + '%'); seg.style.setProperty('--i', i); seg.style.background = KIND_COLORS[k] || '#8a9499'; seg.title = k + '：' + counts[k] + ' 篇';
+      stack.appendChild(seg);
+      legend.appendChild(el('span', 'ov-lg', '<i style="background:' + (KIND_COLORS[k] || '#8a9499') + '"></i>' + esc(k) + ' <b>' + counts[k] + '</b>'));
+    });
+    sec.appendChild(kp);
+    return sec;
+  }
+  // 進場：一列一列浮起。只在真正「進到這頁」時做（render），refresh 時不要重播——每個方框／列用 --i 錯開。
+  function freshen(root) {
+    if (!root) return;
+    const items = root.querySelectorAll('.ov-card, .ov-panel, .dash-folder-tile, .dash-book-tile, .dash-note-wrap, .trash-row, .ab-file-row, .ab-sticky');
+    Array.prototype.forEach.call(items, function (x, i) { if (!x.classList.contains('ov-card') && !x.classList.contains('ov-panel')) x.style.setProperty('--i', Math.min(i, 14)); });
+    root.classList.add('is-fresh');
+    clearTimeout(root._freshTimer);
+    root._freshTimer = setTimeout(function () { root.classList.remove('is-fresh'); }, 1100);
+  }
+
   // ---- 進入點 ------------------------------------------------------------
-  function paint() {
+  function paint(fresh) {
     const root = document.getElementById('dashboard');
     if (!root || !lastOpts) return;
     root.innerHTML = '';
     root.appendChild(renderHead(lastOpts));
+    // 總覽只在最上層、沒有篩選標籤時
+    if (!tagFilter && !curFolderId) root.appendChild(renderOverview(lastOpts, !!fresh));
     if (!tagFilter) {
       const cloud = renderTagCloud(lastOpts.allNotes || lastOpts.notes);
       if (cloud) root.appendChild(cloud);
     }
     root.appendChild(renderBody(lastOpts));
+    if (fresh) freshen(root);
   }
   function normalize(opts) {
     const o = opts || {};
@@ -790,7 +889,7 @@
     lastOpts = normalize(opts);
     tagFilter = null;
     curFolderId = null;
-    paint();
+    paint(true);
   }
   function refresh(opts) {
     lastOpts = normalize(Object.assign({}, lastOpts || {}, opts || {}));
@@ -809,7 +908,7 @@
   function currentFolder() { return curFolderId; }
   global.Dashboard = {
     makeBookTile: makeBookTile,
-    rowTags: rowTags,
+    rowTags: rowTags, freshen: freshen, folderColor: folderColor,
     render: render, refresh: refresh, setTag: setTag, openFolder: navigate,
     currentFolder: currentFolder, renameFolderTile: renameFolderTile
   };

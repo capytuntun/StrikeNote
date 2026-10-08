@@ -518,6 +518,7 @@
     // 刪除都在選單裡（選單本身是 app.js 的 showFolderMenu，首頁跟這裡共用同一個）。
     const tile = el('div', 'dash-folder-tile');
     tile.dataset.id = folder.id;
+    if (global.Dashboard && Dashboard.folderColor) tile.style.setProperty('--fc', Dashboard.folderColor(folder.id));
     makeDropTarget(tile, folder.id, o);
     makeFolderTileDnD(tile, folder, o);
     tile.tabIndex = 0;

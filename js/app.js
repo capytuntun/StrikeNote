@@ -1818,6 +1818,7 @@
     if (o.replaceHash) replaceHash(h);
     else if (!o.keepHash) setHash(h);
     AreaBrowser.render(info.page, areaOpts(area));
+    if (window.Dashboard && Dashboard.freshen) Dashboard.freshen(info.page);
     if (o.folderId) AreaBrowser.openFolder(o.folderId);
     setTreeArea(area);
   }
@@ -2382,6 +2383,7 @@
     autoOpenSidebar();    // 跟首頁一樣開著抽屜，點頁面內容也不會收回
     setHash('trash');
     Trash.render(trashPageEl, trashOpts());
+    if (window.Dashboard && Dashboard.freshen) Dashboard.freshen(trashPageEl);
     setTreeArea(null);
   }
 
