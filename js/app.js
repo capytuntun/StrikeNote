@@ -5935,6 +5935,65 @@
     // TOC show button (re-open a collapsed TOC)
     { const b = $('#toc-show'); if (b) b.addEventListener('click', function () { setTocCollapsed(false); }); }
     // Copy button on code blocks
+    // 預覽裡的圖片點兩下放大（使用者：「筆記的預覽，點兩下圖片要放大」）：一個 position: fixed 的燈箱，
+    // 先縮到螢幕放得下，再點一下圖切 1:1（太大就可以捲），滾輪縮放，Esc／點暗處／✕ 關掉。只是看，什麼都不寫。
+    function openLightbox(img) {
+      const src = img.currentSrc || img.src; if (!src) return;
+      const old = document.querySelector('.lightbox'); if (old) old.remove();
+      const box = document.createElement('div');
+      box.className = 'lightbox';
+      box.innerHTML = '<div class="lightbox-bar"><span class="lightbox-cap"></span><span class="lightbox-zoom"></span>' +
+        '<button type="button" class="lightbox-btn" data-lb="out" title="縮小">' + Icons.svg('minus') + '</button>' +
+        '<button type="button" class="lightbox-btn" data-lb="in" title="放大">' + Icons.svg('plus') + '</button>' +
+        '<button type="button" class="lightbox-btn" data-lb="fit" title="符合螢幕／原始大小">' + Icons.svg('maximize') + '</button>' +
+        '<button type="button" class="lightbox-btn" data-lb="open" title="在新分頁開啟">' + Icons.svg('external-link') + '</button>' +
+        '<button type="button" class="lightbox-btn" data-lb="close" title="關閉 (Esc)">' + Icons.svg('x') + '</button></div>' +
+        '<div class="lightbox-stage"><img class="lightbox-img" alt=""></div>';
+      document.body.appendChild(box);
+      const pic = box.querySelector('.lightbox-img'), stage = box.querySelector('.lightbox-stage'), zoomEl = box.querySelector('.lightbox-zoom');
+      box.querySelector('.lightbox-cap').textContent = img.getAttribute('alt') || '';
+      pic.src = src;
+      let scale = 1, fit = true;   // fit：縮到放得下；否則 scale 是相對原始大小的倍率
+      function apply() {
+        const nw = pic.naturalWidth || 1, nh = pic.naturalHeight || 1;
+        const sw = stage.clientWidth - 32, sh = stage.clientHeight - 32;
+        if (fit) scale = Math.min(1, sw / nw, sh / nh);
+        pic.style.width = Math.round(nw * scale) + 'px';
+        pic.style.height = Math.round(nh * scale) + 'px';
+        box.classList.toggle('is-fit', fit);
+        zoomEl.textContent = Math.round(scale * 100) + '%';
+      }
+      function setScale(v) { fit = false; scale = Math.max(0.1, Math.min(8, v)); apply(); }
+      function close() { box.classList.add('is-out'); document.removeEventListener('keydown', onKey, true); window.removeEventListener('resize', apply); setTimeout(function () { box.remove(); }, 160); }
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+        else if (e.key === '+' || e.key === '=') { e.preventDefault(); setScale(scale * 1.25); }
+        else if (e.key === '-') { e.preventDefault(); setScale(scale / 1.25); }
+        else if (e.key === '0') { e.preventDefault(); fit = true; apply(); }
+      }
+      pic.addEventListener('load', apply);
+      if (pic.complete) apply();
+      // 點圖：符合螢幕 ↔ 1:1（1:1 比螢幕小的圖，點了就放到 2 倍）
+      pic.addEventListener('click', function (e) { e.stopPropagation(); if (fit) { const nw = pic.naturalWidth, fitted = pic.offsetWidth; setScale(nw > fitted + 2 ? 1 : 2); } else { fit = true; apply(); } });
+      stage.addEventListener('click', function (e) { if (e.target === stage) close(); });
+      box.addEventListener('click', function (e) {
+        const b = e.target.closest('[data-lb]'); if (!b) return;
+        const a = b.getAttribute('data-lb');
+        if (a === 'close') close(); else if (a === 'in') setScale(scale * 1.25); else if (a === 'out') setScale(scale / 1.25);
+        else if (a === 'fit') { if (fit) setScale(1); else { fit = true; apply(); } }
+        else if (a === 'open') window.open(img.getAttribute('data-img-id') ? '/api/images/' + img.getAttribute('data-img-id') : src, '_blank', 'noopener');   // 預覽裡的 src 是 blob:，新分頁要用真正的網址
+      });
+      box.addEventListener('wheel', function (e) { e.preventDefault(); setScale(scale * (e.deltaY < 0 ? 1.1 : 1 / 1.1)); }, { passive: false });
+      document.addEventListener('keydown', onKey, true);
+      window.addEventListener('resize', apply);
+    }
+    previewEl.addEventListener('dblclick', function (e) {
+      const img = e.target.closest('img');
+      if (!img || img.closest('.lightbox, .img-tools, .link-card')) return;
+      e.preventDefault();
+      if (window.getSelection) { const sel = window.getSelection(); if (sel && sel.removeAllRanges) sel.removeAllRanges(); }   // 雙擊順便選到的字取消
+      openLightbox(img);
+    });
     previewEl.addEventListener('click', function (e) {
       if (!e.target.closest) return;
       // 待辦清單：預覽裡的勾選框直接改寫原始 markdown（Notion 式）

@@ -5711,3 +5711,19 @@ select.kb-input { cursor: pointer; }
 .sidebar-areas .sidebar-nav-item:hover .ic-svg, .sidebar-areas .sidebar-nav-item.is-active .ic-svg { color: var(--ac, var(--accent)); opacity: 1; }
 .sidebar-areas .sidebar-nav-item.is-active { background: color-mix(in srgb, var(--ac, var(--accent)) 12%, transparent); color: var(--text); }
 .sidebar-areas .sidebar-nav-item.is-active::before { background: var(--ac, var(--accent)); }
+
+/* ---------- 燈箱：預覽裡的圖片點兩下放大（app.js openLightbox） ----------
+   掛在 body 上所以是 position: fixed；上面一列（說明文字、倍率、縮放／符合／新分頁／關閉），下面一整塊暗底，
+   圖先縮到放得下，點一下切 1:1（大圖可以捲），滾輪縮放。 */
+.lightbox { position: fixed; inset: 0; z-index: 2500; display: flex; flex-direction: column; background: rgba(12, 14, 18, .92); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); animation: modal-fade var(--dur-2) var(--ease-out); }
+.lightbox.is-out { opacity: 0; transition: opacity .15s var(--ease-out); }
+.lightbox-bar { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; height: 48px; padding: 0 12px 0 16px; color: #e6e9ef; font-size: var(--fs-sm); }
+.lightbox-cap { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lightbox-zoom { flex: 0 0 auto; margin-right: 6px; color: #9aa2ae; font-variant-numeric: tabular-nums; font-size: var(--fs-xs); }
+.lightbox-btn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 0; border-radius: 6px; background: transparent; color: #e6e9ef; cursor: pointer; }
+.lightbox-btn:hover { background: rgba(255, 255, 255, .12); }
+.lightbox-btn .ic-svg { width: 17px; height: 17px; }
+.lightbox-stage { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 16px; cursor: zoom-out; }
+.lightbox-img { display: block; flex: 0 0 auto; max-width: none; margin: auto; box-shadow: 0 12px 40px rgba(0, 0, 0, .5); cursor: zoom-in; animation: modal-pop var(--dur-3) var(--ease-out); user-select: none; }
+.lightbox:not(.is-fit) .lightbox-img { cursor: zoom-out; }
+.markdown-body img[data-img-id] { cursor: zoom-in; }
