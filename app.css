@@ -5652,11 +5652,8 @@ select.kb-input { cursor: pointer; }
 /* ---------- 美化與動態（使用者：「美化所有的東西，視覺化，要有動畫之類的」） ----------
    一層加在原本設計上的動態：頁面進場、方框／列一列一列浮起（.is-fresh，只在進到那一頁時播一次）、
    選單彈出、側邊欄選中的那列有一道會長出來的色條、換主題時顏色漸變、勾選框彈一下、吐司用彈簧曲線；
-   首頁最上層多了「總覽」：四張數字卡（數字從 0 跑上來）、最近 28 天的編輯長條圖（由下往上長）、筆記種類
-   的堆疊條。全部尊重 prefers-reduced-motion（上面那個全站規則會把時間壓到 0）。 */
+   全部尊重 prefers-reduced-motion（上面那個全站規則會把時間壓到 0）。 */
 @keyframes sn-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-@keyframes sn-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
-@keyframes sn-widen { from { flex-basis: 0; } }
 @keyframes sn-pop { 0% { transform: scale(.6); } 55% { transform: scale(1.18); } 100% { transform: scale(1); } }
 @keyframes sn-fade { from { opacity: 0; } to { opacity: 1; } }
 /* 整頁進場：每個「接管 #main 的頁面」顯示時從下面輕輕浮上來 */
@@ -5665,11 +5662,9 @@ select.kb-input { cursor: pointer; }
 }
 /* 進到頁面那一下：方框、列一個接一個浮起（dashboard.js 的 freshen 設 --i，1.1 秒後拿掉 .is-fresh，
    之後滑過去的 transform 才不會被動畫的 fill 卡住） */
-.is-fresh .ov-card, .is-fresh .ov-panel, .is-fresh .dash-folder-tile, .is-fresh .dash-book-tile, .is-fresh .dash-note-wrap, .is-fresh .trash-row, .is-fresh .ab-file-row, .is-fresh .ab-sticky {
+.is-fresh .dash-folder-tile, .is-fresh .dash-book-tile, .is-fresh .dash-note-wrap, .is-fresh .trash-row, .is-fresh .ab-file-row, .is-fresh .ab-sticky {
   animation: sn-rise .4s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 28ms);
 }
-.is-fresh .ov-bar { animation: sn-grow .6s var(--ease-out) both; animation-delay: calc(.2s + var(--i, 0) * 14ms); }
-.is-fresh .ov-seg { animation: sn-widen .7s var(--ease-out) both; animation-delay: calc(.25s + var(--i, 0) * 60ms); }
 /* 側邊欄：選中的那一列左邊長出一道色條；滑過去圖示往右挪一點 */
 .sidebar-nav-item { position: relative; }
 .sidebar-nav-item::before { content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px; background: var(--accent); transform: scaleY(0); transform-origin: center; transition: transform var(--dur-2) var(--ease-spring); }
@@ -5701,7 +5696,7 @@ select.kb-input { cursor: pointer; }
 /* 吐司：彈簧曲線浮上來 */
 .toast { transition: opacity .2s var(--ease-out), transform .32s var(--ease-spring); }
 /* 換主題：底色、文字、框線漸變，不會一閃 */
-#app, #sidebar, #topbar, .trash-wrap, .empty-state, .preview-scroll, .markdown-body, .modal, .ctx-menu, .user-dropdown, .ov-card, .ov-panel, .dash-head, .dash-section-head, .tree-row, .sidebar-nav-item, .btn {
+#app, #sidebar, #topbar, .trash-wrap, .empty-state, .preview-scroll, .markdown-body, .modal, .ctx-menu, .user-dropdown, .dash-head, .dash-section-head, .tree-row, .sidebar-nav-item, .btn {
   transition-property: background-color, color, border-color, box-shadow, transform;
   transition-duration: .22s; transition-timing-function: var(--ease-out);
 }
@@ -5709,41 +5704,6 @@ select.kb-input { cursor: pointer; }
 /* 標題的筆記路徑、預覽第一次畫出來淡入 */
 #preview > .markdown-body { animation: sn-fade .25s var(--ease-out); }
 
-/* ---------- 總覽 ---------- */
-.dash-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0 4px; }
-.ov-cards { display: contents; }
-.ov-card {
-  position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; min-width: 0; overflow: hidden;
-  border: 1px solid var(--border); background: var(--bg); cursor: default;
-}
-.ov-card::after { content: ''; position: absolute; right: -30px; top: -30px; width: 110px; height: 110px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--c) 18%, transparent), transparent 70%); pointer-events: none; }
-.ov-card:hover { border-color: var(--border-strong); box-shadow: var(--lift); transform: translateY(-2px); }
-.ov-ic { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex: 0 0 auto; background: color-mix(in srgb, var(--c) 14%, transparent); color: var(--c); }
-.ov-ic .ic-svg { width: 17px; height: 17px; }
-.ov-body { display: flex; flex-direction: column; min-width: 0; }
-.ov-n { font-size: 26px; font-weight: 800; line-height: 1.1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--text); }
-.ov-l { font-size: var(--fs-sm); font-weight: 600; color: var(--text-dim); margin-top: 2px; }
-.ov-d { font-size: var(--fs-xs); color: var(--text-faint); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ov-panel { grid-column: span 2; padding: 14px 16px 12px; border: 1px solid var(--border); background: var(--bg); min-width: 0; }
-.ov-panel-t { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: var(--fs-sm); font-weight: 700; color: var(--text); }
-.ov-panel-t .ic-svg { width: 15px; height: 15px; color: var(--accent); }
-.ov-panel-t small { margin-left: auto; font-weight: 500; color: var(--text-faint); font-size: var(--fs-xs); }
-.ov-chart { display: flex; align-items: flex-end; gap: 3px; height: 68px; padding: 0 1px; border-bottom: 1px solid var(--border); }
-.ov-bar { flex: 1 1 0; height: var(--h, 4%); min-height: 2px; background: color-mix(in srgb, var(--accent) 45%, var(--bg)); transform-origin: bottom; transition: background var(--dur-1) var(--ease-out), transform var(--dur-2) var(--ease-out); }
-.ov-bar.is-zero { background: var(--bg-3); }
-.ov-bar.is-today { background: var(--accent); }
-.ov-bar:hover { background: var(--accent); transform: scaleY(1.04); }
-.ov-axis { display: flex; justify-content: space-between; margin-top: 6px; font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
-.ov-stack { display: flex; height: 12px; gap: 2px; margin: 6px 0 12px; }
-.ov-seg { display: block; flex: 0 0 var(--w, 0%); min-width: 0; height: 100%; transition: filter var(--dur-1) var(--ease-out); }
-.ov-seg:hover { filter: brightness(1.12); }
-.ov-seg.is-empty { background: var(--bg-3); }
-.ov-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: var(--fs-xs); color: var(--text-dim); }
-.ov-lg { display: inline-flex; align-items: center; gap: 6px; }
-.ov-lg i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
-.ov-lg b { color: var(--text); font-variant-numeric: tabular-nums; }
-@media (max-width: 1100px) { .dash-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .dash-overview { grid-template-columns: 1fr; } .ov-panel { grid-column: span 1; } }
 /* 側邊欄每個區域自己的顏色：圖示一眼就分得出是哪一區（選中時色條也跟著） */
 #course-open-btn { --ac: #d9962a; } #quick-open-btn { --ac: #e0a458; } #knowledge-open-btn { --ac: #17934f; } #board-open-btn { --ac: #0079bf; }
 #start-open-btn { --ac: #5b7fa6; } #xmind-open-btn { --ac: #c5221f; } #timetree-open-btn { --ac: #1a9a81; } #novel-open-btn { --ac: #8e44ad; }
