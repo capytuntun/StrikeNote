@@ -1458,7 +1458,7 @@
     if (o && o.calId) { delete TimeTree.state.hidden[o.calId]; LS.set('ttHidden', JSON.stringify(TimeTree.state.hidden)); }
     timetreeWrapEl.hidden = false;
     setNavActive('timetree-open-btn', true);
-    autoOpenSidebar();
+    setSidebarOpen(false);   // 使用者要的：點開 timetree 就收起左邊
     setHash('timetree');
     setTreeArea('timetree');
     renderTimeTree();
@@ -5515,7 +5515,7 @@
       if (!emptyEl.hidden || (trashWrapEl && !trashWrapEl.hidden) || (filesWrapEl && !filesWrapEl.hidden) ||
         (courseWrapEl && !courseWrapEl.hidden) || (knowledgeWrapEl && !knowledgeWrapEl.hidden) ||
         (quickWrapEl && !quickWrapEl.hidden) || (novelWrapEl && !novelWrapEl.hidden) ||
-        (boardsWrapEl && !boardsWrapEl.hidden) || (startWrapEl && !startWrapEl.hidden) || (xmindWrapEl && !xmindWrapEl.hidden) || (timetreeWrapEl && !timetreeWrapEl.hidden)) return;
+        (boardsWrapEl && !boardsWrapEl.hidden) || (startWrapEl && !startWrapEl.hidden) || (xmindWrapEl && !xmindWrapEl.hidden)) return;
       const main = $('#main'), top = $('#topbar');
       if ((main && main.contains(e.target)) || (top && top.contains(e.target))) setSidebarOpen(false);
     });

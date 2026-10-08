@@ -4482,6 +4482,13 @@ button.imglib-use:hover:not(:disabled) .u-go { color: var(--accent); transform: 
   font: inherit; font-size: 14px; line-height: 1.5; resize: none; outline: none; overflow: hidden;
 }
 .qn-row-input::placeholder { color: var(--kp-text-2); }
+/* 有連結的一行：沒在打字時顯示 .qn-row-view（連結可點），輸入框藏起來但留在版面外，焦點一回來就換回 */
+.qn-row-view { display: none; flex: 1 1 auto; min-width: 0; padding: 4px 2px; font-size: 14px; line-height: 1.5; color: var(--kp-text); white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
+.qn-row.is-view .qn-row-view { display: block; }
+.qn-row.is-view .qn-row-input { position: absolute; left: 0; top: 0; width: 1px; height: 1px !important; opacity: 0; pointer-events: none; }   /* !important：藏起來時 autosize 留下的 inline 高度不能撐開捲動範圍 */
+.qn-row-view a { color: #1a73e8; text-decoration: underline; cursor: pointer; }
+.qn-row.is-done .qn-row-view { color: var(--kp-text-2); text-decoration: line-through; }
+:root[data-theme="dark"] .qn-row-view a { color: #8ab4f8; }
 .qn-row.is-done .qn-row-input { color: var(--kp-text-2); text-decoration: line-through; }
 .qn-row-tools { position: absolute; right: 2px; top: 2px; display: none; gap: 2px; }
 .qn-row:hover .qn-row-tools, .qn-row:focus-within .qn-row-tools { display: inline-flex; }

@@ -260,6 +260,7 @@
     if (hasTaskLines(lines)) return lines.map(function (r) { return { type: 'text', text: r.text }; });
     return lines.map(function (r) { return r.text.trim() ? { type: 'task', done: false, text: r.text } : r; });
   }
+  const LINKY = /https?:\/\/|\[\[[^\]\n]+\]\]|(^|[\s(（「\[])#[^\s#]/;
   function makeLineEditor(lines, onChange, o) {
     o = o || {};
     const box = el('div', 'qn-lines');
@@ -309,6 +310,32 @@
         focusAt = { i: i + extra.length, pos: extra[extra.length - 1].text.length - after.length }; onChange(); draw();
       });
       el0.appendChild(ta);
+      // 有網址／[[筆記]]／#標籤 的一行：沒在打字時顯示成可以點的連結（跟卡片一樣），點文字處才變回輸入框
+      const view = el('div', 'qn-row-view');
+      const syncView = function () {
+        const linky = LINKY.test(r.text);
+        view.innerHTML = linky ? inlineHTML(r.text) : '';
+        el0.classList.toggle('is-view', linky && document.activeElement !== ta);
+      };
+      view.addEventListener('mousedown', function (e) {
+        if (e.target.closest('a')) return;
+        e.preventDefault();
+        el0.classList.remove('is-view');
+        ta.focus();
+        // 點在哪個字就把游標放哪（算不出來就放最後）
+        let pos = ta.value.length;
+        try { const cp = document.caretPositionFromPoint ? document.caretPositionFromPoint(e.clientX, e.clientY) : null; const rg = !cp && document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null; const node = cp ? cp.offsetNode : rg && rg.startContainer, off = cp ? cp.offset : rg && rg.startOffset; if (node && view.contains(node)) { const pre = document.createRange(); pre.selectNodeContents(view); pre.setEnd(node, off); pos = Math.min(ta.value.length, pre.toString().length); } } catch (err) { /* 放最後 */ }
+        ta.setSelectionRange(pos, pos);
+      });
+      view.addEventListener('click', function (e) {
+        const a = e.target.closest('a'); if (!a) return;
+        if (a.classList.contains('note-link') || a.classList.contains('hashtag')) { e.preventDefault(); if (o.onLink) o.onLink(a); }
+        // 一般網址：瀏覽器自己開新分頁
+      });
+      ta.addEventListener('focus', function () { el0.classList.remove('is-view'); autosizeRow(ta); });
+      ta.addEventListener('blur', function () { syncView(); });
+      el0.appendChild(view);
+      syncView();
       const tools = el('span', 'qn-row-tools');
       const kind = iconBtn('qn-row-btn', r.type === 'task' ? 'type' : 'check-square', r.type === 'task' ? '變成文字' : '變成勾選項目');
       kind.addEventListener('click', function () { lines[i] = r.type === 'task' ? { type: 'text', text: r.text } : { type: 'task', done: false, text: r.text }; focusAt = { i: i, pos: r.text.length }; onChange(); draw(); });
@@ -431,45 +458,13 @@
     function drawMedia() { mediaBox.innerHTML = ''; mediaBox.appendChild(makeMediaStrip(media, function () { drawMedia(); scheduleSave(); })); }
     function drawBody() {
       bodyBox.innerHTML = '';
-      editor = makeLineEditor(lines, function () { scheduleSave(); linksSoon(); });
+      editor = makeLineEditor(lines, function () { scheduleSave(); }, { onLink: function (a) {
+        if (a.classList.contains('note-link')) { if (o.onOpenNote) { close(); o.onOpenNote(a); } }
+        else if (a.classList.contains('hashtag')) { if (o.onTag) { close(); o.onTag(a.getAttribute('data-tag')); } }
+      } });
       bodyBox.appendChild(editor);
     }
 
-    // 內文裡的網址、[[筆記]]、#標籤 列在下面，點得到
-    const linksBox = el('div', 'qn-modal-links');
-    modal.appendChild(linksBox);
-    let linkTimer = null;
-    function linksSoon() { clearTimeout(linkTimer); linkTimer = setTimeout(renderLinks, 300); }
-    function renderLinks() {
-      linksBox.innerHTML = '';
-      const text = linesPlain(lines);
-      const seen = {};
-      const urlRe = /https?:\/\/[^\s<>()\[\]"']+/g;
-      let m;
-      while ((m = urlRe.exec(text))) {
-        const u = m[0].replace(/[.,;:!?）」』]+$/, '');
-        if (seen[u]) continue; seen[u] = 1;
-        const a = el('a', 'qn-link-chip', ic('link') + '<span>' + esc(u.replace(/^https?:\/\//, '').slice(0, 60)) + '</span>');
-        a.href = u; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.title = u;
-        linksBox.appendChild(a);
-      }
-      const wikiRe = /\[\[([^\]\n]+)\]\]/g;
-      while ((m = wikiRe.exec(text))) {
-        const t = m[1].split('|')[0].trim();
-        if (!t || seen['[[' + t]) continue; seen['[[' + t] = 1;
-        const a = el('a', 'qn-link-chip note-link', ic('file-text') + '<span>' + esc(t) + '</span>');
-        a.href = '#'; a.setAttribute('data-note-title', t);
-        a.addEventListener('click', function (e) { e.preventDefault(); if (o.onOpenNote) { close(); o.onOpenNote(a); } });
-        linksBox.appendChild(a);
-      }
-      ((global.MD && MD.extractTags) ? MD.extractTags(text) : []).forEach(function (t) {
-        const a = el('a', 'qn-link-chip hashtag', '<span>#' + esc(t) + '</span>');
-        a.href = '#'; a.setAttribute('data-tag', t);
-        a.addEventListener('click', function (e) { e.preventDefault(); if (o.onTag) { close(); o.onTag(t); } });
-        linksBox.appendChild(a);
-      });
-      linksBox.hidden = !linksBox.children.length;
-    }
     const meta = el('div', 'qn-modal-meta', esc(timeLabel(note.updatedAt)));
     modal.appendChild(meta);
 
@@ -515,7 +510,7 @@
         { icon: 'copy', label: '建立副本', fn: function () { flush(); o.onDuplicate(Object.assign({}, note, { title: title.value, content: currentContent() })); } },
         { icon: 'list-checks', label: function () { return hasTaskLines(lines) ? '隱藏勾選框' : '顯示勾選框'; }, fn: function () {
           lines = toggleLinesChecklist(lines);
-          drawBody(); editor.focusLast(); scheduleSave(); renderLinks();
+          drawBody(); editor.focusLast(); scheduleSave();
         } }
       ]
     }));
@@ -535,7 +530,6 @@
     document.body.appendChild(overlay);
     drawMedia();
     drawBody();
-    renderLinks();
     setTimeout(function () { editor.autosize(); editor.focusLast(); }, 0);
   }
 
