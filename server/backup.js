@@ -45,7 +45,8 @@ const settings = require('./settings');
 const { normalizeArea } = require('./api');
 const { ZipWriter, ZipReader } = require('./zip');
 
-const FORMAT = 'strikenote-backup';
+const FORMAT = 'capynote-backup';
+const LEGACY_FORMATS = ['strikenote-backup']; // 改名前做的備份還是要能還原
 const FORMAT_VERSION = 1;
 // One entry at most: a note, a packed book or an upload — all bounded by
 // MariaDB's max_allowed_packet in practice.
@@ -92,7 +93,7 @@ function parseJson(s, dflt) {
 async function exportZip(user, scope, req, res) {
   const site = scope === 'site';
   const now = Date.now();
-  const filename = 'strikenote-backup-' + (site ? 'site' : 'mine') + '-' + stamp(now) + '.zip';
+  const filename = 'capynote-backup-' + (site ? 'site' : 'mine') + '-' + stamp(now) + '.zip';
 
   const users = site ? await q.usersAll.all() : [{ id: user.id, username: user.username }];
   const nameOf = new Map(users.map(u => [u.id, u.username]));
@@ -124,13 +125,13 @@ async function exportZip(user, scope, req, res) {
       bookVersions: bookVersions.length, bookLinks: links.length, noteLinks: noteLinks.length }
   });
   await addText('README.txt',
-    'StrikeNote 備份（' + (site ? '整個站台' : user.username + ' 的資料') + '，' + new Date(now).toLocaleString('zh-TW') + '）\n\n' +
+    'capyNote 備份（' + (site ? '整個站台' : user.username + ' 的資料') + '，' + new Date(now).toLocaleString('zh-TW') + '）\n\n' +
     'notes/     每篇筆記一個 .md，照資料夾放；垃圾桶裡的在 _垃圾桶/ 底下' + (site ? '，最外層是使用者名稱' : '') + '\n' +
     'files/     上傳過的圖片、PDF 與其他檔案（檔名是它在筆記裡的 id）\n' +
     'versions/  每篇筆記的版本歷史，一個版本一個 .md\n' +
     'books/     電子書公開分享連結的打包 HTML\n' +
     '*.json     還原時用的索引：id、時間、資料夾、分享、位置等 .md 裡沒有的東西\n\n' +
-    '還原：登入 StrikeNote → 右上角帳號選單 → 備份與還原 → 上傳這個 zip。\n' +
+    '還原：登入 capyNote → 右上角帳號選單 → 備份與還原 → 上傳這個 zip。\n' +
     '缺的會補回來、已經有的預設不動；勾「覆蓋」才會用備份裡的內容取代現有筆記（覆蓋前會先留一份版本）。\n');
 
   // Folder paths per id, for the readable layout.
@@ -302,7 +303,7 @@ function removeFile(file) {
 
 function createUpload(user) {
   const id = newId();
-  const file = path.join(os.tmpdir(), 'strikenote-restore-' + id + '.zip');
+  const file = path.join(os.tmpdir(), 'capynote-restore-' + id + '.zip');
   fs.writeFileSync(file, '');
   uploads.set(id, { id: id, userId: user.id, file: file, size: 0, touched: Date.now(), job: null });
   return { id: id, chunkMax: config.maxBodyBytes, totalMax: config.backupMaxBytes };
@@ -346,11 +347,11 @@ function findManifest(zr) {
     if (name.indexOf('__MACOSX/') === 0) continue;
     if (!best || name.length < best.length) best = name;
   }
-  if (!best) throw new Error('這個 zip 裡沒有 manifest.json，不是 StrikeNote 的備份');
+  if (!best) throw new Error('這個 zip 裡沒有 manifest.json，不是 capyNote 的備份');
   const prefix = best.slice(0, best.length - 'manifest.json'.length);
   const manifest = parseJson(zr.read(best, ENTRY_MAX).toString('utf8'), null);
-  if (!manifest || manifest.format !== FORMAT) throw new Error('這不是 StrikeNote 的備份檔');
-  if (Number(manifest.version) > FORMAT_VERSION) throw new Error('這個備份是較新版本的 StrikeNote 做的，請先更新伺服器');
+  if (!manifest || (manifest.format !== FORMAT && !LEGACY_FORMATS.includes(manifest.format))) throw new Error('這不是 capyNote 的備份檔');
+  if (Number(manifest.version) > FORMAT_VERSION) throw new Error('這個備份是較新版本的 capyNote 做的，請先更新伺服器');
   return { prefix: prefix, manifest: manifest };
 }
 
@@ -756,7 +757,7 @@ function sweep() {
 // Temp files left by a previous process (a crash mid-upload) are nobody's now.
 function startHousekeeping() {
   fs.promises.readdir(os.tmpdir()).then(function (names) {
-    names.filter(n => /^strikenote-restore-[0-9a-f]{24}\.zip$/.test(n))
+    names.filter(n => /^(capynote|strikenote)-restore-[0-9a-f]{24}\.zip$/.test(n))
       .forEach(n => removeFile(path.join(os.tmpdir(), n)));
   }).catch(function () { /* unreadable tmp: nothing to clean */ });
   setInterval(sweep, 5 * 60 * 1000).unref();

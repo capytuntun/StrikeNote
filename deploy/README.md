@@ -7,7 +7,7 @@
 全新機器，一條指令裝好 MariaDB、Node 22、程式碼、資料庫帳號、systemd service、每日備份：
 
 ```
-curl -fsSL https://raw.githubusercontent.com/capytuntun/StrikeNote/main/deploy/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/capytuntun/capyNote/main/deploy/install.sh | sudo bash
 ```
 
 跑完會印出健康檢查結果、管理員帳密（隨機產生，只印這一次）。之後要更新到最新版，

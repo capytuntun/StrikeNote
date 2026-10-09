@@ -1,4 +1,4 @@
-/* app.css — StrikeNote UI
+/* app.css — capyNote UI
    Visual language: flat, square, precise. One neutral surface palette,
    hairline borders only where they separate regions, square corners
    everywhere (the radius tokens below are all 0 on purpose — flip them if
@@ -403,7 +403,7 @@ input, select, textarea { transition: border-color var(--dur-1) var(--ease-out),
 #topbar.topbar-lvl4 .user-btn #current-user { display: none; }
 #topbar.topbar-lvl4 .user-btn { padding-right: 6px; }
 /* 收到不能再收：連品牌字都放不下，只留水豚標記——圖示還在，回首頁的點擊區也還在，
-   只是暫時看不到「StrikeNote」這幾個字。 */
+   只是暫時看不到「capyNote」這幾個字。 */
 #topbar.topbar-lvl5 .logo-text { display: none; }
 /* 標題先讓步（flex-shrink 1000，見上面 #note-path 的說明），資料夾名撐到最後——排版
    比照 HackMD：`📁 資料夾 / **標題…**`。一開始寫反了（標題 flex-shrink:0），結果 flex

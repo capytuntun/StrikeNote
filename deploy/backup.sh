@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# StrikeNote 備份：mariadb-dump 整個資料庫 → gzip → 保留 N 天 →（選填）rclone 到異地。
+# capyNote 備份：mariadb-dump 整個資料庫 → gzip → 保留 N 天 →（選填）rclone 到異地。
 # 讀 /etc/strikenote/env 的 DB_*、BACKUP_DIR、BACKUP_KEEP_DAYS、RCLONE_REMOTE。
 # 手動跑： set -a; . /etc/strikenote/env; set +a; deploy/backup.sh
 # 還原：   zcat strikenote-YYYYMMDD-HHMM.sql.gz | mariadb -u strikenote -p strikenote

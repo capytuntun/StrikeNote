@@ -32,7 +32,7 @@ const DEADLINE_MS = 8000;
 const MAX_HTML_BYTES = 1024 * 1024;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 4;
-const UA = 'Mozilla/5.0 (compatible; StrikeNote-LinkPreview/1.0)';
+const UA = 'Mozilla/5.0 (compatible; CapyNote-LinkPreview/1.0)';
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon)$/;
 
 // ---------------- address guard ----------------

@@ -911,13 +911,13 @@ async function main() {
 
     r = await call(carol, 'GET', '/api/backup?scope=mine', undefined, { buffer: true });
     ok(r.status === 200 && (r.headers.get('content-type') || '').includes('zip') &&
-       /^attachment; filename="strikenote-backup-mine-/.test(r.headers.get('content-disposition') || ''), 'download a mine backup', r.status);
+       /^attachment; filename="capynote-backup-mine-/.test(r.headers.get('content-disposition') || ''), 'download a mine backup', r.status);
     const mineZip = r.data;
     let z = openZip(mineZip);
     const man = readJson(z.zr, 'manifest.json');
     const notesIdx = readJson(z.zr, 'notes.json');
     const filesIdx = readJson(z.zr, 'files.json');
-    ok(man.format === 'strikenote-backup' && man.scope === 'mine' && man.counts.notes === 2 && man.counts.files === 1 && man.counts.folders === 1,
+    ok(man.format === 'capynote-backup' && man.scope === 'mine' && man.counts.notes === 2 && man.counts.files === 1 && man.counts.folders === 1,
       'manifest describes the backup', man);
     const n1 = notesIdx.find(n => n.id === cNote.id);
     ok(n1 && n1.file === 'notes/備份資料夾/第一章.md' && z.zr.read(n1.file).toString('utf8') === cNoteV2.content,

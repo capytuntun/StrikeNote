@@ -147,7 +147,7 @@
     box.innerHTML =
       '<div class="auth-brand">' +
         '<span class="auth-brand-mark" aria-hidden="true"></span>' +
-        '<div class="auth-brand-name">StrikeNote</div>' +
+        '<div class="auth-brand-name">capyNote</div>' +
       '</div>' +
       '<div class="auth-form">' +
         '<div class="auth-title">' + (wrong ? '後端沒有正確回應' : '伺服器沒有回應') + '</div>' +

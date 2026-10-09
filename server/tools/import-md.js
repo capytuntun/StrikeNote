@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* import-md.js — 把一個資料夾的 Markdown（含圖片）批次匯入 StrikeNote。
+/* import-md.js — 把一個資料夾的 Markdown（含圖片）批次匯入 capyNote。
  *
  * 用途：讓 Claude Code 之類的工具在本機把網站／文件轉成一堆 .md 之後，一次全部搬進站上，
  * 圖片一併處理好——相對路徑的圖片上傳、外部網址的圖片先抓下來再上傳、內嵌的 base64 圖片
@@ -33,8 +33,8 @@ const DIRECT_LIMIT = 20 * 1024 * 1024;     // 超過這個大小就走分塊上�
 
 function parseArgs(argv) {
   const o = {
-    dir: null, url: process.env.STRIKENOTE_URL || 'http://127.0.0.1:8080',
-    user: process.env.STRIKENOTE_USER || null, password: process.env.STRIKENOTE_PASSWORD || null,
+    dir: null, url: process.env.CAPYNOTE_URL || process.env.STRIKENOTE_URL || 'http://127.0.0.1:8080',
+    user: process.env.CAPYNOTE_USER || process.env.STRIKENOTE_USER || null, password: process.env.CAPYNOTE_PASSWORD || process.env.STRIKENOTE_PASSWORD || null,
     area: null, into: null, flat: false, remote: true, files: 'referenced',
     skipExisting: false, dryRun: false, maxRemote: 50 * 1024 * 1024, timeout: 20000
   };
@@ -209,7 +209,7 @@ async function main() {
 
   // 2) 登入
   const api = makeClient(o.url);
-  if (!o.user || !o.password) { console.error('請給 --user 與 --password（或設 STRIKENOTE_USER / STRIKENOTE_PASSWORD）'); process.exit(2); }
+  if (!o.user || !o.password) { console.error('請給 --user 與 --password（或設 CAPYNOTE_USER / CAPYNOTE_PASSWORD）'); process.exit(2); }
   await api.login(o.user, o.password);
   console.log('已登入：' + o.user);
 

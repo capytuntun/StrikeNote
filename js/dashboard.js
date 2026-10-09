@@ -228,7 +228,7 @@
     head.appendChild(main);
 
     const right = el('div', 'dash-head-right');
-    right.appendChild(viewToggle(function () { paint(); }));
+    right.appendChild(viewToggle(function () { paint(); }, viewKey('home', curFolderId)));
     if (o.onSortMenu) {
       const s = el('button', 'btn dash-sort-btn', ic('arrow-up-down') + '<span>排序：</span>' +
         '<span class="dash-sort-mode">' + esc(Sorting.info().short) + '</span>');
@@ -681,7 +681,7 @@
       const sec = el('section', 'dash-section');
       sec.appendChild(sectionHead('book-open', '電子書', books.length));
       if (books.length) {
-        const grid = folderGrid();
+        const grid = folderGrid(viewKey('home', curFolderId));
         books.forEach(function (f) { grid.appendChild(makeBookTile(f, o)); });
         sec.appendChild(grid);
       } else {
@@ -693,7 +693,7 @@
     if (subs.length) {
       const sec = el('section', 'dash-section');
       sec.appendChild(sectionHead('folder', '資料夾', subs.length));
-      const grid = folderGrid();
+      const grid = folderGrid(viewKey('home', curFolderId));
       subs.forEach(function (f) { grid.appendChild(makeFolderTile(f, o)); });
       sec.appendChild(grid);
       frag.appendChild(sec);
@@ -760,18 +760,34 @@
   }
 
 
-  // ---- 資料夾的顯示方式：方格（預設）或清單（像筆記一樣一列一列、由上到下）。首頁與區域頁共用，記在
-  // localStorage folderView；切換只是把 .is-list 放到 .dash-folder-grid 上，方框的 DOM 不變，CSS 排成列。----
-  function folderView() { try { return localStorage.getItem('folderView') === 'list' ? 'list' : 'grid'; } catch (e) { return 'grid'; } }
-  function setFolderView(v) { try { localStorage.setItem('folderView', v === 'list' ? 'list' : 'grid'); } catch (e) { /* */ } }
-  function folderGrid() { return el('div', 'dash-folder-grid' + (folderView() === 'list' ? ' is-list' : '')); }
-  function viewToggle(onChange) {
+  // ---- 資料夾的顯示方式：方格（預設）或清單（像筆記一樣一列一列、由上到下）。首頁與區域頁共用同一顆按鈕，
+  // 但「哪些地方用清單、哪些用方格」是每個位置各自記住的（使用者要的）：位置 = 頁面 + 瀏覽到的資料夾
+  // （首頁最上層 'home'、首頁某資料夾 'home/<id>'、課程筆記 'course'、其某資料夾 'course/<id>'……），存在
+  // localStorage folderViews 的一張表裡；沒設定過的位置沿用舊的全站鍵 folderView 當預設，所以改版前只選過
+  // 一次的人看到的跟以前一樣。切換只是把 .is-list 放到 .dash-folder-grid 上，方框的 DOM 不變，CSS 排成列。----
+  function viewKey(page, folderId) { return (page || 'home') + (folderId ? '/' + folderId : ''); }
+  function viewMap() { try { const m = JSON.parse(localStorage.getItem('folderViews') || '{}'); return m && typeof m === 'object' ? m : {}; } catch (e) { return {}; } }
+  function folderView(key) {
+    const m = viewMap();
+    if (key && (m[key] === 'list' || m[key] === 'grid')) return m[key];
+    try { return localStorage.getItem('folderView') === 'list' ? 'list' : 'grid'; } catch (e) { return 'grid'; }
+  }
+  function setFolderView(key, v) {
+    v = v === 'list' ? 'list' : 'grid';
+    try {
+      if (key) { const m = viewMap(); m[key] = v; localStorage.setItem('folderViews', JSON.stringify(m)); }
+      else localStorage.setItem('folderView', v);
+    } catch (e) { /* */ }
+  }
+  function folderGrid(key) { return el('div', 'dash-folder-grid' + (folderView(key) === 'list' ? ' is-list' : '')); }
+  function viewToggle(onChange, key) {
     const box = el('div', 'dash-viewtoggle');
-    box.setAttribute('role', 'group'); box.setAttribute('aria-label', '資料夾顯示方式');
+    box.setAttribute('role', 'group'); box.setAttribute('aria-label', '資料夾顯示方式（這個位置）');
+    if (key) box.setAttribute('data-view-key', key);
     [['grid', 'layout-grid', '方格'], ['list', 'list', '清單（由上到下）']].forEach(function (v) {
-      const b = el('button', 'dash-view-btn' + (folderView() === v[0] ? ' on' : ''), ic(v[1]));
-      b.type = 'button'; b.title = '資料夾顯示成' + v[2]; b.setAttribute('data-view', v[0]); b.setAttribute('aria-pressed', folderView() === v[0] ? 'true' : 'false');
-      b.addEventListener('click', function (e) { e.stopPropagation(); if (folderView() === v[0]) return; setFolderView(v[0]); if (onChange) onChange(v[0]); });
+      const b = el('button', 'dash-view-btn' + (folderView(key) === v[0] ? ' on' : ''), ic(v[1]));
+      b.type = 'button'; b.title = '這個位置的資料夾顯示成' + v[2]; b.setAttribute('data-view', v[0]); b.setAttribute('aria-pressed', folderView(key) === v[0] ? 'true' : 'false');
+      b.addEventListener('click', function (e) { e.stopPropagation(); if (folderView(key) === v[0]) return; setFolderView(key, v[0]); if (onChange) onChange(v[0]); });
       box.appendChild(b);
     });
     return box;
@@ -818,7 +834,7 @@
     };
   }
   // render() = 回首頁：清掉標籤篩選、也回到最上層。之前只清篩選不清資料夾，
-  // 所以在資料夾裡點左上角的 StrikeNote 會原地不動。
+  // 所以在資料夾裡點左上角的 capyNote 會原地不動。
   function render(opts) {
     lastOpts = normalize(opts);
     tagFilter = null;
@@ -842,7 +858,7 @@
   function currentFolder() { return curFolderId; }
   global.Dashboard = {
     makeBookTile: makeBookTile,
-    rowTags: rowTags, freshen: freshen, folderColor: folderColor, folderGrid: folderGrid, viewToggle: viewToggle, folderView: folderView,
+    rowTags: rowTags, freshen: freshen, folderColor: folderColor, folderGrid: folderGrid, viewToggle: viewToggle, folderView: folderView, viewKey: viewKey,
     render: render, refresh: refresh, setTag: setTag, openFolder: navigate,
     currentFolder: currentFolder, renameFolderTile: renameFolderTile
   };

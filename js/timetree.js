@@ -174,11 +174,11 @@
   function fold(line) { const out = []; let i = 0; while (i < line.length) { out.push((i ? ' ' : '') + line.slice(i, i + 72)); i += 72; } return out.join('\r\n'); }
   function toICS(cal, name) {
     const BY = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
-    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//StrikeNote//timetree//ZH', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:' + icsEsc(name || '行事曆')];
+    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//capyNote//timetree//ZH', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:' + icsEsc(name || '行事曆')];
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
     cal.events.forEach(function (ev) {
       if (ev.keep || !ev.start) return;
-      lines.push('BEGIN:VEVENT', 'UID:' + ev.id + '@strikenote', 'DTSTAMP:' + stamp, 'SUMMARY:' + icsEsc(ev.title));
+      lines.push('BEGIN:VEVENT', 'UID:' + ev.id + '@capynote', 'DTSTAMP:' + stamp, 'SUMMARY:' + icsEsc(ev.title));
       if (ev.allDay) { lines.push('DTSTART;VALUE=DATE:' + icsDate(ev.start), 'DTEND;VALUE=DATE:' + icsDate(dkey(addDays(parseLocal(ev.end), 1)))); }
       else lines.push('DTSTART:' + icsDT(ev.start), 'DTEND:' + icsDT(ev.end));
       if (ev.repeat) { let r = 'RRULE:FREQ=' + ev.repeat.freq.toUpperCase(); if (ev.repeat.interval > 1) r += ';INTERVAL=' + ev.repeat.interval; if (ev.repeat.until) r += ';UNTIL=' + icsDate(ev.repeat.until) + (ev.allDay ? '' : 'T235959'); if (ev.repeat.count) r += ';COUNT=' + ev.repeat.count; if (ev.repeat.byDay) r += ';BYDAY=' + ev.repeat.byDay.map(function (d) { return BY[d]; }).join(','); lines.push(r); }

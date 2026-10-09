@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-StrikeNote (folder name `report_system`, UI title 報告筆記系統): a self-hosted, HackMD-style Markdown note app for pentest/exam reporting. It generates OSCP / OSEP / CPENT-LPT / VHL report templates and two structured Taiwanese "資安院" report modes, and exports paginated PDFs. UI strings and most comments are Traditional Chinese.
+capyNote (renamed from StrikeNote on 2026-10-09 — the lowercase `strikenote` identifiers below — DB name/user, systemd service, `/etc/strikenote`, `/opt/strikenote`, localStorage keys, drag MIME types — were deliberately kept so an existing install keeps working; folder name `report_system`, UI title 報告筆記系統): a self-hosted, HackMD-style Markdown note app for pentest/exam reporting. It generates OSCP / OSEP / CPENT-LPT / VHL report templates and two structured Taiwanese "資安院" report modes, and exports paginated PDFs. UI strings and most comments are Traditional Chinese.
 
 ## Running
 

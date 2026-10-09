@@ -191,6 +191,8 @@
 
   let curFolderId = null;   // 目前瀏覽到哪個資料夾；每次 render() 重置為最上層
   let lastOpts = null;
+  // 方格／清單記憶的鍵：這個區域 + 瀏覽到的資料夾（見 dashboard.js viewKey）
+  function viewKey(o) { return global.Dashboard && Dashboard.viewKey ? Dashboard.viewKey(o.area || 'area', curFolderId) : null; }
 
   function foldersIn(folders, parentId) {
     return folders.filter(function (f) { return (f.parentId || null) === parentId; })
@@ -439,8 +441,8 @@
     head.appendChild(main);
 
     const right = el('div', 'dash-head-right');
-    // 資料夾方格／清單：跟首頁同一顆（Dashboard.viewToggle，記在 localStorage）
-    if (global.Dashboard && Dashboard.viewToggle) right.appendChild(Dashboard.viewToggle(function () { if (lastOpts) render(lastOpts, true); }));
+    // 資料夾方格／清單：跟首頁同一顆（Dashboard.viewToggle），但每個位置（區域＋資料夾）各自記住
+    if (global.Dashboard && Dashboard.viewToggle) right.appendChild(Dashboard.viewToggle(function () { if (lastOpts) render(lastOpts, true); }, viewKey(o)));
     // 排序：跟首頁同一顆（排序方式本身也是同一套，側邊欄、首頁、這裡一起變）
     if (o.onSortMenu && global.Sorting) {
       const s = el('button', 'btn dash-sort-btn', ic('arrow-up-down') + '<span>排序：</span>' +
@@ -933,7 +935,7 @@
       const secB = el('section', 'dash-section');
       secB.appendChild(sectionHead('book-open', '電子書', books.length));
       if (books.length) {
-        const gridB = (global.Dashboard && Dashboard.folderGrid ? Dashboard.folderGrid() : el('div', 'dash-folder-grid'));
+        const gridB = (global.Dashboard && Dashboard.folderGrid ? Dashboard.folderGrid(viewKey(o)) : el('div', 'dash-folder-grid'));
         books.forEach(function (f) { gridB.appendChild(Dashboard.makeBookTile(f, o.booksCtx || o)); });
         secB.appendChild(gridB);
       } else {
@@ -945,7 +947,7 @@
     if (subs.length) {
       const sec = el('section', 'dash-section');
       sec.appendChild(sectionHead('folder', '資料夾', subs.length));
-      const grid = (global.Dashboard && Dashboard.folderGrid ? Dashboard.folderGrid() : el('div', 'dash-folder-grid'));
+      const grid = (global.Dashboard && Dashboard.folderGrid ? Dashboard.folderGrid(viewKey(o)) : el('div', 'dash-folder-grid'));
       subs.forEach(function (f) { grid.appendChild(makeFolderTile(f, o)); });
       sec.appendChild(grid);
       frag.appendChild(sec);
