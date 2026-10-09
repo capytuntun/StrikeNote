@@ -5798,14 +5798,11 @@ select.kb-input { cursor: pointer; }
 .btn-primary, .btn-danger { font-weight: 600; }
 .mode-btn { font-weight: 500; }
 .mode-btn.active { font-weight: 600; }
-/* 資料夾方框：原本 134px 高、下半空著（早期列過三篇筆記的預覽，拿掉後高度沒跟著收）。
-   收成名稱＋數量剛好的高度；hover 只剩浮起與左色條，不轉圖示、不打光暈。 */
-.dash-folder-tile { min-height: 0; padding: 13px 14px 12px; gap: 5px; }
-.dash-folder-meta { margin-top: 0; }
+/* 資料夾方框：高度維持原本的 134px（曾收矮過一次，使用者要求還原：「資料夾高度給我還原」）；
+   hover 只剩浮起與左色條，不轉圖示、不打光暈。 */
 .dash-folder-tile:hover .dash-folder-ic { transform: none; }
 .dash-folder-tile::after { display: none; }
 .dash-folder-tile:hover, .dash-folder-tile:focus-visible { transform: translateY(-1px); }
-.dash-book-tile { min-height: 0; padding: 13px 14px 12px; gap: 5px; }
 /* 標籤雲：名稱 500 而不是 700，一整排不再像一排粗體按鈕 */
 .tag-chip { font-weight: 500; }
 /* 編輯器工具列：一行放不下時先把文字標籤收掉（Code／筆記／檔案／範本），
