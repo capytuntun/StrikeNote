@@ -31,14 +31,9 @@
     mode = m;
     setError('');
     $('#auth-title').textContent = m === 'login' ? '登入' : '建立帳號';
-    const sub = $('#auth-sub');
-    if (sub) sub.textContent = m === 'login' ? '歡迎回來，繼續你的報告。' : '幾秒鐘就好，之後所有筆記都存在這台伺服器上。';
     const st = $('.auth-submit-text');
     if (st) st.textContent = m === 'login' ? '登入' : '建立帳號'; else $('#auth-submit').textContent = m === 'login' ? '登入' : '建立帳號';
     $('#auth-toggle').innerHTML = m === 'login' ? '還沒有帳號？<b>建立一個</b>' : '已經有帳號？<b>前往登入</b>';
-    // 表單內容淡入一下，讓切換有「換頁」的感覺（class 在 animationend 拿掉，才能再播）
-    const form = $('#auth-form');
-    if (form) { form.classList.remove('is-swap'); void form.offsetWidth; form.classList.add('is-swap'); }
     // The invite field only matters when registering on an invite-only site.
     show($('#auth-invite-row'), m === 'register' && registerMode === 'invite');
     // A closed site has nothing to offer behind 「建立帳號」.
@@ -152,11 +147,8 @@
       msg = '無法連線到伺服器' + (wrong ? '（<code>/api/me</code> 回應 <b>' + esc(e.status) + '</b>）' : '') +
         '。伺服器可能正在重新啟動或維護中，請稍後按「重新檢查」。';
     }
+    // 品牌區在 .auth-box 外面（index.html .auth-wrap），這裡只換卡片的內容
     box.innerHTML =
-      '<div class="auth-brand">' +
-        '<span class="auth-brand-mark" aria-hidden="true"></span>' +
-        '<div class="auth-brand-name">capynote</div>' +
-      '</div>' +
       '<div class="auth-form">' +
         '<div class="auth-title">' + (wrong ? '後端沒有正確回應' : '伺服器沒有回應') + '</div>' +
         '<div class="backend-msg">' + msg + '</div>' + fix +
@@ -171,8 +163,6 @@
     onReady = cb;
     $('#auth-form').addEventListener('submit', function (e) { e.preventDefault(); submit(); });
     $('#auth-toggle').addEventListener('click', function () { setMode(mode === 'login' ? 'register' : 'login'); });
-    const form = $('#auth-form');
-    if (form) form.addEventListener('animationend', function () { form.classList.remove('is-swap'); });
     // 密碼顯示／隱藏
     const eye = $('#auth-eye');
     if (eye) eye.addEventListener('click', function () {

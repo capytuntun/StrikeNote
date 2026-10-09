@@ -12,51 +12,48 @@
        獨立一支樣式表，因為它幾乎不會變，可以被瀏覽器快取；app.css 則是 no-store。 -->
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljs-theme-light">
-  <link rel="stylesheet" href="app.css?v=203">
+  <link rel="stylesheet" href="app.css?v=205">
 </head>
 <body>
   <!-- Login gate: shown until /api/me returns a user -->
   <div id="auth-screen" class="auth-screen" hidden>
-    <!-- 背景：三團慢慢漂移的光暈（純裝飾，CSS .auth-bg） -->
-    <div class="auth-bg" aria-hidden="true"><i></i><i></i><i></i></div>
     <!-- 主題切換：跟頂列那顆存同一個 localStorage 鍵（js/auth.js 處理，app.js 還沒載入） -->
     <button id="auth-theme" type="button" class="auth-theme" title="切換深色／淺色" aria-label="切換深色／淺色"><span class="theme-ic theme-ic-light" data-icon="moon"></span><span class="theme-ic theme-ic-dark" data-icon="sun"></span></button>
-    <div class="auth-box">
-      <!-- 品牌區：跟頂列 logo 同一份 mask 技巧，只是放大、坐在玻璃方塊裡、底下是漸層與點陣紋理——
-           這是使用者第一眼看到的畫面，值得有它自己的存在感，而不是跟表單同一塊白。 -->
+    <div class="auth-wrap">
+      <!-- 品牌：跟頂列 logo 同一份 mask 技巧，放大、重點色；在卡片外面，後端沒回應時也留著 -->
       <div class="auth-brand">
         <span class="auth-brand-mark" aria-hidden="true"></span>
         <div class="auth-brand-name">capynote</div>
         <div class="auth-brand-tag">滲透測試 · 檢定考試報告系統</div>
       </div>
-      <form id="auth-form" class="auth-form" autocomplete="on">
-        <div id="auth-title" class="auth-title">登入</div>
-        <div id="auth-sub" class="auth-sub">歡迎回來，繼續你的報告。</div>
-        <label class="auth-field">
-          <span>帳號</span>
-          <!-- 圖示排在 input 後面，讓 CSS 的 input:focus + .auth-field-ic 這種
-               緊鄰選擇器抓得到（它只認「後面那個手足」，順序不能反過來） -->
-          <input id="auth-username" type="text" autocomplete="username" autocapitalize="off" spellcheck="false">
-          <span class="auth-field-ic" data-icon="user" aria-hidden="true"></span>
-        </label>
-        <label class="auth-field auth-field-pw">
-          <span>密碼</span>
-          <input id="auth-password" type="password" autocomplete="current-password">
-          <span class="auth-field-ic" data-icon="lock" aria-hidden="true"></span>
-          <!-- 顯示／隱藏密碼。<button> 放在 <label> 裡沒關係：瀏覽器不會把互動元素上的點擊轉給 input -->
-          <button id="auth-eye" type="button" class="auth-eye" title="顯示密碼" aria-label="顯示密碼" aria-pressed="false"><span class="ic-on" data-icon="eye"></span><span class="ic-off" data-icon="eye-off"></span></button>
-        </label>
-        <label class="auth-field" id="auth-invite-row" hidden>
-          <span>邀請碼</span>
-          <input id="auth-invite" type="text" autocomplete="off" spellcheck="false">
-          <span class="auth-field-ic" data-icon="key" aria-hidden="true"></span>
-        </label>
-        <div id="auth-hint" class="auth-hint" hidden><span data-icon="shield-check" aria-hidden="true"></span>密碼至少 12 個字元。</div>
-        <div id="auth-error" class="auth-error" hidden></div>
-        <button id="auth-submit" type="submit" class="btn btn-primary auth-submit"><span class="auth-submit-text">登入</span><span class="auth-submit-ic" data-icon="arrow-right" aria-hidden="true"></span></button>
-        <button id="auth-toggle" type="button" class="link-btn auth-toggle">還沒有帳號？<b>建立一個</b></button>
-      </form>
-      <div class="auth-foot"><span data-icon="shield-check" aria-hidden="true"></span>自架服務，資料只存在你自己的伺服器</div>
+      <div class="auth-box">
+        <form id="auth-form" class="auth-form" autocomplete="on">
+          <div id="auth-title" class="auth-title">登入</div>
+          <label class="auth-field">
+            <span>帳號</span>
+            <!-- 圖示排在 input 後面，讓 CSS 的 input:focus + .auth-field-ic 這種
+                 緊鄰選擇器抓得到（它只認「後面那個手足」，順序不能反過來） -->
+            <input id="auth-username" type="text" autocomplete="username" autocapitalize="off" spellcheck="false">
+            <span class="auth-field-ic" data-icon="user" aria-hidden="true"></span>
+          </label>
+          <label class="auth-field auth-field-pw">
+            <span>密碼</span>
+            <input id="auth-password" type="password" autocomplete="current-password">
+            <span class="auth-field-ic" data-icon="lock" aria-hidden="true"></span>
+            <!-- 顯示／隱藏密碼。<button> 放在 <label> 裡沒關係：瀏覽器不會把互動元素上的點擊轉給 input -->
+            <button id="auth-eye" type="button" class="auth-eye" title="顯示密碼" aria-label="顯示密碼" aria-pressed="false"><span class="ic-on" data-icon="eye"></span><span class="ic-off" data-icon="eye-off"></span></button>
+          </label>
+          <label class="auth-field" id="auth-invite-row" hidden>
+            <span>邀請碼</span>
+            <input id="auth-invite" type="text" autocomplete="off" spellcheck="false">
+            <span class="auth-field-ic" data-icon="key" aria-hidden="true"></span>
+          </label>
+          <div id="auth-hint" class="auth-hint" hidden>密碼至少 12 個字元。</div>
+          <div id="auth-error" class="auth-error" hidden></div>
+          <button id="auth-submit" type="submit" class="btn btn-primary auth-submit"><span class="auth-submit-text">登入</span></button>
+        </form>
+      </div>
+      <button id="auth-toggle" type="button" class="link-btn auth-toggle">還沒有帳號？<b>建立一個</b></button>
     </div>
   </div>
 
@@ -228,7 +225,7 @@
               <button data-fmt="italic" title="斜體" data-icon="italic"></button>
               <button data-fmt="strike" title="刪除線" data-icon="strikethrough"></button>
               <span class="tb-sep"></span>
-              <button data-fmt="codeblock" title="程式碼區塊" data-icon="square-code">Code</button>
+              <button data-fmt="codeblock" title="程式碼區塊" data-icon="square-code"><span class="tb-txt">Code</span></button>
               <button data-fmt="code" title="行內程式碼" data-icon="code"></button>
               <button data-fmt="callout" title="Callout 提示框" data-icon="message-square"></button>
               <button data-fmt="quote" title="引言" data-icon="quote"></button>
@@ -238,13 +235,13 @@
               <button data-fmt="task" title="待辦清單" data-icon="list-checks"></button>
               <span class="tb-sep"></span>
               <button data-fmt="link" title="連結" data-icon="link"></button>
-              <button data-fmt="notelink" title="連結到其他筆記（也可輸入 [[ ）" data-icon="files">筆記</button>
+              <button data-fmt="notelink" title="連結到其他筆記（也可輸入 [[ ）" data-icon="files"><span class="tb-txt">筆記</span></button>
               <button data-fmt="image" title="圖片" data-icon="image"></button>
-              <button data-fmt="file" title="上傳檔案：圖片、PDF 或任何附件（也可以直接拖進來、貼上，或輸入 /file）" data-icon="paperclip">檔案</button>
+              <button data-fmt="file" title="上傳檔案：圖片、PDF 或任何附件（也可以直接拖進來、貼上，或輸入 /file）" data-icon="paperclip"><span class="tb-txt">檔案</span></button>
               <button data-fmt="table" title="表格" data-icon="table"></button>
               <button data-fmt="hr" title="分隔線" data-icon="minus"></button>
               <span class="tb-sep"></span>
-              <button data-fmt="template" title="插入範本（機器、AD Set，或你自己新增的）" data-icon="template">範本</button>
+              <button data-fmt="template" title="插入範本（機器、AD Set，或你自己新增的）" data-icon="template"><span class="tb-txt">範本</span></button>
             </div>
             <div class="editor-area" id="editor-area">
             <div class="editor-backdrop" id="editor-backdrop" aria-hidden="true"></div>
@@ -397,7 +394,7 @@
   <script src="js/drawio.js?v=8"></script>
   <script src="js/graph.js?v=12"></script>
   <script src="js/store.js?v=63"></script>
-  <script src="js/auth.js?v=49"></script>
+  <script src="js/auth.js?v=50"></script>
   <script src="js/migrate.js?v=41"></script>
   <script src="js/admin.js?v=51"></script>
   <script src="js/backup.js?v=2"></script>

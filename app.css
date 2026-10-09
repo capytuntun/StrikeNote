@@ -471,217 +471,102 @@ input, select, textarea { transition: border-color var(--dur-1) var(--ease-out),
 .user-menu-sep { height: 1px; background: var(--border); margin: 6px 4px; }
 
 /* ---------- Login gate ---------- */
-/* 登入畫面：唯一一個「產品品牌時刻」——每個使用者的第一眼，所以是全站少數允許圓角、
-   柔光與玻璃感的地方（跟 Keep 風的隨筆頁同一種例外）。結構：淡格線底 + 三團慢慢
-   漂移的重點色光暈（.auth-bg）→ 半透明毛玻璃卡片（.auth-box）→ 上半是漸層品牌區
-   （放大版水豚 mark、點陣紋理、頂部一道光），下半是表單。右上角有主題切換，
-   跟頂列那顆存同一個 localStorage 鍵（js/auth.js）。showBackendProblem() 只重建
-   .auth-box 的內容，所以背景與主題鈕都不受影響。 */
+/* 登入畫面：克制、方角、跟 app 本體同一套語言（GitHub 登入頁那種結構）——mark 與字樣在卡片
+   上方、表單卡片、下面一格「還沒有帳號？」。沒有漸層、光暈、毛玻璃、圓角或標語：
+   第一版美化用了那些，使用者嫌「AI 感太重」。保留的是功能：密碼顯示／隱藏、右上角主題
+   切換（跟頂列那顆存同一個 localStorage 鍵，js/auth.js）、送出中的轉圈。
+   showBackendProblem() 只重建 .auth-box 的內容，品牌區與主題鈕在外面不受影響。 */
 .auth-screen {
-  --auth-grid: rgba(23, 26, 33, .05);
-  --auth-blob-1: rgba(47, 107, 240, .34);
-  --auth-blob-2: rgba(124, 82, 232, .24);
-  --auth-blob-3: rgba(24, 186, 150, .20);
-  --auth-card: rgba(255, 255, 255, .78);
-  --auth-card-line: rgba(255, 255, 255, .7);
-  --auth-input: #f6f7f9;
-  --auth-input-line: #dfe3e9;
-  --auth-shadow: 0 30px 80px rgba(23, 26, 33, .16), 0 2px 8px rgba(23, 26, 33, .05);
-  position: fixed; inset: 0; z-index: 3000; overflow: hidden;
+  position: fixed; inset: 0; z-index: 3000; overflow: auto;
   display: flex; align-items: center; justify-content: center; padding: 24px;
-  background-color: var(--bg-2);
-  background-image:
-    linear-gradient(to right, var(--auth-grid) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--auth-grid) 1px, transparent 1px);
-  background-size: 36px 36px;
+  background: var(--bg-2);
 }
-:root[data-theme="dark"] .auth-screen {
-  --auth-grid: rgba(255, 255, 255, .045);
-  --auth-blob-1: rgba(93, 143, 245, .34);
-  --auth-blob-2: rgba(150, 110, 255, .24);
-  --auth-blob-3: rgba(45, 200, 170, .16);
-  --auth-card: rgba(19, 22, 28, .74);
-  --auth-card-line: rgba(255, 255, 255, .09);
-  --auth-input: #191d24;
-  --auth-input-line: #2b313b;
-  --auth-shadow: 0 30px 80px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .35);
-}
-/* 格線往邊緣淡出，畫面中央才是主角 */
-.auth-screen::after {
-  content: ''; position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(ellipse 70% 70% at 50% 45%, transparent 30%, var(--bg-2) 100%);
-  opacity: .9;
-}
-.auth-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-.auth-bg i {
-  position: absolute; border-radius: 50%; filter: blur(70px); will-change: transform;
-  animation: auth-drift 18s ease-in-out infinite alternate;
-}
-.auth-bg i:nth-child(1) { width: 560px; height: 560px; left: -160px; top: -200px; background: var(--auth-blob-1); }
-.auth-bg i:nth-child(2) { width: 480px; height: 480px; right: -140px; top: 8%; background: var(--auth-blob-2); animation-duration: 23s; animation-delay: -7s; }
-.auth-bg i:nth-child(3) { width: 440px; height: 440px; left: 32%; bottom: -230px; background: var(--auth-blob-3); animation-duration: 27s; animation-delay: -13s; }
-@keyframes auth-drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(48px, 36px) scale(1.1); } }
-
-/* 右上角：主題切換（跟頂列的同一組 theme-ic 規則） */
 .auth-theme {
-  position: absolute; top: 16px; right: 16px; z-index: 2;
-  width: 38px; height: 38px; border-radius: 12px;
+  position: absolute; top: 14px; right: 14px; width: 34px; height: 34px;
   display: inline-flex; align-items: center; justify-content: center;
-  background: var(--auth-card); border: 1px solid var(--auth-card-line); color: var(--text-dim);
-  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
-  cursor: pointer; box-shadow: var(--shadow-raise);
-  transition: color var(--dur-1) var(--ease-out), transform var(--dur-2) var(--ease-spring);
+  background: none; border: 1px solid transparent; color: var(--text-faint); cursor: pointer;
+  transition: color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
 }
-.auth-theme:hover { color: var(--text); transform: rotate(-12deg) scale(1.06); }
+.auth-theme:hover { color: var(--text); background: var(--bg-3); border-color: var(--border); }
 .auth-theme .theme-ic { display: none; align-items: center; }
 .auth-theme .theme-ic-light { display: inline-flex; }
 :root[data-theme="dark"] .auth-theme .theme-ic-light { display: none; }
 :root[data-theme="dark"] .auth-theme .theme-ic-dark { display: inline-flex; }
-.auth-theme .ic-svg { width: 17px; height: 17px; }
+.auth-theme .ic-svg { width: 16px; height: 16px; }
 
-.auth-box {
-  position: relative; z-index: 1;
-  width: min(412px, 100%); border-radius: 20px; overflow: hidden;
-  background: var(--auth-card); border: 1px solid var(--auth-card-line);
-  box-shadow: var(--auth-shadow);
-  -webkit-backdrop-filter: blur(22px) saturate(1.35); backdrop-filter: blur(22px) saturate(1.35);
-  animation: auth-in .6s var(--ease-spring) both;
-}
-@keyframes auth-in { from { opacity: 0; transform: translateY(22px) scale(.96); } to { opacity: 1; transform: none; } }
-
-/* 品牌區：漸層 + 點陣紋理 + 頂部一道光，mark 坐在玻璃方塊裡 */
-.auth-brand {
-  position: relative; overflow: hidden;
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  padding: 36px 28px 30px; text-align: center; color: #fff;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 58%, #6b4fe3 150%);
-}
-.auth-brand::before {
-  content: ''; position: absolute; inset: 0;
-  background-image: radial-gradient(rgba(255, 255, 255, .2) 1px, transparent 1.3px);
-  background-size: 14px 14px;
-  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, .9), transparent 95%);
-          mask-image: linear-gradient(to bottom, rgba(0, 0, 0, .9), transparent 95%);
-}
-.auth-brand::after {
-  content: ''; position: absolute; left: 50%; top: -150px; width: 320px; height: 320px;
-  transform: translateX(-50%); pointer-events: none;
-  background: radial-gradient(circle, rgba(255, 255, 255, .38), transparent 62%);
-}
-.auth-brand > * { position: relative; z-index: 1; }
+.auth-wrap { width: min(340px, 100%); }
+.auth-brand { display: flex; flex-direction: column; align-items: center; gap: 3px; margin-bottom: 20px; text-align: center; }
 .auth-brand-mark {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 76px; height: 76px; flex: 0 0 auto; margin-bottom: 8px; border-radius: 24px;
-  background: rgba(255, 255, 255, .16); border: 1px solid rgba(255, 255, 255, .38);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .18), inset 0 1px 0 rgba(255, 255, 255, .4);
-  animation: auth-mark .75s var(--ease-spring) .12s both;
-}
-@keyframes auth-mark { from { opacity: 0; transform: translateY(-8px) scale(.8); } to { opacity: 1; transform: none; } }
-.auth-brand-mark::before {
-  content: ''; width: 44px; height: 44px; background: #fff;
+  display: block; width: 44px; height: 44px; margin-bottom: 8px; background: var(--accent);
   -webkit-mask: url('logo.png') center / contain no-repeat;
           mask: url('logo.png') center / contain no-repeat;
 }
-.auth-brand-name { font-size: 28px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; text-shadow: 0 1px 0 rgba(0, 0, 0, .12); }
-.auth-brand-tag { font-size: var(--fs-sm); color: rgba(255, 255, 255, .84); letter-spacing: .02em; }
+.auth-brand-name { font-size: 20px; font-weight: 700; letter-spacing: -.01em; color: var(--text); line-height: 1.2; }
+.auth-brand-tag { font-size: var(--fs-xs); color: var(--text-dim); }
 
-/* 表單區 */
-.auth-form { padding: 26px 30px 24px; }
-.auth-form.is-swap { animation: auth-swap .3s var(--ease-out); }
-@keyframes auth-swap { from { opacity: .3; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.auth-title { font-size: 21px; font-weight: 700; letter-spacing: -.01em; line-height: 1.2; }
-.auth-sub { font-size: var(--fs-sm); color: var(--text-dim); margin: 4px 0 20px; }
-.auth-field { display: block; position: relative; margin-bottom: 14px; }
-.auth-field > span:first-child {
-  display: block; font-size: var(--fs-xs); font-weight: 600; color: var(--text-dim);
-  margin-bottom: 6px; letter-spacing: .03em;
-}
-.auth-field-ic {
-  position: absolute; left: 13px; bottom: 13px; display: inline-flex;
-  color: var(--text-faint); pointer-events: none;
-  transition: color var(--dur-1) var(--ease-out);
-}
-.auth-field-ic .ic-svg { width: 17px; height: 17px; }
+.auth-box { background: var(--bg); border: 1px solid var(--border); }
+.auth-form { padding: 20px 20px 18px; }
+.auth-title { font-size: var(--fs-md); font-weight: 600; margin-bottom: 14px; }
+.auth-field { display: block; position: relative; margin-bottom: 12px; }
+.auth-field > span:first-child { display: block; font-size: var(--fs-sm); font-weight: 500; color: var(--text); margin-bottom: 5px; }
+.auth-field-ic { position: absolute; left: 10px; bottom: 10px; display: inline-flex; color: var(--text-faint); pointer-events: none; }
+.auth-field-ic .ic-svg { width: 15px; height: 15px; }
 .auth-field input {
-  width: 100%; height: 44px; padding: 0 14px 0 40px; border-radius: 12px;
-  border: 1px solid var(--auth-input-line); background: var(--auth-input);
-  color: var(--text); font-size: var(--fs-md); font-family: inherit; outline: none;
-  transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
+  width: 100%; height: 36px; padding: 0 10px 0 32px; border: 1px solid var(--border-strong);
+  background: var(--bg); color: var(--text); font-size: var(--fs-base); font-family: inherit; outline: none;
+  transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
 }
-.auth-field-pw input { padding-right: 46px; }
-.auth-field input:hover { border-color: var(--border-strong); }
-.auth-field input:focus { background: var(--bg); border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-ring); }
+.auth-field-pw input { padding-right: 36px; }
+.auth-field input:focus { border-color: var(--accent); box-shadow: var(--ring); }
 /* :not(:placeholder-shown) 沒用——這幾個欄位沒有 placeholder 文字，這個偽類
    對沒有 placeholder 屬性的 input 永遠不成立（也就永遠判定為真），圖示會一直
    是重點色而不是「聚焦才亮」。就只認 :focus，簡單也不會因為這個細節而壞掉。 */
 .auth-field input:focus + .auth-field-ic { color: var(--accent); }
-/* 密碼欄右側的顯示／隱藏；<button> 在 <label> 裡，瀏覽器不會把它的點擊轉給 input */
+/* 密碼欄右側的顯示／隱藏；<button> 在 <label> 裡沒關係，瀏覽器不會把它的點擊轉給 input */
 .auth-eye {
-  position: absolute; right: 6px; bottom: 6px; width: 32px; height: 32px; border-radius: 9px;
+  position: absolute; right: 4px; bottom: 4px; width: 28px; height: 28px;
   display: inline-flex; align-items: center; justify-content: center;
   background: none; border: none; color: var(--text-faint); cursor: pointer;
-  transition: color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
 }
 .auth-eye:hover { color: var(--text); background: var(--bg-3); }
-.auth-eye .ic-svg { width: 16px; height: 16px; }
+.auth-eye .ic-svg { width: 15px; height: 15px; }
 .auth-eye .ic-off, .auth-eye.is-on .ic-on { display: none; }
 .auth-eye.is-on .ic-off { display: inline-flex; }
-.auth-hint {
-  display: flex; align-items: center; gap: 6px;
-  font-size: var(--fs-xs); color: var(--text-dim); margin: -6px 0 14px 2px;
-}
-/* 錯誤訊息比照 callout 的「一條色帶」語言，而不是單純變色文字；出現時輕輕晃一下 */
+.auth-hint { font-size: var(--fs-xs); color: var(--text-dim); margin: -4px 0 12px; }
+/* 錯誤訊息比照 callout 的「一條色帶」語言，而不是單純變色文字 */
 .auth-error {
-  display: flex; align-items: flex-start; gap: 8px; border-radius: 10px;
+  display: flex; align-items: flex-start; gap: 8px;
   font-size: var(--fs-sm); color: var(--sev-crit-fg); background: var(--sev-crit-bg);
-  border: 1px solid transparent; border-left: 3px solid var(--sev-crit-line);
-  padding: 9px 11px; margin-bottom: 14px; line-height: 1.5;
-  animation: auth-shake .4s var(--ease-out);
+  border-left: 3px solid var(--sev-crit-line); padding: 8px 10px; margin-bottom: 12px; line-height: 1.5;
 }
-@keyframes auth-shake { 0%, 100% { transform: none; } 20% { transform: translateX(-5px); } 45% { transform: translateX(4px); } 70% { transform: translateX(-2px); } }
 /* 跟 js/icons.js 的 'alert-triangle' 用同一份路徑／線條參數，只是這裡是純 CSS
    遮罩（純文字節點沒有機會插入 <svg>），視覺上仍是同一個圖示系統。 */
 .auth-error::before {
-  content: ''; flex: 0 0 auto; width: 15px; height: 15px; margin-top: 2px;
+  content: ''; flex: 0 0 auto; width: 15px; height: 15px; margin-top: 1px;
   background: currentColor;
   -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/></svg>') center / contain no-repeat;
           mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/></svg>') center / contain no-repeat;
 }
-/* 送出鈕：漸層 + 重點色投影，hover 浮起、箭頭往前；is-busy 時字隱藏、中間轉圈 */
-.auth-submit {
-  position: relative; width: 100%; height: 46px; margin-top: 6px; border-radius: 12px;
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  font-size: var(--fs-md); font-weight: 600; letter-spacing: .01em;
-  box-shadow: 0 8px 22px var(--accent-ring), 0 1px 2px rgba(0, 0, 0, .08);
-  transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out), background var(--dur-1) var(--ease-out);
-}
-.auth-submit:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 12px 28px var(--accent-ring), 0 1px 2px rgba(0, 0, 0, .08); }
-.auth-submit:active:not(:disabled) { transform: translateY(0); box-shadow: 0 4px 12px var(--accent-ring); }
-.auth-submit .ic-svg { width: 17px; height: 17px; transition: transform var(--dur-2) var(--ease-out); }
-.auth-submit:hover:not(:disabled) .ic-svg { transform: translateX(3px); }
+/* 送出鈕：is-busy 時字隱藏、中間轉圈（不改 textContent） */
+.auth-submit { position: relative; width: 100%; height: 36px; margin-top: 4px; font-size: var(--fs-base); font-weight: 600; }
 .auth-submit.is-busy { color: transparent; }
-.auth-submit.is-busy .auth-submit-ic { visibility: hidden; }
 .auth-submit.is-busy::after {
-  content: ''; position: absolute; width: 18px; height: 18px; border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, .35); border-top-color: #fff;
+  content: ''; position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px;
+  border-radius: 50%; border: 2px solid rgba(255, 255, 255, .35); border-top-color: #fff;
   animation: auth-spin .7s linear infinite;
 }
 @keyframes auth-spin { to { transform: rotate(360deg); } }
-.auth-toggle { display: block; width: 100%; text-align: center; margin-top: 16px; font-size: var(--fs-sm); color: var(--text-dim); }
-.auth-toggle b { color: var(--accent); font-weight: 600; margin-left: 3px; }
-.auth-toggle:hover { color: var(--text-dim); }
-.auth-toggle:hover b { text-decoration: underline; text-underline-offset: 3px; }
-.auth-foot {
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 0 30px 20px; font-size: var(--fs-xs); color: var(--text-faint);
+/* 卡片下方那一格：GitHub 登入頁的「New to GitHub? Create an account」 */
+.auth-toggle {
+  display: block; width: 100%; margin-top: 14px; padding: 11px 12px; text-align: center;
+  background: var(--bg); border: 1px solid var(--border); font-size: var(--fs-sm); color: var(--text-dim);
 }
-.auth-foot .ic-svg { width: 13px; height: 13px; }
+.auth-toggle:hover { color: var(--text-dim); }
+.auth-toggle b { color: var(--accent); font-weight: 600; margin-left: 2px; }
+.auth-toggle:hover b { text-decoration: underline; text-underline-offset: 3px; }
 @media (max-width: 640px) {
-  .auth-screen { padding: 14px; }
-  .auth-brand { padding: 28px 20px 24px; }
-  .auth-form { padding: 22px 20px 20px; }
-  .auth-foot { padding: 0 20px 16px; }
-  .auth-box { border-radius: 16px; }
+  .auth-screen { padding: 16px; }
+  .auth-form { padding: 16px 16px 14px; }
 }
 
 /* ---------- Shared notes ---------- */
@@ -5900,3 +5785,39 @@ select.kb-input { cursor: pointer; }
 .dash-folder-grid.is-list .dash-folder-meta { margin: 0 0 0 auto; padding: 0; white-space: nowrap; }
 .dash-folder-grid.is-list .dash-folder-acts { position: static; margin-left: 4px; }
 .dash-folder-grid.is-list .dash-folder-tile:hover { transform: translateX(2px); }
+
+
+/* ==========================================================================
+   質感修整（2026-10-09，使用者：「請盡全力提升整體介面的質感」）
+   原則：不換語言、不加裝飾——只把會讓人覺得「粗」的細節收掉：少一點粗體、少一點
+   動作、尺寸合理、一行放得下的東西不折行。這段放最後，刻意覆寫上面的規則。
+   ========================================================================== */
+/* 按鈕：一般按鈕回到 500，只有主要／危險動作才 600——整頁都是粗體時，真正重要的
+   那顆反而不突出。 */
+.btn { font-weight: 500; }
+.btn-primary, .btn-danger { font-weight: 600; }
+.mode-btn { font-weight: 500; }
+.mode-btn.active { font-weight: 600; }
+/* 資料夾方框：原本 134px 高、下半空著（早期列過三篇筆記的預覽，拿掉後高度沒跟著收）。
+   收成名稱＋數量剛好的高度；hover 只剩浮起與左色條，不轉圖示、不打光暈。 */
+.dash-folder-tile { min-height: 0; padding: 13px 14px 12px; gap: 5px; }
+.dash-folder-meta { margin-top: 0; }
+.dash-folder-tile:hover .dash-folder-ic { transform: none; }
+.dash-folder-tile::after { display: none; }
+.dash-folder-tile:hover, .dash-folder-tile:focus-visible { transform: translateY(-1px); }
+.dash-book-tile { min-height: 0; padding: 13px 14px 12px; gap: 5px; }
+/* 標籤雲：名稱 500 而不是 700，一整排不再像一排粗體按鈕 */
+.tag-chip { font-weight: 500; }
+/* 編輯器工具列：一行放不下時先把文字標籤收掉（Code／筆記／檔案／範本），
+   分割檢視在 1500px 以下的視窗就會碰到；再不夠才允許折行。 */
+.edit-toolbar button .tb-txt { display: inline; }
+@media (max-width: 1500px) { .panes.mode-split .edit-toolbar .tb-txt { display: none; } }
+@media (max-width: 760px) { .edit-toolbar .tb-txt { display: none; } }
+/* 分享對話框：「新增」是一顆按鈕，不是一整列——.btn 的 flex:1 把它撐滿了 */
+.share-add .share-add-btn { flex: 0 0 auto; padding-left: 16px; padding-right: 16px; }
+/* 對話框：標題與內文之間、內文與按鈕之間多一口氣 */
+.modal-title { margin-bottom: 12px; }
+/* 頂列字樣：稍微收緊字距，跟 logo mark 的線條粗細更接近 */
+.logo-text { letter-spacing: -.01em; }
+/* 首頁／區域頁標題列下的分隔線淡一點（它只是分區，不是框） */
+.dash-head { border-bottom-color: var(--border); }
