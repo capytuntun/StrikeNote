@@ -42,6 +42,12 @@
           .then(function () { return req(method, path, body, opts, (attempt || 0) + 1); });
       }
       if (r.status === 401) {
+        // 登入／註冊本身的 401 是「帳號或密碼錯誤」，要照伺服器的話顯示，不是 session 過期
+        if (path === '/api/login' || path === '/api/register') {
+          return r.json().catch(function () { return {}; }).then(function (data) {
+            const err = new Error(data.error || '帳號或密碼錯誤'); err.status = 401; err.data = data; throw err;
+          });
+        }
         // Session gone (expired, or logged out in another tab) — bounce to login
         // rather than let the UI silently fail on every keystroke.
         if (global.Auth && global.Auth.onSessionLost) global.Auth.onSessionLost();

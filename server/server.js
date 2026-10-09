@@ -890,7 +890,7 @@ function start() {
   purgeTrash();
   setInterval(purgeTrash, 3600000).unref();
   server.listen(config.port, config.host, function () {
-    console.log('capyNote — http://' + config.host + ':' + config.port);
+    console.log('capynote — http://' + config.host + ':' + config.port);
     console.log('  資料庫:   MariaDB ' + (config.db.socket ? config.db.socket : config.db.host + ':' + config.db.port) +
       '/' + config.db.name);
     const reg = settings.get();

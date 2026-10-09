@@ -174,7 +174,7 @@
   function fold(line) { const out = []; let i = 0; while (i < line.length) { out.push((i ? ' ' : '') + line.slice(i, i + 72)); i += 72; } return out.join('\r\n'); }
   function toICS(cal, name) {
     const BY = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
-    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//capyNote//timetree//ZH', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:' + icsEsc(name || '行事曆')];
+    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//capynote//timetree//ZH', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:' + icsEsc(name || '行事曆')];
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
     cal.events.forEach(function (ev) {
       if (ev.keep || !ev.start) return;

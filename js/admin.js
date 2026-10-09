@@ -434,7 +434,7 @@
       '</div>');
     // ---- 伺服器 ----
     const hub = s.hub || {}, sess = s.sessions || {};
-    parts.push('<div class="sys-sec-t">' + ic('server') + '<span>capyNote 伺服器</span></div>');
+    parts.push('<div class="sys-sec-t">' + ic('server') + '<span>capynote 伺服器</span></div>');
     parts.push('<div class="sys-two">' +
       kv([['程序', 'PID ' + proc.pid + ' · Node ' + esc(proc.node || '')], ['執行', fmtDur(proc.uptime)],
         ['程序 CPU', (proc.cpu != null ? proc.cpu.toFixed(1) : '—') + '%'],

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* import-md.js — 把一個資料夾的 Markdown（含圖片）批次匯入 capyNote。
+/* import-md.js — 把一個資料夾的 Markdown（含圖片）批次匯入 capynote。
  *
  * 用途：讓 Claude Code 之類的工具在本機把網站／文件轉成一堆 .md 之後，一次全部搬進站上，
  * 圖片一併處理好——相對路徑的圖片上傳、外部網址的圖片先抓下來再上傳、內嵌的 base64 圖片

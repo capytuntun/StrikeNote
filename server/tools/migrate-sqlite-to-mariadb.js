@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* migrate-sqlite-to-mariadb.js — one-shot copy of a capyNote SQLite database
+/* migrate-sqlite-to-mariadb.js — one-shot copy of a capynote SQLite database
  * into MariaDB, preserving every id.
  *
  *   node server/tools/migrate-sqlite-to-mariadb.js --sqlite <path/to/data.db> [--dry-run] [--force] [--skip-orphans]

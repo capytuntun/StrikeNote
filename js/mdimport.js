@@ -1,4 +1,4 @@
-/* mdimport.js — 把外面來的 Markdown 整理成 capyNote 吃得下的樣子，瀏覽器與命令列共用。
+/* mdimport.js — 把外面來的 Markdown 整理成 capynote 吃得下的樣子，瀏覽器與命令列共用。
  *
  * 外面的 .md（網頁轉出來的、別的筆記軟體匯出的）裡面的圖片有三種寫法，站上都不能直接用：
  *   ![](images/x.png)                相對路徑 → 站上沒有這個檔案，404

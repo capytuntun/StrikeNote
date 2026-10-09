@@ -19,9 +19,11 @@
     box.hidden = !msg;
   }
 
+  // 送出中：鈕上的字隱藏、中間轉圈（.auth-submit.is-busy），不改文字，圖示才不會被 textContent 洗掉
   function busy(on) {
-    $('#auth-submit').disabled = on;
-    $('#auth-submit').textContent = on ? '請稍候…' : (mode === 'login' ? '登入' : '建立帳號');
+    const b = $('#auth-submit');
+    b.disabled = on;
+    b.classList.toggle('is-busy', !!on);
   }
 
   let mode = 'login';
@@ -29,8 +31,14 @@
     mode = m;
     setError('');
     $('#auth-title').textContent = m === 'login' ? '登入' : '建立帳號';
-    $('#auth-submit').textContent = m === 'login' ? '登入' : '建立帳號';
-    $('#auth-toggle').textContent = m === 'login' ? '還沒有帳號？建立一個' : '已經有帳號？前往登入';
+    const sub = $('#auth-sub');
+    if (sub) sub.textContent = m === 'login' ? '歡迎回來，繼續你的報告。' : '幾秒鐘就好，之後所有筆記都存在這台伺服器上。';
+    const st = $('.auth-submit-text');
+    if (st) st.textContent = m === 'login' ? '登入' : '建立帳號'; else $('#auth-submit').textContent = m === 'login' ? '登入' : '建立帳號';
+    $('#auth-toggle').innerHTML = m === 'login' ? '還沒有帳號？<b>建立一個</b>' : '已經有帳號？<b>前往登入</b>';
+    // 表單內容淡入一下，讓切換有「換頁」的感覺（class 在 animationend 拿掉，才能再播）
+    const form = $('#auth-form');
+    if (form) { form.classList.remove('is-swap'); void form.offsetWidth; form.classList.add('is-swap'); }
     // The invite field only matters when registering on an invite-only site.
     show($('#auth-invite-row'), m === 'register' && registerMode === 'invite');
     // A closed site has nothing to offer behind 「建立帳號」.
@@ -147,7 +155,7 @@
     box.innerHTML =
       '<div class="auth-brand">' +
         '<span class="auth-brand-mark" aria-hidden="true"></span>' +
-        '<div class="auth-brand-name">capyNote</div>' +
+        '<div class="auth-brand-name">capynote</div>' +
       '</div>' +
       '<div class="auth-form">' +
         '<div class="auth-title">' + (wrong ? '後端沒有正確回應' : '伺服器沒有回應') + '</div>' +
@@ -163,6 +171,30 @@
     onReady = cb;
     $('#auth-form').addEventListener('submit', function (e) { e.preventDefault(); submit(); });
     $('#auth-toggle').addEventListener('click', function () { setMode(mode === 'login' ? 'register' : 'login'); });
+    const form = $('#auth-form');
+    if (form) form.addEventListener('animationend', function () { form.classList.remove('is-swap'); });
+    // 密碼顯示／隱藏
+    const eye = $('#auth-eye');
+    if (eye) eye.addEventListener('click', function () {
+      const pw = $('#auth-password');
+      const on = pw.type === 'password';
+      pw.type = on ? 'text' : 'password';
+      eye.classList.toggle('is-on', on);
+      eye.setAttribute('aria-pressed', on ? 'true' : 'false');
+      eye.title = on ? '隱藏密碼' : '顯示密碼';
+      eye.setAttribute('aria-label', on ? '隱藏密碼' : '顯示密碼');
+      pw.focus();
+    });
+    // 主題切換：app.js 的 applyTheme 還沒跑（它在登入後才初始化），這裡做同一件事、寫同一個鍵
+    const themeBtn = $('#auth-theme');
+    if (themeBtn) themeBtn.addEventListener('click', function () {
+      const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const next = dark ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('theme', next); } catch (e) { /* */ }
+      const link = $('#hljs-theme-light');
+      if (link) link.href = next === 'dark' ? 'vendor/hljs-github-dark.min.css' : 'vendor/hljs-github.min.css';
+    });
     // 帳號選單：點名稱開合，點選項或點外面則關閉
     const userBtn = $('#user-btn');
     const dropdown = $('#user-dropdown');

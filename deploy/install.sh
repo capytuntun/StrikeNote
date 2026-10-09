@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# capyNote 一鍵安裝 / 更新（Raspberry Pi OS 64-bit，或任何 Debian/Ubuntu、arm64/amd64 皆可）。
+# capynote 一鍵安裝 / 更新（Raspberry Pi OS 64-bit，或任何 Debian/Ubuntu、arm64/amd64 皆可）。
 #
 # 全新機器，一條指令：
-#   curl -fsSL https://raw.githubusercontent.com/capytuntun/capyNote/main/deploy/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/capytuntun/capynote/main/deploy/install.sh | sudo bash
 #
 # 已經裝過、要更新到最新版：直接對同一台機器再跑一次同一條指令即可 —— 密碼與設定
 # （/etc/strikenote/env）不會被覆蓋，只會拉新程式碼、npm ci、重啟服務。
@@ -21,7 +21,7 @@
 # （TRUST_PROXY=1 才會信任它）。這台機器本身只監聽 127.0.0.1。
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/capytuntun/capyNote.git}"
+REPO_URL="${REPO_URL:-https://github.com/capytuntun/capynote.git}"
 BRANCH="${BRANCH:-main}"
 APP_DIR="${APP_DIR:-/opt/strikenote}"
 ENV_FILE="/etc/strikenote/env"
@@ -158,7 +158,7 @@ log "設定 systemd service…"
 NODE_BIN="$(command -v node)"
 cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<UNIT
 [Unit]
-Description=capyNote
+Description=capynote
 After=network.target mariadb.service
 Requires=mariadb.service
 
@@ -201,7 +201,7 @@ done
 echo
 echo "════════════════════════════════════════════════════════════"
 if [ "$ok" -eq 1 ]; then
-  echo " ✅ capyNote 已啟動：http://127.0.0.1:${PORT:-8080}/api/health"
+  echo " ✅ capynote 已啟動：http://127.0.0.1:${PORT:-8080}/api/health"
 else
   echo " ⚠ 服務沒有在時限內回應健康檢查，請看："
   echo "     journalctl -u $SERVICE_NAME -n 80 --no-pager"

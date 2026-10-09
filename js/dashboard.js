@@ -834,7 +834,7 @@
     };
   }
   // render() = 回首頁：清掉標籤篩選、也回到最上層。之前只清篩選不清資料夾，
-  // 所以在資料夾裡點左上角的 capyNote 會原地不動。
+  // 所以在資料夾裡點左上角的 capynote 會原地不動。
   function render(opts) {
     lastOpts = normalize(opts);
     tagFilter = null;

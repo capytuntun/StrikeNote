@@ -2,7 +2,7 @@
   "name": "capynote",
   "version": "1.0.0",
   "private": true,
-  "description": "capyNote — self-hosted Markdown note app for pentest / exam reporting (Node 22 + MariaDB)",
+  "description": "capynote — self-hosted Markdown note app for pentest / exam reporting (Node 22 + MariaDB)",
   "engines": {
     "node": ">=22"
   },
