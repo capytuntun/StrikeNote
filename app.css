@@ -5762,13 +5762,13 @@ select.kb-input { cursor: pointer; }
 .markdown-body .video-embed.is-gdrive iframe.video-frame { background: #202124; }
 .markdown-body .video-note { font-size: .9em; color: var(--text-dim); }
 .sync-hit iframe.video-frame { box-shadow: 0 3px 0 0 var(--accent); }
-/* 預覽（#preview）的字全部小 3px：先是「預覽的所有文字大小都減 1 個 font」（18→17），2026-10-10 再「預覽的字體小兩號」（→15）；標題用 em 跟著縮；
+/* 預覽（#preview）的字全部小 2px：「減 1 個 font」（18→17）→「小兩號」（→15）→「加大一個px」（→16，2026-10-10）；標題用 em 跟著縮；
    程式碼區塊、連結卡、附件籤片本來各自是固定 px，也各減 1。電子書與 PDF 不動。 */
-#preview.markdown-body { font-size: calc(var(--fs-lg) - 3px); }
-#preview .code-block { font-size: calc(var(--fs-md) - 3px); }
-#preview .link-card-title, #preview .file-chip-name { font-size: calc(var(--fs-base) - 3px); }
-#preview .link-card-url, #preview .link-card-desc { font-size: calc(var(--fs-xs) - 3px); }
-#preview .file-chip-type { font-size: calc(var(--fs-micro) - 3px); }
+#preview.markdown-body { font-size: calc(var(--fs-lg) - 2px); }
+#preview .code-block { font-size: calc(var(--fs-md) - 2px); }
+#preview .link-card-title, #preview .file-chip-name { font-size: calc(var(--fs-base) - 2px); }
+#preview .link-card-url, #preview .link-card-desc { font-size: calc(var(--fs-xs) - 2px); }
+#preview .file-chip-type { font-size: calc(var(--fs-micro) - 2px); }
 
 /* ---------- 資料夾顯示方式：方格 ↔ 清單（Dashboard.viewToggle，.dash-folder-grid.is-list） ----------
    清單模式只動 CSS：同一個 .dash-folder-tile 排成一列（圖示、名稱、數量靠右、⋯），像筆記列一樣由上到下。 */
